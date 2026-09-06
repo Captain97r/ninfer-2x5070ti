@@ -311,6 +311,20 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in,
             // Created once, here, for the same reason PeerEvents is: cudaEventCreate is not
             // capturable, and the fork/join pair must outlive every capture.
             graph_bridge.emplace(execution.dev[0]->device, execution.dev[1]->device);
+            // Mailbox transport for the CAPTURED collectives: one pinned host slot per captured
+            // call site, sized for the widest single-request exchange -- the MTP verify
+            // activation [hidden, draft_window + 1] in BF16 (the same bound the staged path
+            // must hold, and the shape every decode round's 128 reductions replay). Payloads
+            // beyond a slot (multi-request batches, prefill) run the staged path instead, by
+            // construction of ops::allreduce_sum's mailbox selection. Slots must cover every
+            // captured call site across all captured profiles; 2048 covers the single-request
+            // graph families (64 layers x 2 collectives + MTP head, per context class and
+            // batch profile) with margin, and the collective falls back loudly to the staged
+            // path if a future topology ever exhausts them.
+            const std::size_t mailbox_slot_bytes =
+                static_cast<std::size_t>(TextConfig::hidden) * (draft_window + 1) * 2;
+            constexpr int kMailboxSlots = 2048;
+            peer_mailbox.emplace(execution, mailbox_slot_bytes, kMailboxSlots);
         }
     }
     if (rope_mode == RopeMode::Yarn) {

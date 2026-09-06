@@ -174,7 +174,9 @@ ninfer_add_test(ninfer_qwen3_8_27b_tp2_parity_test
   SOURCES ${PROJECT_SOURCE_DIR}/tools/tp2/parity.cpp
   NEEDS_SOURCE_DIR
   LIBRARIES ninfer_engine ninfer_product_prompt_input)
-target_link_libraries(ninfer_qwen3_8_27b_tp2_parity_test PRIVATE CUDA::cudart)
+# Match the engine's cudart flavor (static on WIN32): linking CUDA::cudart here pulls the DLL
+# import lib alongside ninfer_core's static one and fails with LNK2005 duplicate symbols.
+target_link_libraries(ninfer_qwen3_8_27b_tp2_parity_test PRIVATE ${NINFER_CUDART_TARGET})
 set_tests_properties(ninfer_qwen3_8_27b_tp2_parity_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 5400)
 ninfer_add_test(ninfer_qwen3_6_27b_load_plan_test
   SOURCES targets/qwen3_6_27b/test_load_plan.cpp

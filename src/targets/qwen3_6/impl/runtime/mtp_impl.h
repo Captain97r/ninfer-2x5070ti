@@ -179,6 +179,7 @@ void mtp_bridge_and_propose(PrefillContext& state, const Tensor& next_token,
     }
 }
 
+
 auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                            MtpGqaEnvelopes envelopes) {
     return [&state, batch_size, k, envelopes] {
