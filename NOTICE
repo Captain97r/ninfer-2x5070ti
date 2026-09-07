@@ -45,6 +45,35 @@ tensor-parallel execution across two GPUs and YaRN positional scaling for
 Single-GPU (--tp 1) behaviour is unchanged from feaf4dd; see
 tests/data/tp1-golden/MANIFEST.md for the token-level comparison.
 
+Modifications (Windows-TP2 layer)
+--------------------------------
+Copyright 2026 Dmitriy Ivanov.
+Source: https://github.com/ivanov84/ninfer-windows-tp2
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This tree is a fork of wamansou/ninfer-tp2-1m at commit 6a355d5 (branch windows-tp2).
+The modifications add, in summary:
+
+  * a native Windows 11 build of the TP2 engine (MSVC/vcpkg toolchain;
+    CreateFileW/MapViewOfFile artifact reader; winsock media acquisition;
+    MSVC-safe TMA descriptors and plan moves)
+  * a pinned-host-memory peer mailbox transport (ops::PeerMailbox,
+    peer_exchange_sum_kernel) for the small captured TP2 collectives, with the
+    staged event-ordered path retained as the automatic fallback
+  * MTP-related cleanup, build fixes, and the tp2 diagnostic set
+    (mailbox_probe, reduce_bench, graph_launch_probe, profile analysis scripts)
+  * documentation and benchmark records of the Windows-TP2 results
+
+Portions of the Windows compatibility layer are derived from
+natpate/ninfer-windows (https://github.com/natpate/ninfer-windows),
+Copyright the natpate/ninfer-windows contributors, licensed under the
+Apache License, Version 2.0 (see LICENSE). Cherry-picked source commits:
+8e7f596 (CMake/vcpkg Windows build), 965c67f (artifact reader, load
+progress, console log), 0785bd3 (media acquire, request-log test),
+9bc46ce (platform library routing), 48035f7+d7cc655+b408783 (TMA
+descriptors, plan moves). The per-file mapping is documented in
+docs/PROVENANCE.md.
+
 Model artifacts
 ---------------
 The published artifacts are derived from Qwen/Qwen3.6-27B, Qwen/Qwen3.8-27B and

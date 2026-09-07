@@ -1,0 +1,12 @@
+version,mtp,communication,kv_cache,cuda_graphs,prompt_tokens,generated_tokens,decode_tok_s,prefill_tok_s,acceptance_pct,accept_len_tok_per_round,source_log
+baseline-staged,0,staged-host-bf16,bf16,off,59,512,16.37,,,-,logs/mtp0_run_err.txt (pre-mailbox)
+baseline-staged,3,staged-host-bf16,bf16,off,59,512,32.58,,45-46,~2.3,logs/mtp3_out2.txt (pre-mailbox, recorded in PROGRESS)
+mailbox-final,0,pinned-host-mailbox,bf16,on,19,424,35.77,103.58,-,-,logs/final_mtp0_err.txt
+mailbox-final,1,pinned-host-mailbox,bf16,on,19,377,53.44,,73.27,1.73,logs/final_mtp1_err.txt
+mailbox-final,2,pinned-host-mailbox,bf16,on,19,512,62.48,,64.72,2.29,logs/final_mtp2a_err.txt
+mailbox-final,2,pinned-host-mailbox,bf16,on,19,512,62.49,,64.72,2.29,logs/final_mtp2b_err.txt (repeat run, stability)
+mailbox-final,3,pinned-host-mailbox,bf16,on,19,353,63.19,,53.43,2.60,logs/final_mtp3_err.txt
+sweep-k59tok,2,pinned-host-mailbox,bf16,on,59,512,61.61,,63.19,2.26,logs/mtp2_err.txt (59-token prompt sweep)
+sweep-k59tok,1,pinned-host-mailbox,bf16,on,59,512,54.17,,75.60,1.76,logs/mtp1_err.txt (59-token prompt sweep)
+sweep-k59tok,3,pinned-host-mailbox,bf16,on,59,512,59.02,,47.54,2.42,logs/mtp3_err.txt (mid-integration snapshot)
+external-vllm,3,nccl-tp2-docker,fp8,off,118660,512,67.293,952.497,,,club-5060ti evidence qwen38-27b-nvfp4-vllm-2x5060ti-122k.json

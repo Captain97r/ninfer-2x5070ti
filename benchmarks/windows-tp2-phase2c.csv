@@ -1,0 +1,26 @@
+experiment,run,mtp,max_new,prompt_tag,decode_tok_s,acceptance_pct,mean_accepted_per_round,rounds,prefill_tok_s,throughput_overall,generate_total_s,finish,binary,notes
+baseline,base_mtp0_r1,0,512,short,35.73,,,,45.05,,14.32,output-limit,canonical,2C-1 reproduce
+baseline,base_mtp0_r2,0,512,short,35.77,,,,45.05,,14.30,output-limit,canonical,repeat
+baseline,base_mtp1,1,512,short,57.71,87.50,1.88,272,50.25,,8.86,output-limit,canonical,2C-2 sweep
+baseline,base_mtp2_r1,2,512,short,63.18,65.76,2.31,,50.25,,8.08,output-limit,canonical,2C-2 sweep
+baseline,base_mtp2_r2,2,512,short,63.11,,,,50.25,,8.09,output-limit,canonical,repeat
+baseline,base_mtp3_r1,3,512,short,66.71,57.75,2.73,184,50.25,,7.66,output-limit,canonical,2C-2 sweep
+baseline,base_mtp3_r2,3,512,short,66.86,,,,50.25,,7.64,output-limit,canonical,repeat
+baseline,base_mtp4_r1,4,512,short,68.53,53.06,3.12,164,45.20,,7.44,output-limit,canonical,2C-2 sweep optimum
+baseline,base_mtp4_r2,4,512,short,68.87,53.06,3.12,164,45.20,,7.40,output-limit,canonical,repeat
+baseline,base_mtp5,5,512,short,60.82,40.52,3.02,169,97.83,59.57,8.60,output-limit,canonical,2C-2 sweep rejected
+baseline,base_mtp4_1024,4,1024,short,70.74,,,,,,14.62,output-limit,canonical,long-run 1024
+prompt_length,len_short_mtp3,3,512,short,66.74,57.75,1.733,187,50.25,63.72,7.66,output-limit,canonical,2C-3
+prompt_length,len_short_mtp4,4,512,short,68.65,53.06,2.116,164,45.20,65.10,7.44,output-limit,canonical,2C-3
+prompt_length,len_med_mtp3,3,512,medium,67.68,59.24,1.777,184,208.19,63.34,7.65,output-limit,canonical,2C-3 medium prompt ~100 tok
+prompt_length,len_med_mtp4,4,512,medium,66.97,51.50,2.042,168,249.50,63.41,7.64,output-limit,canonical,2C-3 MTP3 wins by +1.1%
+prompt_length,len_long_mtp3,3,512,long,57.21,45.08,1.350,217,440.95,54.37,8.97,output-limit,canonical,2C-3 long prompt ~230 tok
+prompt_length,len_long_mtp4,4,512,long,59.54,42.71,1.704,189,433.89,56.41,8.69,output-limit,canonical,2C-3 -13% vs short both
+experiment_e3,e3_mtp4_r1,4,512,short,68.77,53.06,3.12,164,45.20,,7.39,output-limit,poll400ns,poll backoff 400ns variant
+experiment_e3,e3_mtp4_r2,4,512,short,68.72,53.06,3.12,164,45.20,,7.39,output-limit,poll400ns,poll backoff 400ns variant
+experiment_e3,e3_mtp0,0,512,short,35.80,,,,45.05,,14.30,output-limit,poll400ns,poll backoff 400ns variant
+experiment_e3,e3_coher_mtp4,4,256,short,69.37,,,,,,3.90,output-limit,poll400ns,coherence check text bit-exact prefix of base
+final,final_mtp4_512,4,512,short,68.68,53.06,3.12,164,46.90,67.53,7.79,output-limit,canonical,post-revert rebuild control: matches base 68.53/68.87; text bit-exact vs base_mtp4
+final,final_mtp4_1024,4,1024,short,70.57,,,,46.90,,14.83,output-limit,canonical,matches base 70.74 within noise; prefix identical through 512-token cut point
+final,final_mtp4_2048,4,2048,short,76.65,62.33,3.49,586,46.90,75.54,27.13,output-limit,canonical,long-run: acceptance rises 53.06->62.33% (repetitive markdown patterns); accepted-by-pos 502,408,313,238
+pcie_probe,pcie_probe_256,4,256,short,69.20,,,,46.90,,4.10,output-limit,canonical,instrumented PCIe sampling run

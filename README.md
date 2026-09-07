@@ -9,13 +9,30 @@ OpenAI-/Anthropic-compatible HTTP APIs. The 27B execution package additionally r
 across two RTX 5090s and, with YaRN positional scaling, serves contexts up to 1,048,576 tokens --
 see [Dual-GPU (TP2) and YaRN 1M context](#dual-gpu-tp2-and-yarn-1m-context).
 
-> **This is a fork.** Upstream is [Neroued/ninfer](https://github.com/Neroued/ninfer); this tree
-> branches from its commit `feaf4dd` and adds two things to the 27B execution package. **Dual-GPU
-> tensor parallelism** (`--tp 2 --devices A,B`) halves per-card weight and KV residency and is
-> ~40% faster at long context — one resident model, one process, two devices, no NVLink and no
-> distributed serving. **YaRN ×4 positional scaling** (`--rope yarn`) raises the addressable
-> ceiling from the registered 262,144 tokens to 1,048,576, computed to match vLLM as deployed and
-> guarded by a drift test against the installed vLLM. Everything else is upstream's:
+> **This is the Windows-TP2 experiment fork.** It is a Windows-focused fork/experiment built on
+> top of two other projects:
+>
+> - [wamansou/ninfer-tp2-1m](https://github.com/wamansou/ninfer-tp2-1m) -- the TP2/YaRN fork this
+>   branch descends from (`6a355d5`), itself a fork of upstream [Neroued/ninfer](https://github.com/Neroued/ninfer)
+>   (`feaf4dd`);
+> - [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows) -- the native Windows
+>   (MSVC/vcpkg) port whose compatibility layer was cherry-picked here.
+>
+> What this branch adds on top of both: a native Windows 11 build of the TP2 engine, and a new
+> low-latency transport for the small TP2 collectives (a pinned-host-memory GPU mailbox) that
+> replaces the host-staged allreduce in the captured decode graph on systems where CUDA P2P is
+> unavailable (GeForce/WDDM). See [Native Windows 11 TP2 on two GeForce GPUs](#native-windows-11-tp2-on-two-geforce-gpus),
+> [docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md) and [docs/PROVENANCE.md](docs/PROVENANCE.md)
+> for the full story, measurements, and attribution. See [NOTICE](NOTICE) for the required
+> Apache-2.0 §4(b) attribution.
+
+> **The base fork.** Upstream is [Neroued/ninfer](https://github.com/Neroued/ninfer); the TP2
+> base of this tree branches from its commit `feaf4dd` and adds two things to the 27B execution
+> package. **Dual-GPU tensor parallelism** (`--tp 2 --devices A,B`) halves per-card weight and KV
+> residency and is ~40% faster at long context — one resident model, one process, two devices, no
+> NVLink and no distributed serving. **YaRN ×4 positional scaling** (`--rope yarn`) raises the
+> addressable ceiling from the registered 262,144 tokens to 1,048,576, computed to match vLLM as
+> deployed and guarded by a drift test against the installed vLLM. Everything else is upstream's:
 > `--tp 1` output is byte-identical to `feaf4dd` on the greedy cases in
 > [`tests/data/tp1-golden/`](tests/data/tp1-golden/MANIFEST.md), and single-GPU behaviour,
 > supported identities, artifact format, and protocol surfaces are unchanged. The design
@@ -42,6 +59,73 @@ source's mixed allocation: NVFP4 MLP weights in Text layers 0–55 and row-scale
 embedding, attention input/output projections, GDN Q/K/V/Z and output projections, output head, and
 remaining MLP weights. All four 27B artifacts retain the same Text, Vision, MTP, prefix-reuse, CLI,
 and serving routes.
+
+## Native Windows 11 TP2 on two GeForce GPUs
+
+This fork is an experiment answering one question: **is tensor-parallel inference practical on
+native Windows 11 with two consumer GeForce cards, where CUDA P2P is unavailable?**
+
+On the tested system (2 × RTX 5060 Ti 16 GB, WDDM, asymmetric PCIe — see
+[Hardware](#hardware-tested)), `cudaDeviceCanAccessPeer(0, 1) == 0`. The TP2 engine's fallback
+transport was a host-staged allreduce: each of the ~128 collectives per decode round walked a
+four-hop cross-device event chain plus driver-staged copy-engine transfers, at ~277 µs per 10 KiB
+reduction — regardless of the fact that the useful payload only needs ~3.3 µs of PCIe time. The
+communication *protocol*, not the PCIe bandwidth, was the bottleneck.
+
+The fix in this fork is a **peer mailbox**: both devices exchange partial sums directly through a
+pinned write-back host-memory slab via small CUDA kernels (publish → flag → poll → consume),
+captured inside the existing cross-device CUDA graph. The staged path remains as the automatic
+fallback for eager execution and oversized payloads. This is a transport for *small, frequent*
+TP communication where WDDM/P2P limitations make conventional staged collectives expensive — it
+is not a replacement for NCCL or a general claim of superiority over Linux.
+
+### Key result (single request, Qwen3.8-27B NVFP4, greedy, thinking off)
+
+| Configuration | Staged transport | Mailbox transport |
+|---|---:|---:|
+| MTP0 (no speculative decoding), 512 tok | 16.37 tok/s | **35.73–35.77 tok/s** (2.19×) |
+| MTP3, 512 tok | 32.58 tok/s | **66.71–66.86 tok/s** (2.04×) |
+| MTP4 (optimum), 512 tok | — | **68.53–68.87 tok/s** |
+| MTP4, 1024 tok | — | 70.57–70.74 tok/s |
+| MTP4, 2048 tok | — | 76.65 tok/s (acceptance 62.33%) |
+
+Numbers are decode-time tok/s committed by the engine (not server/client wall-clock), measured as
+described in [Benchmark methodology](#benchmark-methodology). The 2048-token figure is
+**workload-dependent** — it rides a rising draft acceptance rate (53.06% → 62.33%) on repetitive
+text and must not be quoted as a universal speed. All details, the per-MTP sweep, prompt-length
+sensitivity, and the communication decomposition are in
+[benchmarks/windows-tp2-benchmarks.md](benchmarks/windows-tp2-benchmarks.md) and
+[docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md).
+
+### What was done
+
+- **Windows port of the TP2 code** (from [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows),
+  attributed in [docs/PROVENANCE.md](docs/PROVENANCE.md)): MSVC/vcpkg build,
+  `CreateFileW`/`MapViewOfFile` artifact reader, winsock media acquire, MSVC-safe TMA
+  descriptors and plan moves.
+- **Peer mailbox transport** (new in this fork): `ops::PeerMailbox` — a pinned WB host slab
+  (2048 slots, 256-byte aligned) + `peer_exchange_sum_kernel`, GPU-side publish/flag/poll/consume,
+  installed at Program setup and claimed per captured call site; hang-guard and host-side flag
+  reset between graph replays; `NINFER_TP2_MAILBOX=0` disables it.
+- **Correctness**: exact-BF16-sum comparison against the staged path (`mailbox_probe`), eager and
+  CUDA-graph modes, bit-identical repeated runs across 512/1024/2048-token generations, zero graph
+  failures, zero fallback events in the final long run.
+
+### Limitations
+
+- Tested on **one machine** (see [Hardware](#hardware-tested)); no claim of portability to other
+  GPUs, drivers, or PCIe topologies.
+- Consumer GeForce / WDDM specific behaviour: no CUDA P2P, and the mailbox is what makes the
+  fallback path cheap here. Linux/NCCL systems may behave completely differently; **no Linux
+  comparison is claimed**.
+- The mailbox installs whenever `--tp 2` and CUDA graphs are enabled, regardless of whether P2P
+  works on the host — on P2P-capable systems (e.g. the 2 × RTX 5090 the base fork targets) the
+  direct path may be preferable and `NINFER_TP2_MAILBOX=0` restores the staged transport.
+- MTP performance depends on draft acceptance rate; long-generation tok/s differs from
+  512-token benchmarks.
+- Remaining bottleneck after the mailbox is synchronization/lockstep waiting plus memory-bound
+  GEMM (~60% of a round), not useful PCIe bandwidth — the 40 KiB exchanges sit at the ~17–19 µs
+  transport floor while only ~13 µs is payload time.
 
 ## Performance
 
@@ -660,6 +744,94 @@ from one to fifteen.
 - [HTTP serving](docs/serving.md)
 - [Performance](docs/performance.md)
 - [CLI examples](examples/cli/)
+
+**Windows-TP2 fork additions:**
+
+- [Windows peer mailbox transport (technical writeup)](docs/windows-peer-mailbox.md)
+- [Benchmark results and methodology (this fork)](benchmarks/windows-tp2-benchmarks.md)
+- [Provenance and attribution audit](docs/PROVENANCE.md)
+- [Windows build notes (Russian)](docs/windows-tp2.md)
+
+## Hardware tested (Windows-TP2 results)
+
+| Component | Value |
+|---|---|
+| OS | Windows 11 x64, native (no WSL2/VM/Docker) |
+| GPUs | 2 × NVIDIA GeForce RTX 5060 Ti 16 GB (`sm_120a`), same VBIOS |
+| GPU0 slot | CPU-attached (Z690 PEG), PCIe 5.0 ×16 max — degrades to ×8 under load when an M.2 slot shares the CPU lanes |
+| GPU1 slot | Z690 chipset, PCIe 3.0 ×4 (~3.16 GiB/s measured staging bandwidth) |
+| CPU / RAM | Intel Core i3-12100F / 64 GB |
+| Motherboard | MSI PRO Z690-A |
+| Driver | 581.57 (WDDM) |
+| Toolchain | MSVC 14.44 (VS 2022), CMake 4.0.2, Ninja, CUDA 13.1.80, vcpkg manifest deps |
+| CUDA P2P | `cudaDeviceCanAccessPeer(0,1) == 0` (GeForce/WDDM) |
+
+## Building (native Windows)
+
+Prerequisites: Visual Studio 2022 (C++ x64 tools), CMake ≥ 3.28, Ninja, a CUDA toolkit that can
+compile for `sm_120a` (13.1 is known-good; the system CUDA 12.8 miscompiles one GQA decode kernel
+with a shared-memory overflow — see [docs/windows-tp2.md](docs/windows-tp2.md)), and a vcpkg
+checkout for the FFmpeg/libcurl/zlib manifest dependencies.
+
+```bat
+git clone --branch windows-tp2 <this-repo>
+cd ninfer
+git clone https://github.com/microsoft/vcpkg third_party\vcpkg
+cmd /c scripts\build-windows.cmd all
+:: or, with a non-PATH CUDA:
+:: set NINFER_CUDA_BIN=C:\path\to\cuda\bin && cmd /c scripts\build-windows.cmd all
+```
+
+Artifacts land in `build-windows\apps\{ninfer.exe,ninfer-serve.exe}` (the CUDA runtime is
+statically linked; FFmpeg/curl DLLs are resolved from the vcpkg install).
+
+## Running (Windows-TP2 configuration)
+
+```bat
+build-windows\apps\ninfer.exe models\qwen3_8_27b_nvfp4.ninfer --tp 2 --devices 0,1 ^
+  --max-context 8192 --kv-capacity auto ^
+  --spec mtp --draft-tokens 4 --lm-head-draft ^
+  --prompt "Explain tensor parallelism briefly." --max-new 512 ^
+  --no-thinking --greedy --ignore-eos
+```
+
+`--tp 2 --devices 0,1` splits the model across both cards; `--spec mtp --draft-tokens N` selects
+MTP speculative decoding; `NINFER_TP2_MAILBOX=0` in the environment forces the staged transport
+(A/B testing). Diagnostics: `tools/tp2/mailbox_probe.cu` (mailbox vs staged, exact-sum check),
+`tools/tp2/reduce_bench.cu` (per-collective latency), `tools/tp2/graph_launch_probe.cu`.
+
+## Benchmark methodology
+
+All Windows-TP2 numbers in this fork were produced as follows, unless stated otherwise:
+
+- single request, **greedy decoding** (temperature 0), **thinking disabled** (`--no-thinking`),
+  `--ignore-eos`, fixed prompt ("Explain tensor parallelism briefly.", 19 tokens), generated
+  tokens = 512 (1024/2048 for the long runs, labelled explicitly), `--max-context 8192`,
+  `--kv-capacity auto`;
+- tok/s = tokens **committed by the engine per decode-second** (from the engine's own
+  end-of-run summary), not client-side wall-clock throughput and not server TTFT-inclusive
+  figures — server/client timing must not be confused with these;
+- MTP rows state their draft window (`--draft-tokens`) and acceptance rate; tok/s rises with
+  acceptance, so MTP4@512 and MTP4@2048 are different workloads, not a single speed;
+- each 512-token configuration was run at least twice; repeated runs agreed within ±0.5%.
+
+Raw per-run data: [benchmarks/windows-tp2-final.csv](benchmarks/windows-tp2-final.csv) and
+[benchmarks/windows-tp2-phase2c.csv](benchmarks/windows-tp2-phase2c.csv).
+
+## Attribution
+
+This fork stands on three layers of prior work, none of which it claims ownership of:
+
+- [Neroued/ninfer](https://github.com/Neroued/ninfer) — the engine itself (upstream, Apache-2.0);
+- [wamansou/ninfer-tp2-1m](https://github.com/wamansou/ninfer-tp2-1m) (Wael Mansour) — the TP2 +
+  YaRN fork this branch builds on (base commit `6a355d5`);
+- [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows) — the native Windows port
+  whose compatibility layer was cherry-picked into this branch.
+
+The peer-mailbox transport itself is the work of this fork. The full audit — which files came
+from where, what was inspiration only, and what is external benchmark reference — is
+[docs/PROVENANCE.md](docs/PROVENANCE.md); the Apache-2.0 §4(b) attribution lives in
+[NOTICE](NOTICE).
 
 ## License
 

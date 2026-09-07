@@ -1,6 +1,8 @@
 import sqlite3
+import sys
 
-db = sqlite3.connect(r'D:\AI_envs\aider_olymp\project_ninfer\logs\mtp2_eager_prof.sqlite')
+path = sys.argv[1] if len(sys.argv) > 1 else 'mtp2_eager_prof.sqlite'
+db = sqlite3.connect(path)
 cur = db.cursor()
 
 # Map API name ids.
