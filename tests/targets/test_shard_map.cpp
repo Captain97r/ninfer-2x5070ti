@@ -305,8 +305,17 @@ int main() {
     // --- tp < 1 is rejected outright. ---
     expect_throws([&] { (void)plan_for("text/token_embedding", 0, config); }, "tp=0");
 
-    // --- unrecognized object family is rejected outright (not silently replicated). ---
-    expect_throws([&] { (void)plan_for("vision/merger/fc2", 2, config); }, "unrecognized object");
+    // --- vision tower: the phase 3A dual-replicated placement. Every `vision/` object is
+    // REPLICATED by design at any tp > 1 (both ranks run the full encoder against their own
+    // weight copy), so the plan is empty rather than a throw. A non-vision unknown family
+    // must still be rejected outright rather than silently replicated. ---
+    expect_empty(plan_for("vision/merger/fc2", 2, config), "vision/merger/fc2 tp=2 replicated");
+    expect_empty(plan_for("vision/layers/13/attention/qkv", 2, config),
+                 "vision layer qkv tp=2 replicated");
+    expect_empty(plan_for("vision/patch_embedding", 4, config),
+                 "vision patch embedding tp=4 replicated");
+    expect_throws([&] { (void)plan_for("vision_extra/not_a_real_family", 2, config); },
+                  "vision_-prefixed non-tower object rejected");
 
     // --- shard_mapping_for: the axis the loader slices along. plan_for delegates to it, so the
     // two can never disagree about a family's boundaries; this pins the axis half. Rows narrows
@@ -344,8 +353,16 @@ int main() {
         }
         for (std::string_view object :
              {"text/token_embedding", "text/final_norm", "text/layers/5/input_norm",
-              "text/layers/3/gdn/norm", "mtp/hidden_norm", "text/draft_head_token_ids"}) {
+              "text/layers/3/gdn/norm", "mtp/hidden_norm", "text/draft_head_token_ids",
+              "vision/patch_embedding", "vision/layers/0/attention/qkv",
+              "vision/layers/26/mlp/fc2", "vision/merger/fc1", "vision/merger/fc2"}) {
             expect_axis(object, ShardAxis::Replicated);
+        }
+        // The vision prefix at tp 2 specifically: replicated there too, which is the
+        // dual-replicated phase 3A placement (empty plan == full copy on both devices).
+        if (shard_mapping_for("vision/layers/0/attention/qkv", 2, config).axis !=
+            ShardAxis::Replicated) {
+            fail("axis tp2: vision tower must be replicated");
         }
         // tp == 1 degenerates the same way plan_for does, before any family check.
         if (shard_mapping_for("not/a/real/object", 1, config).axis != ShardAxis::Replicated) {

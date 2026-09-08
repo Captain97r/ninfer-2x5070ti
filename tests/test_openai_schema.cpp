@@ -474,6 +474,27 @@ int test_parse_tool_history_messages() {
     failures +=
         check(throws_api([&] { (void)parse_chat_completion_request(bad_args, default_limits()); }),
               "non-object tool call arguments rejected");
+
+    // OpenHands SDK sends tool results as an array of text parts; null content is an
+    // empty observation. Both must be accepted per OpenAI tool-message semantics.
+    Json array_body = body;
+    array_body["messages"][2]["content"] = Json::array(
+        {Json{{"type", "text"}, {"text", "line1"}}, Json{{"type", "text"}, {"text", "line2"}}});
+    GenerationRequest array_req = parse_chat_completion_request(array_body, default_limits());
+    failures += check(array_req.messages[2].content.at(0).text == "line1line2",
+                      "tool content array parts joined");
+
+    Json null_body           = body;
+    null_body["messages"][2] = Json{{"role", "tool"}, {"tool_call_id", "call_1"}, {"content", nullptr}};
+    GenerationRequest null_req = parse_chat_completion_request(null_body, default_limits());
+    failures += check(null_req.messages[2].content.at(0).text.empty(), "null tool content accepted");
+
+    Json image_body = body;
+    image_body["messages"][2]["content"] =
+        Json::array({Json{{"type", "image_url"}, {"image_url", Json{{"url", "http://x/y.png"}}}}});
+    failures +=
+        check(throws_api([&] { (void)parse_chat_completion_request(image_body, default_limits()); }),
+              "non-text tool content part rejected");
     return failures;
 }
 

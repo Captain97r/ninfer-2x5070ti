@@ -32,6 +32,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -215,7 +216,8 @@ public:
     }
 
     rt::PrefillStepResult start_prefill_lane(std::uint32_t lane, q36::PreparedPrompt&& prompt,
-                                             ScriptedPlan&& plan, rt::TransientRegion) {
+                                             ScriptedPlan&& plan, rt::TransientRegion,
+                                             rt::TransientRegion /*peer: tp1 ignores*/) {
         if (queued_.empty()) { throw std::logic_error("scripted program has no remaining script"); }
         Lane& state     = lanes_[lane];
         state.script    = std::move(queued_.front());
@@ -384,6 +386,8 @@ struct ScriptedInstance {
     std::shared_ptr<ScriptedLoaded> loaded;
     std::unique_ptr<ScriptedProgram> program;
     ScriptedRequestMemory request_memory;
+    // The scripted program models tp1 text execution, so the peer twin stays unengaged.
+    std::optional<ScriptedRequestMemory> request_memory_peer;
     rt::KvCapacityResolution kv_capacity_resolution;
 };
 

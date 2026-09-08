@@ -1,0 +1,6 @@
+# The frontend resolves digest-checked chat templates (see
+# src/targets/qwen3_6/impl/frontend/chat_template.cpp: kThinkingToggleTemplateDigest /
+# kReasoningEffortTemplateDigest), so the fixture bytes must be identical on every platform.
+# core.autocrlf on Windows would otherwise materialize CRLF files whose sha256 no longer
+# matches the compiled-in digest, failing every frontend/executor test on Windows.
+tests/fixtures/frontend/*.jinja text eol=lf
