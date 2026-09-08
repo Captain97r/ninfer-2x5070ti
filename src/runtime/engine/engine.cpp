@@ -61,11 +61,10 @@ void require_supported_tp_features(const EngineOptions& options) {
             "weights are sharded by the load plan but the DFlash forward path is not split-aware "
             "yet; use --tp 1, --spec mtp or --spec none");
     }
-    // The Vision encoder runs entirely on the primary device against replicated weights and has no
-    // split path; the target layer states the same rule (layouts_impl.h validate_target_options).
-    if (options.enable_vision) {
-        throw std::invalid_argument("--tp 2 does not support Vision in this build; use --tp 1");
-    }
+    // Vision is prefill-only and dual-replicated at tp2 (phase 3A): each rank encodes the
+    // item independently against its own full weight copy with zero cross-GPU traffic, and
+    // the text tp2 prefill consumes the per-rank embeddings. Nothing about it touches the
+    // captured decode graph or PeerMailbox.
 }
 
 // Resolves EngineOptions.tp/.device/.devices into the device id list ExecutionContext should

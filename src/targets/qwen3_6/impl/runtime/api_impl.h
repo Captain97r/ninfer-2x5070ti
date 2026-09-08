@@ -172,9 +172,10 @@ template <>
 runtime::PrefillStepResult
 Program<Variant>::start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt,
                                      RequestPlan<Variant>&& plan,
-                                     runtime::TransientRegion transient) {
+                                     runtime::TransientRegion transient,
+                                     runtime::TransientRegion transient_peer) {
     return impl_->start_prefill_lane(lane, PreparedPromptAccess::take(std::move(prompt)),
-                                     std::move(plan), transient);
+                                     std::move(plan), transient, transient_peer);
 }
 
 template <>

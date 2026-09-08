@@ -87,13 +87,27 @@ struct VisionChunk {
     std::int32_t length                       = 0;
     const qwen3_6::VisionItemControl* control = nullptr;
     Tensor embeddings;
+    // Rank 1's copy of the SAME item's output embeddings (phase 3A dual-replicated vision): each
+    // rank encodes the item against its own full weight copy, so the text tp2 prefill scatters
+    // rank-local embeddings on both devices with zero cross-GPU traffic. Empty Tensor at tp 1.
+    Tensor embeddings_peer;
+};
+
+// Everything VisionPrefillSession needs to mirror the encode on rank 1. Null members are a
+// construction error the session rejects loudly; the bundle is only ever supplied at tp == 2.
+struct VisionPeerBundle {
+    DeviceContext* device                          = nullptr;
+    const LoadedModelData* model                   = nullptr;
+    WorkspaceArena* work                           = nullptr;
+    runtime::TransientRegion transient{};
 };
 
 class VisionPrefillSession {
 public:
     VisionPrefillSession(DeviceContext& device, const LoadedModelData& model,
                          WorkspaceArena& workspace, qwen3_6::PreparedPromptData& prompt,
-                         const VisionPrefillPlan& plan, runtime::TransientRegion transient);
+                         const VisionPrefillPlan& plan, runtime::TransientRegion transient,
+                         std::optional<VisionPeerBundle> peer = std::nullopt);
 
     [[nodiscard]] VisionChunk prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length);
     void release_encoded_media_payloads() noexcept;
@@ -106,9 +120,12 @@ private:
     const VisionPrefillPlan& plan_;
     runtime::TransientRegion transient_;
     VisionContext context_;
+    std::optional<VisionPeerBundle> peer_;
+    std::optional<VisionContext> context_peer_;
     std::optional<std::uint32_t> active_item_;
     std::vector<std::uint32_t> encoded_payloads_pending_release_;
     std::vector<CudaEventTimer> timers_;
+    std::vector<CudaEventTimer> peer_timers_;
 };
 
 } // namespace ninfer::targets::qwen3_6::detail::NINFER_QWEN36_RUNTIME_NS::schedule

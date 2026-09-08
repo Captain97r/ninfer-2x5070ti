@@ -96,6 +96,12 @@ Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentit
     if (identity.model_id == qwen3_8_model_id && identity.weights_id == "nvfp4") {
         return WeightsProfile::Qwen38Nvfp4;
     }
+    // The split-storage nvfp4 export (separate gdn a/b projections, BF16 early attention input
+    // projections, W8G32 vocab planes): same tensor schema as Qwen36Nvfp4, but exported from a
+    // qwen3.8-27b checkpoint, so sampling defaults must stay with kQwen3_8Defaults.
+    if (identity.model_id == qwen3_8_model_id && identity.weights_id == "nvfp4-split") {
+        return WeightsProfile::Qwen36Nvfp4;
+    }
     throw std::runtime_error("artifact identity '" + identity.model_id + "/" + identity.weights_id +
                              "' is not supported by target '" + std::string(target_key) + "'");
 }

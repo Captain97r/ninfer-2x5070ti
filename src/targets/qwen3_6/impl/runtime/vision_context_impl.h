@@ -313,17 +313,29 @@ VisionPrefillSession::VisionPrefillSession(DeviceContext& device, const LoadedMo
                                            WorkspaceArena& workspace,
                                            qwen3_6::PreparedPromptData& prompt,
                                            const VisionPrefillPlan& plan,
-                                           runtime::TransientRegion transient)
+                                           runtime::TransientRegion transient,
+                                           std::optional<VisionPeerBundle> peer)
     : device_(device), workspace_(workspace), prompt_(prompt), plan_(plan), transient_(transient),
-      context_(device, model) {
+      context_(device, model), peer_(std::move(peer)) {
     if (plan_.control == nullptr || plan_.control->items.empty() || plan_.uses.empty()) {
         throw std::invalid_argument("Vision prefill plan has no suffix item spans");
     }
     if (transient_.data == nullptr || transient_.alignment < kWorkspaceAlignment) {
         throw std::invalid_argument("Vision item output transient is missing or misaligned");
     }
+    if (peer_) {
+        if (peer_->device == nullptr || peer_->model == nullptr || peer_->work == nullptr) {
+            throw std::invalid_argument("Vision peer bundle is incomplete");
+        }
+        if (peer_->transient.data == nullptr ||
+            peer_->transient.alignment < kWorkspaceAlignment) {
+            throw std::invalid_argument("Vision peer output transient is missing or misaligned");
+        }
+        context_peer_.emplace(*peer_->device, *peer_->model);
+    }
     encoded_payloads_pending_release_.reserve(plan_.uses.size());
     timers_.reserve(plan_.uses.size());
+    if (context_peer_) { peer_timers_.reserve(plan_.uses.size()); }
 }
 
 VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length) {
@@ -372,9 +384,18 @@ VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32
     if (output_bytes > transient_.size) {
         throw std::invalid_argument("Vision item output transient is too small");
     }
+    if (context_peer_ && output_bytes > peer_->transient.size) {
+        throw std::invalid_argument("Vision peer output transient is too small");
+    }
     Tensor output(
         transient_.data, DType::BF16,
         {VisionScheduleConfig::out_hidden, static_cast<std::int32_t>(control.merged_count)});
+    Tensor output_peer;
+    if (context_peer_) {
+        output_peer =
+            Tensor(peer_->transient.data, DType::BF16,
+                   {VisionScheduleConfig::out_hidden, static_cast<std::int32_t>(control.merged_count)});
+    }
 
     if (!active_item_ || *active_item_ != active->item_index) {
         if (active_item_ && active->item_index <= *active_item_) {
@@ -392,10 +413,28 @@ VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32
         context_.encode(VisionItemView{payload->span(), &control}, output, workspace_);
         timers_.back().record_stop();
         workspace_.reset();
+        if (context_peer_) {
+            // Dual-replicated encode (phase 3A architecture E): rank 1 runs the IDENTICAL
+            // single-device schedule over the same host payload bytes and control metadata against
+            // its own full weight copy. The two encodes are independent -- no collective, no
+            // staging, no cross-GPU copy -- and produce bit-identical outputs because the kernels,
+            // weights bytes and inputs are identical. The peer device must be current: both the
+            // timer's events and every kernel launch below are device-scoped.
+            int previous_device = 0;
+            CUDA_CHECK(cudaGetDevice(&previous_device));
+            CUDA_CHECK(cudaSetDevice(peer_->device->device));
+            peer_timers_.emplace_back(*peer_->device);
+            peer_timers_.back().start();
+            context_peer_->encode(VisionItemView{payload->span(), &control}, output_peer,
+                                  *peer_->work);
+            peer_timers_.back().record_stop();
+            peer_->work->reset();
+            CUDA_CHECK(cudaSetDevice(previous_device));
+        }
         active_item_ = active->item_index;
         encoded_payloads_pending_release_.push_back(active->item_index);
     }
-    return VisionChunk{static_cast<std::int32_t>(end - begin), &control, output};
+    return VisionChunk{static_cast<std::int32_t>(end - begin), &control, output, output_peer};
 }
 
 void VisionPrefillSession::release_encoded_media_payloads() noexcept {
@@ -407,9 +446,13 @@ void VisionPrefillSession::release_encoded_media_payloads() noexcept {
 }
 
 double VisionPrefillSession::elapsed_seconds() const {
-    double milliseconds = 0.0;
+    double milliseconds     = 0.0;
+    double peer_milliseconds = 0.0;
     for (const CudaEventTimer& timer : timers_) { milliseconds += timer.elapsed_ms(); }
-    return milliseconds / 1000.0;
+    for (const CudaEventTimer& timer : peer_timers_) { peer_milliseconds += timer.elapsed_ms(); }
+    // The two encodes run concurrently on independent devices; the wall-clock cost of the vision
+    // stage is the slower device's total, not the sum.
+    return std::max(milliseconds, peer_milliseconds) / 1000.0;
 }
 
 } // namespace ninfer::targets::qwen3_6::detail::NINFER_QWEN36_RUNTIME_NS::schedule

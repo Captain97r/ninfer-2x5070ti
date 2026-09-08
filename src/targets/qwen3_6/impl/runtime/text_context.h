@@ -403,7 +403,8 @@ private:
     // rank 1's the NORMALIZED HIDDEN half, so device 1 never embeds a token in the MTP stem.
     void mtp_forward_stem_tp2(const Tensor& ids, const std::array<Tensor, 2>& hidden,
                               std::array<Tensor, 2>& x, std::array<Tensor, 2>& ah,
-                              const std::array<Tensor, 2>& staging);
+                              const std::array<Tensor, 2>& staging,
+                              const Tensor* composed_embedding = nullptr);
     void mtp_forward_tail_tp2(std::array<Tensor, 2>& x, const std::array<Tensor, 2>& ah,
                               const std::array<Tensor, 2>& positions,
                               const std::array<Tensor, 2>& rope_positions,
@@ -420,7 +421,8 @@ private:
                                const std::array<Tensor, 2>& rope_positions,
                                ops::GqaExecutionEnvelope envelope, bool final_chunk,
                                const std::array<Tensor, 2>* final_hidden,
-                               const std::array<Tensor, 2>* logits, Tensor* draft_token);
+                               const std::array<Tensor, 2>* logits, Tensor* draft_token,
+                               const Tensor* composed_embedding = nullptr);
     // Vocabulary-split proposal head: each rank computes its own half of the proposal logits and
     // one allgather leaves the FULL vector on both, because the winning row is a GLOBAL argmax
     // that can land in either half and `draft_head_token_ids` is replicated for exactly that
@@ -476,10 +478,13 @@ private:
     prefill_impl(std::span<const int> ids, const TextPrefill* text_prefill,
                  const MultimodalPrefill* multimodal, Tap& tap, bool finalize_at_end);
     // The tp2 text prefill. Declared here rather than beside its siblings above because it names
-    // TextPrefill, which is declared just above this line.
+    // TextPrefill, which is declared just above this line. `multimodal` is null for a plain text
+    // suffix; when set, this is the tp2 form of the multimodal prefill (vision chunk encode on
+    // both ranks, 3-axis rope positions, per-rank vision scatter, MTP visual-overlap stem).
     [[nodiscard]] PrefillChunkResult prefill_impl_tp2(std::span<const int> ids,
                                                       const TextPrefill& text_prefill,
-                                                      bool finalize_at_end);
+                                                      bool finalize_at_end,
+                                                      const MultimodalPrefill* multimodal);
     DeviceContext& ctx_;
     const LoadedModelData& weights_;
     WorkspaceArena& work_;

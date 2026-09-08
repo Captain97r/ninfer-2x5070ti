@@ -195,6 +195,11 @@ struct RequestControl {
         std::optional<VisionPrefillPlan> vision_plan;
         std::unique_ptr<schedule::VisionPrefillSession> vision;
         runtime::TransientRegion transient;
+        // Rank 1's vision output transient at tp == 2 (phase 3A dual-replicated vision): each
+        // rank's encode writes the SAME item embeddings into ITS OWN per-request region on ITS
+        // OWN device, so the tp2 multimodal prefill never crosses GPUs. Empty at tp == 1 and for
+        // text-only requests.
+        runtime::TransientRegion transient_peer;
         std::optional<RewriteCheckpointSpec> rewrite_checkpoint_capture;
         std::uint32_t base               = 0;
         std::uint32_t cursor             = 0;
@@ -260,7 +265,8 @@ public:
     [[nodiscard]] runtime::PrefillStepResult start_prefill_lane(std::uint32_t lane,
                                                                 PreparedPromptData&& prompt,
                                                                 RequestPlan&& plan,
-                                                                runtime::TransientRegion transient);
+                                                                runtime::TransientRegion transient,
+                                                                runtime::TransientRegion transient_peer = {});
     [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_batch(std::span<const std::uint32_t> lanes,

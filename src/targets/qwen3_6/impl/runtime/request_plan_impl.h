@@ -258,6 +258,22 @@ RequestPlan ProgramImplCore::plan_request_for_lane(std::uint32_t lane,
         plan->reuse_base = 0;
     }
 
+    // Multimodal prefix reuse has no tensor-parallel implementation either, and for two reasons.
+    // (1) The vision PLANNER does not split the item control across the reuse boundary: every
+    // suffix use-span is required to map to an item the tp2 session can encode, and a reused
+    // prefix would need the pre-frontier part of that metadata reconstructed per rank. (2) A text
+    // suffix appended after a vision-carrying prefix inherits that prompt's nonzero rope_delta,
+    // and the tp2 text path ropes plain suffixes with the un-offset positions -- so the reuse
+    // would silently produce wrong MRoPE angles rather than a loud failure. Full re-prefill gives
+    // the identical answer (the tp2 multimodal prefill is bit-faithful to tp1), only the reuse
+    // saving is lost. Decided HERE, not in execution, so a single vision turn with prefix reuse
+    // enabled cannot take the executor down; the executor-side tp2 throws stay as unreachable
+    // backstops.
+    if (tp != 1 && base.vision_control != nullptr && plan->reuse != ReusePath::FullReset) {
+        plan->reuse      = ReusePath::FullReset;
+        plan->reuse_base = 0;
+    }
+
     if (is_rewrite_checkpoint_restore(plan->reuse) &&
         speculative_backend == SpeculativeBackend::DFlash &&
         (!dflash || !sequence.kv || !sequence.kv->backend ||

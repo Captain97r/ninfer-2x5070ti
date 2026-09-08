@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Small fixed-capacity request scheduling and batched decode execution for every backend.
 
@@ -203,7 +203,20 @@ public:
             std::scoped_lock lock(execution_mutex_);
             instance_.program->reset_memory_peaks();
             instance_.request_memory.reset_peak();
+            if (instance_.request_memory_peer) {
+                instance_.request_memory_peer->reset_peak();
+            }
         } catch (...) {}
+    }
+
+    // The request transient is a PAIR at tp == 2: rank 0's region on device 0 and rank 1's
+    // identical region on device 1 (phase 3A dual-replicated vision). Both were activated with
+    // the same byte count, so every release point must drop both.
+    void deactivate_request_memory() noexcept {
+        instance_.request_memory.deactivate();
+        if (instance_.request_memory_peer) {
+            instance_.request_memory_peer->deactivate();
+        }
     }
 
     // Debug-only, OFF by default (see ProgramImplCore::logits_capture): the raw BF16 bits of the
@@ -559,7 +572,7 @@ private:
                             std::exception_ptr error) {
         instance_.program->abort_lane(lane);
         if (prefill_lane_ && *prefill_lane_ == lane) {
-            instance_.request_memory.deactivate();
+            deactivate_request_memory();
             prefill_lane_.reset();
         }
         complete_error(request, std::move(error));
@@ -599,7 +612,7 @@ private:
             if (request == nullptr || !cancelled_at_boundary[lane]) { continue; }
             instance_.program->abort_lane(lane);
             if (prefill_lane_ && *prefill_lane_ == lane) {
-                instance_.request_memory.deactivate();
+                deactivate_request_memory();
                 prefill_lane_.reset();
             }
             complete_cancelled(request);
@@ -691,7 +704,7 @@ private:
             if (!request->lane) { throw std::logic_error("cancelled prefill has no request lane"); }
             const std::uint32_t lane = *request->lane;
             if (prefill_lane_ && lane == *prefill_lane_) {
-                instance_.request_memory.deactivate();
+                deactivate_request_memory();
                 prefill_lane_.reset();
             }
             instance_.program->abort_lane(lane);
@@ -702,7 +715,7 @@ private:
         if (!step.complete) { return; }
         if (!request->lane) { throw std::logic_error("completed prefill has no request lane"); }
         if (prefill_lane_ && *request->lane == *prefill_lane_) {
-            instance_.request_memory.deactivate();
+            deactivate_request_memory();
             prefill_lane_.reset();
         }
         request->begin = step.summary;
@@ -880,16 +893,28 @@ private:
             invalidate_lane_plans(lane);
 
             TransientRegion transient;
+            TransientRegion transient_peer;
             if (needs_prefill) {
                 instance_.request_memory.activate(summary.transient_bytes,
                                                   summary.transient_alignment);
-                prefill_lane_ = lane;
-                transient     = instance_.request_memory.region();
+                if (instance_.request_memory_peer) {
+                    // The peer region carries the SAME bytes at the SAME alignment: the tp2
+                    // vision planner's output transient is symmetric across ranks by
+                    // construction, so one activation drives both devices.
+                    instance_.request_memory_peer->activate(summary.transient_bytes,
+                                                            summary.transient_alignment);
+                }
+                prefill_lane_     = lane;
+                transient         = instance_.request_memory.region();
+                transient_peer    = instance_.request_memory_peer
+                              ? instance_.request_memory_peer->region()
+                              : TransientRegion{};
             }
             publish_runtime_stats();
             target_started                = true;
             const PrefillStepResult first = instance_.program->start_prefill_lane(
-                lane, std::move(request->prompt), std::move(selected_plan), transient);
+                lane, std::move(request->prompt), std::move(selected_plan), transient,
+                transient_peer);
             if (!first.complete && (!prefill_lane_ || *prefill_lane_ != lane)) {
                 throw std::logic_error("partial prefill did not retain its execution owner");
             }
@@ -900,7 +925,7 @@ private:
             const std::exception_ptr error = std::current_exception();
             if (target_started) { instance_.program->abort_lane(lane); }
             if (prefill_lane_ && *prefill_lane_ == lane) {
-                instance_.request_memory.deactivate();
+                deactivate_request_memory();
                 prefill_lane_.reset();
             }
             slots_[lane].reset();
@@ -1184,7 +1209,7 @@ private:
             pending_.clear();
         }
         if (prefill_lane_) {
-            instance_.request_memory.deactivate();
+            deactivate_request_memory();
             prefill_lane_.reset();
         }
         protection_.reset();

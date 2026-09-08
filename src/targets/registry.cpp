@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -227,12 +228,29 @@ LoadedQwen3_6_27B::LoadedQwen3_6_27B(std::unique_ptr<Qwen3_6_27B::LoadedModel> s
 
 LoadedQwen3_6_27B::~LoadedQwen3_6_27B() = default;
 
+namespace {
+
+// Rank 1's request-transient twin at tp == 2. The frozen capacity is the SAME number the
+// planner derived for rank 0 -- the vision output region is symmetric -- and device 1's arena
+// is simply created on device 1. Returned by value so the non-movable RequestMemory can be
+// placed into an optional without a move (C++17 guaranteed elision).
+std::optional<runtime::RequestMemory> make_peer_request_memory(ExecutionContext& execution,
+                                                               std::size_t frozen_capacity) {
+    if (execution.tp != 2 || !execution.dev[1].has_value()) { return std::nullopt; }
+    return std::optional<runtime::RequestMemory>(std::in_place, *execution.dev[1],
+                                                 frozen_capacity);
+}
+
+} // namespace
+
 Qwen3_6_27BInstance::Qwen3_6_27BInstance(std::unique_ptr<LoadedQwen3_6_27B> stable_loaded,
                                          runtime::KvCapacityResolution resolution,
                                          Qwen3_6_27B::SequencePlan sequence_plan,
                                          ExecutionContext& execution)
     : loaded(std::move(stable_loaded)), kv_capacity_resolution(resolution),
       request_memory(execution.primary(), sequence_plan.request_transient_capacity_bytes()),
+      request_memory_peer(make_peer_request_memory(
+          execution, sequence_plan.request_transient_capacity_bytes())),
       capacity(sequence_plan.capacity()),
       program(Qwen3_6_27B::create_program(*loaded->model, std::move(sequence_plan), execution)) {}
 
@@ -250,6 +268,8 @@ Qwen3_6_35BA3BInstance::Qwen3_6_35BA3BInstance(std::unique_ptr<LoadedQwen3_6_35B
                                                ExecutionContext& execution)
     : loaded(std::move(stable_loaded)), kv_capacity_resolution(resolution),
       request_memory(execution.primary(), sequence_plan.request_transient_capacity_bytes()),
+      request_memory_peer(make_peer_request_memory(
+          execution, sequence_plan.request_transient_capacity_bytes())),
       capacity(sequence_plan.capacity()),
       program(Qwen3_6_35BA3B::create_program(*loaded->model, std::move(sequence_plan),
                                              execution)) {}

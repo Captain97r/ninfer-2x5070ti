@@ -589,7 +589,8 @@ runtime::AdmissionResources ProgramImplCore::admission_capacity() const noexcept
 runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lane,
                                                                PreparedPromptData&& prompt,
                                                                RequestPlan&& plan,
-                                                               runtime::TransientRegion transient) {
+                                                               runtime::TransientRegion transient,
+                                                               runtime::TransientRegion transient_peer) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
@@ -805,6 +806,7 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
             .vision_plan                = std::move(request_plan.vision),
             .vision                     = nullptr,
             .transient                  = transient,
+            .transient_peer             = transient_peer,
             .rewrite_checkpoint_capture = request_plan.rewrite_checkpoint_capture,
             .base                       = base,
             .cursor                     = base,
@@ -818,8 +820,29 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
         request.prefill.emplace(std::move(prefill));
         auto& staged = *request.prefill;
         if (staged.vision_plan) {
+            std::optional<schedule::VisionPeerBundle> vision_peer;
+            if (tp != 1) {
+                // Phase 3A dual-replicated vision: rank 1 mirrors the encode against its own
+                // weights and its own per-request transient. A missing peer region at tp2+vision
+                // is a caller wiring error -- fail it here, loudly, before any request state is
+                // installed.
+                if (!transient_peer) {
+                    throw std::logic_error(
+                        "tensor-parallel Vision prefill requires a peer transient region");
+                }
+                // `peer` is non-const (it is this core's own rank-1 runtime), so the bundle
+                // receives a mutable rank-1 workspace pointer, exactly like the encode's.
+                PeerRuntime& peer_runtime = *peer;
+                vision_peer                      = schedule::VisionPeerBundle{
+                    .device    = &peer_runtime.device,
+                    .model     = &peer_runtime.model,
+                    .work      = &peer_runtime.work,
+                    .transient = transient_peer,
+                };
+            }
             staged.vision = std::make_unique<schedule::VisionPrefillSession>(
-                device, model, work, staged.prompt, *staged.vision_plan, staged.transient);
+                device, model, work, staged.prompt, *staged.vision_plan, staged.transient,
+                std::move(vision_peer));
         }
         staged.elapsed_seconds = std::chrono::duration<double>(Clock::now() - started).count();
         request.lifecycle      = Lifecycle::Prefilling;

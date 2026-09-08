@@ -6,6 +6,7 @@
 #include <ninfer/targets/qwen3_6_35b_a3b/package.h>
 
 #include <memory>
+#include <optional>
 #include <variant>
 
 namespace ninfer {
@@ -36,6 +37,10 @@ struct Qwen3_6_27BInstance {
     std::unique_ptr<LoadedQwen3_6_27B> loaded;
     runtime::KvCapacityResolution kv_capacity_resolution;
     runtime::RequestMemory request_memory;
+    // Rank 1's twin of `request_memory` at tp == 2 (phase 3A dual-replicated vision): the SAME
+    // frozen capacity on device 1, holding each request's rank-local vision output embeddings.
+    // Empty at tp == 1; text-only tp2 requests simply activate zero bytes on it.
+    std::optional<runtime::RequestMemory> request_memory_peer;
     const std::uint32_t capacity;
     std::unique_ptr<Qwen3_6_27B::Program> program;
 
@@ -66,6 +71,10 @@ struct Qwen3_6_35BA3BInstance {
     std::unique_ptr<LoadedQwen3_6_35BA3B> loaded;
     runtime::KvCapacityResolution kv_capacity_resolution;
     runtime::RequestMemory request_memory;
+    // Same role as the 27B peer twin: rank 1's request transient at tp == 2. This target has no
+    // Vision, so a tp2 request only ever activates zero bytes on it, but the executor drives
+    // both devices uniformly and the frozen capacity is the same number.
+    std::optional<runtime::RequestMemory> request_memory_peer;
     const std::uint32_t capacity;
     std::unique_ptr<Qwen3_6_35BA3B::Program> program;
 

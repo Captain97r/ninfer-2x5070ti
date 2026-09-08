@@ -250,12 +250,30 @@ void parse_messages(const Json& body, GenerationRequest& out) {
                 item.at("tool_call_id").get<std::string>().empty()) {
                 bad_request("tool messages must contain a string tool_call_id", "messages");
             }
-            if (!item.contains("content") || !item.at("content").is_string()) {
+            // OpenAI tool-message content may be a plain string or an array of text
+            // parts (clients such as the OpenHands SDK send [{"type":"text",...}]);
+            // null is accepted as an empty observation.
+            if (!item.contains("content") || item.at("content").is_null()) {
+                turn.content.push_back(ContentPart{ContentKind::Text, "", "text"});
+            } else if (item.at("content").is_string()) {
+                turn.content.push_back(
+                    ContentPart{ContentKind::Text, item.at("content").get<std::string>(), "text"});
+            } else if (item.at("content").is_array()) {
+                std::string joined;
+                for (const Json& part : item.at("content")) {
+                    if (!part.is_object() || !part.contains("type") ||
+                        !part.at("type").is_string() ||
+                        part.at("type").get<std::string>() != "text" || !part.contains("text") ||
+                        !part.at("text").is_string()) {
+                        bad_request("tool message content parts must be text parts", "messages");
+                    }
+                    joined += part.at("text").get<std::string>();
+                }
+                turn.content.push_back(ContentPart{ContentKind::Text, joined, "text"});
+            } else {
                 bad_request("tool messages must contain string content", "messages");
             }
             turn.tool_call_id = item.at("tool_call_id").get<std::string>();
-            turn.content.push_back(
-                ContentPart{ContentKind::Text, item.at("content").get<std::string>(), "text"});
             out.messages.push_back(std::move(turn));
             continue;
         }
