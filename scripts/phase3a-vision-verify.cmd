@@ -14,7 +14,7 @@ echo artifact: %ARTIFACT%
 nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv,noheader > "%OUT%\gpu-before.txt"
 type "%OUT%\gpu-before.txt"
 
-set "NINFER=%ROOT%\..\build-windows-131\apps\ninfer.exe"
+set "NINFER=%ROOT%\..\..\build-windows-131\apps\ninfer.exe"
 if not exist "%NINFER%" (
   echo ERROR: %NINFER% not found - build first
   exit /b 2
