@@ -21,15 +21,31 @@ class RequestMemory::Impl {
 public:
     Impl(DeviceContext& context, std::size_t capacity) : device(context.device) {
         if (capacity != 0) {
+            // The arena can be built while a DIFFERENT device is current (a tp2 instance builds
+            // rank 1's request memory from rank 0's setup path), and the previous device must
+            // survive it: the caller's own subsequent allocations (the rank-0 program's
+            // persistent span among them) would otherwise land on this device, and every later
+            // use of them on their intended device fails with cudaErrorInvalidValue.
+            int previous = 0;
+            CUDA_CHECK(cudaGetDevice(&previous));
             CUDA_CHECK(cudaSetDevice(device));
-            arena = std::make_unique<DeviceArena>(capacity);
+            try {
+                arena = std::make_unique<DeviceArena>(capacity);
+            } catch (...) {
+                (void)cudaSetDevice(previous);
+                throw;
+            }
+            CUDA_CHECK(cudaSetDevice(previous));
         }
     }
 
     ~Impl() {
         if (arena != nullptr) {
-            (void)cudaSetDevice(device);
+            int previous = device;
+            CUDA_CHECK(cudaGetDevice(&previous));
+            if (previous != device) { CUDA_CHECK(cudaSetDevice(device)); }
             arena.reset();
+            if (previous != device) { (void)cudaSetDevice(previous); }
         }
     }
 
