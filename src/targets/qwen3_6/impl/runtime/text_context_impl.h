@@ -2977,7 +2977,23 @@ void TextContext::mtp_prefill_chunk_tp2(const Tensor& ids, const std::array<Tens
         Tensor qn       = ws[r]->alloc(DType::BF16, {kCfg.head_dim, kShardQHeads, 1});
         ops::rmsnorm(q, *mtp.q_norm, kCfg.rms_eps, true, qn, s);
         Tensor last_position = positions[r].slice(0, T - 1, 1);
-        Tensor last_rope     = rope_positions[r].slice(0, T - 1, 1);
+        // A multimodal prompt ropes with the {T,3} grid; slicing one row out of it keeps the
+        // parent's column stride (4*T), which the rope wrapper rejects as non-contiguous. Gather
+        // the three axes into a fresh contiguous {1,3} the same way the tp1 final-chunk stage does
+        // (the buffer is [axis][token]: element (axis, t) at axis*T + t).
+        Tensor last_rope;
+        if (rope_positions[r].ne[1] == 1) {
+            last_rope = rope_positions[r].slice(0, T - 1, 1);
+        } else {
+            last_rope = ws[r]->alloc(DType::I32, {1, 3});
+            for (int axis = 0; axis < 3; ++axis) {
+                const auto* src = static_cast<const std::int32_t*>(rope_positions[r].data) +
+                                  static_cast<std::size_t>(axis) * T + (T - 1);
+                auto* dst = static_cast<std::int32_t*>(last_rope.data) + axis;
+                CUDA_CHECK(
+                    cudaMemcpyAsync(dst, src, sizeof(std::int32_t), cudaMemcpyDeviceToDevice, s));
+            }
+        }
         ops::rope(last_rope, kCfg.rotary_dim, kCfg.rope_theta, qn, rope_frequency_[r], s);
         qwen3_6::PagedKVCacheView pages = rank == 0 ? mtp_kv_ : tp_->mtp_kv;
         ops::gqa_attention_cached(qn, last_position, kAttnScale, pages.layer_view(0), envelope,

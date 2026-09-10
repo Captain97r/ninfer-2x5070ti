@@ -1094,6 +1094,15 @@ void ProgramImplCore::abort_lane(std::uint32_t lane) noexcept {
     clear_lane(sequences[lane], requests[lane]);
 }
 
+// Drains every stream on every device this Program drives (both ranks at tp2). Used by the
+// executor's lane-recovery path: a sticky CUDA context error resurfaces here and turns the
+// recovery into the engine-fatal fail_all it must be, while a clean barrier proves the failure
+// was request-scoped and the Engine can keep serving.
+void ProgramImplCore::verify_execution_health() {
+    if (peer) { peer->device.synchronize(); }
+    device.synchronize();
+}
+
 bool ProgramImplCore::has_retained_lane(std::uint32_t lane) const noexcept {
     return lane < max_concurrency && sequences[lane].retained;
 }

@@ -639,6 +639,17 @@ public:
         if (options.max_context == 0) {
             throw std::invalid_argument("frontend max_context must be nonzero");
         }
+        // tp>1 runs the vision workspace envelope capped at one kTp2ItemMergedLimit item per
+        // request (the runtime layout plan sizes vision for exactly ONE item). Clamp the
+        // artifact's preprocessor budgets to that envelope so smart_resize downscales oversized
+        // media instead of the request plan rejecting it mid-flight; tp1 keeps upstream
+        // behavior byte for byte.
+        if (options.tensor_parallel > 1) {
+            processor.image_max_pixels =
+                std::min(processor.image_max_pixels, kTp2ItemMergedPixels);
+            processor.video_max_pixels =
+                std::min(processor.video_max_pixels, kTp2ItemMergedPixels);
+        }
         const std::uint64_t vision_tokens =
             std::min<std::uint64_t>(options.max_context, kMaximumVisionTokens);
         processor.max_vision_tokens = vision_tokens;

@@ -17,6 +17,13 @@ inline constexpr std::uint64_t kRawPatchesPerVisionToken  = 4;
 inline constexpr std::uint64_t kMaximumVisionTokens       = 32'768;
 inline constexpr std::uint64_t kMaximumVisionRawPatches =
     kMaximumVisionTokens * kRawPatchesPerVisionToken;
+// One merged vision token covers a 32 x 32 pixel block after smart_resize. The tp>1 fork sizes
+// its vision workspace for ONE item capped at kTp2ItemMergedLimit merged tokens (see the runtime
+// layout plan), so the frontend clamps the preprocessor's max-pixel budgets to that item budget:
+// smart_resize downscales oversized media instead of the request plan rejecting it at admission.
+inline constexpr std::uint64_t kMergedTokenPixels    = 32ULL * 32ULL;
+inline constexpr std::uint64_t kTp2ItemMergedLimit  = 2048;
+inline constexpr std::uint64_t kTp2ItemMergedPixels = kTp2ItemMergedLimit * kMergedTokenPixels;
 
 struct PreparedMediaPayload {
     // Exact row-major BF16 input consumed by the Vision patch projection.

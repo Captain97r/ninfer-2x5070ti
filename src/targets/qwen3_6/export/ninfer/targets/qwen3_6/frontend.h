@@ -17,6 +17,9 @@ inline constexpr std::size_t kTokenDomain = 248077;
 struct FrontendOptions {
     bool vision_enabled                    = true;
     std::uint32_t max_context              = 2'048;
+    // tp>1 clamps the preprocessor's per-item max-pixel budgets to the tp2 single-item vision
+    // envelope (kTp2ItemMergedPixels); see Frontend::Impl and prepared_prompt.h.
+    std::uint32_t tensor_parallel          = 1;
     std::size_t media_cache_bytes          = kDefaultMediaCacheBytes;
     std::size_t media_live_bytes           = kDefaultMediaLiveBytes;
     std::uint32_t media_preprocess_threads = 0;

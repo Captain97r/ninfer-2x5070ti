@@ -277,6 +277,10 @@ public:
                                std::span<const std::uint8_t> terminal,
                                std::span<const std::uint8_t> cancelled);
     void abort_lane(std::uint32_t lane) noexcept;
+    // Synchronizes every device this Program drives; throws on a sticky CUDA error. The
+    // executor calls it after an aborted prefill lane to decide between serving on and
+    // fail_all (see ConcurrentExecutor::recover_prefill_lane).
+    void verify_execution_health();
     [[nodiscard]] bool has_retained_lane(std::uint32_t lane) const noexcept;
     void evict_retained_lane(std::uint32_t lane) noexcept;
     [[nodiscard]] GenerationTimings generation_timings_lane(std::uint32_t lane) const noexcept;

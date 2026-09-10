@@ -598,17 +598,17 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     if (plan.features.vision) {
         constexpr std::uint32_t kFrontendMergedLimit  = 32768;
         constexpr std::uint32_t kFrontendSegmentLimit = 768 / 2;
-        // tp2 single-item envelope cap. The vision workspace is sized for ONE item (the
-        // request plan rejects any item larger than the envelope at request time), and the
-        // uncapped min(capacity, 32768) envelope reserves 2117 MiB + 320 MiB of transient PER
-        // GPU -- which does not coexist with a 10.08 GiB text shard + KV on 16 GB boards. A
-        // 2048-merged (8192-patch) item covers every image (position table caps one image at
-        // 576) and short/low-resolution video; measured cost 132.31 MiB + 20.00 MiB per GPU.
-        // tp1 keeps the uncapped envelope: no upstream behavior change.
-        constexpr std::uint32_t kTp2ItemMergedLimit = 2048;
-        const std::uint32_t merged = plan.tp > 1
-                                         ? std::min(plan.capacity, kTp2ItemMergedLimit)
-                                         : std::min(plan.capacity, kFrontendMergedLimit);
+        // tp2 single-item envelope cap. The vision workspace is sized for ONE item (the request
+        // plan rejects any item larger than the envelope at request time), and the uncapped
+        // min(capacity, 32768) envelope reserves 2117 MiB + 320 MiB of transient PER GPU -- which
+        // does not coexist with a 10.08 GiB text shard + KV on 16 GB boards. A 2048-merged
+        // (8192-patch) item is 2,097,152 px after smart_resize; the frontend clamps the
+        // preprocessor budget to exactly that (kTp2ItemMergedPixels), so properly preprocessed
+        // media never reaches the plan-time rejection below. Measured cost 132.31 MiB + 20.00 MiB
+        // per GPU. tp1 keeps the uncapped envelope: no upstream behavior change.
+        const std::uint32_t merged =
+            plan.tp > 1 ? std::min<std::uint32_t>(plan.capacity, kTp2ItemMergedLimit)
+                        : std::min(plan.capacity, kFrontendMergedLimit);
         out.vision_encode          = schedule::VisionContext::workspace_capacity_bytes(
             merged, std::min(merged, kFrontendSegmentLimit));
     }

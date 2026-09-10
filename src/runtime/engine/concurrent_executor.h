@@ -1224,6 +1224,36 @@ private:
         publish_runtime_stats();
     }
 
+    // One staged prefill lane died mid-execution. Tear that lane down exactly the way a
+    // mid-prefill cancellation does (abort_lane is the same supported transition), fail its one
+    // request, then prove the devices are still healthy: verify_execution_health synchronizes
+    // both ranks and rethrows a sticky CUDA context error, which is genuinely engine-fatal and
+    // escalates to fail_all. A clean barrier means the failure was request-scoped -- the
+    // shape/domain checks inside the prefill schedule throw before touching shared state -- and
+    // the worker keeps serving later requests. Returns false once the engine itself failed.
+    [[nodiscard]] bool recover_prefill_lane(std::exception_ptr error) noexcept {
+        const std::optional<std::uint32_t> lane = prefill_lane_;
+        const std::shared_ptr<Request> request  = lane ? slots_[*lane] : nullptr;
+        if (lane) {
+            instance_.program->abort_lane(*lane);
+            deactivate_request_memory();
+            prefill_lane_.reset();
+        }
+        if (request != nullptr) {
+            clear_protection_if_head(request);
+            complete_error(request, error);
+            remove_completed_slot(*lane);
+        }
+        publish_runtime_stats();
+        try {
+            instance_.program->verify_execution_health();
+        } catch (...) {
+            fail_all(std::current_exception());
+            return false;
+        }
+        return true;
+    }
+
     void worker_loop() noexcept {
         bool previous_unit_was_decode = false;
         for (;;) {
@@ -1258,7 +1288,17 @@ private:
                         run_decode_round(membership);
                         previous_unit_was_decode = true;
                     } else {
-                        run_prefill_step();
+                        try {
+                            run_prefill_step();
+                        } catch (...) {
+                            // The staged prefill unit executes exactly ONE lane's prompt, so its
+                            // request-scoped failures (shape/domain checks inside the prefill
+                            // schedule, a malformed multimodal item) can be torn down like a
+                            // cancellation instead of failing the whole engine.
+                            // recover_prefill_lane re-checks the devices: a sticky CUDA error
+                            // escalates to fail_all and the worker returns.
+                            if (!recover_prefill_lane(std::current_exception())) { return; }
+                        }
                         previous_unit_was_decode = false;
                     }
                     continue;
