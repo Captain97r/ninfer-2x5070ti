@@ -304,6 +304,13 @@ void validate_fused_column_rank_semantics(const Tensor& x, const Weight& w, cons
                 "attn_input_proj column-parallel: FP8 admits only A16 or A8");
         }
         detail::validate_fp8_weight(w, "fp8 attn_input_proj column-parallel");
+    } else if (w.qtype == QType::BF16_CTRL) {
+        if (policy != LinearPolicy::A16Only) {
+            throw std::invalid_argument(
+                "attn_input_proj column-parallel: BF16 admits only A16");
+        }
+        require_bf16_contiguous(w, kShardFusedRows, kShardHidden,
+                                "query/key/gate/value weight shard");
     } else {
         throw std::invalid_argument(
             "attn_input_proj column-parallel: unsupported fused weight format");
@@ -386,6 +393,9 @@ std::size_t attn_input_proj_column_parallel_workspace_capacity_bytes(QType qtype
     if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
         return detail::fp8_attn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
+    if (qtype == QType::BF16_CTRL) {
+        return 0; // A16-only: no activation quantize workspace, mirroring the tp1 BF16 profile.
+    }
     throw std::invalid_argument(
         "attn_input_proj column-parallel workspace: unsupported weight format");
 }
@@ -421,6 +431,9 @@ void attn_input_proj_column_parallel(const std::array<Tensor, 2>& x,
             detail::nvfp4_attn_input_dispatch_shard(x[slot], w, q_dst[slot], gate_dst[slot],
                                                     k_dst[slot], v_dst[slot], policy,
                                                     workspace[slot], ec.dev[slot]->stream);
+        } else if (w.qtype == QType::BF16_CTRL) {
+            detail::bf16_attn_input_dispatch_shard(x[slot], w, q_dst[slot], gate_dst[slot],
+                                                   k_dst[slot], v_dst[slot], ec.dev[slot]->stream);
         } else {
             detail::fp8_attn_input_dispatch_shard(x[slot], w, q_dst[slot], gate_dst[slot],
                                                   k_dst[slot], v_dst[slot], policy, workspace[slot],
