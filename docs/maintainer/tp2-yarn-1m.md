@@ -484,8 +484,10 @@ capture and transport probes all live in `tools/tp2/`. The 1M needle, soak and p
 
 ## 9. Functional limitations
 
-- **Vision is `--tp 1` only.** The Vision encoder runs on the primary device against replicated
-  weights and has no split path, so `--tp 2 --vision` is rejected at startup. YaRN is likewise
+- **Vision works at `--tp 2` in the Windows-TP2 fork.** Upstream/base design ran the Vision
+  encoder on the primary device against replicated weights and rejected `--tp 2 --vision` at
+  startup; the Windows-TP2 layer dual-replicates the tower and encodes per rank (see the fork
+  README's "Vision on TP2" and the `research/phase3a-vision-*` notes). YaRN is likewise
   rejected together with `--vision`, because the encoder ropes 2-D image-grid positions.
 - **DFlash is rejected at `--tp 2`.** It remains a 35B-A3B text-only backend, and that target has no
   tensor-parallel path at all.

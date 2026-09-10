@@ -1,16 +1,16 @@
-# NInfer
+# NInfer — Windows 11 TP2 fork
 
-> Selected checkpoints. Maximum single-GPU inference performance, plus a two-GPU path to a
-> 1,048,576-token context.
+> Native Windows 11 tensor-parallel inference for Qwen3.8-27B NVFP4 on two consumer GeForce
+> GPUs — measured on 2 × RTX 5060 Ti 16 GB, without requiring CUDA P2P, NCCL, WSL2 or Docker.
 
-NInfer is a from-scratch C++/CUDA inference engine for explicitly registered Qwen checkpoints on a
-single NVIDIA GeForce RTX 5090. It runs text, image, and video prompts through a local CLI or
-OpenAI-/Anthropic-compatible HTTP APIs. The 27B execution package additionally runs tensor-parallel
-across two RTX 5090s and, with YaRN positional scaling, serves contexts up to 1,048,576 tokens --
-see [Dual-GPU (TP2) and YaRN 1M context](#dual-gpu-tp2-and-yarn-1m-context).
+NInfer is a from-scratch C++/CUDA inference engine for explicitly registered Qwen checkpoints.
+It runs text, image, and video prompts through a local CLI or OpenAI-/Anthropic-compatible HTTP
+APIs. The 27B execution package can run tensor-parallel across two GPUs and, with YaRN positional
+scaling, serves contexts up to 1,048,576 tokens -- see
+[Dual-GPU (TP2) and YaRN 1M context](#dual-gpu-tp2-and-yarn-1m-context).
 
-> **This is the Windows-TP2 experiment fork.** It is a Windows-focused fork/experiment built on
-> top of two other projects:
+> **This is the Windows-TP2 experiment fork** ([ivanov84/ninfer-windows-tp2](https://github.com/ivanov84/ninfer-windows-tp2)),
+> built on top of two other projects:
 >
 > - [wamansou/ninfer-tp2-1m](https://github.com/wamansou/ninfer-tp2-1m) -- the TP2/YaRN fork this
 >   branch descends from (`6a355d5`), itself a fork of upstream [Neroued/ninfer](https://github.com/Neroued/ninfer)
@@ -18,13 +18,22 @@ see [Dual-GPU (TP2) and YaRN 1M context](#dual-gpu-tp2-and-yarn-1m-context).
 > - [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows) -- the native Windows
 >   (MSVC/vcpkg) port whose compatibility layer was cherry-picked here.
 >
-> What this branch adds on top of both: a native Windows 11 build of the TP2 engine, and a new
-> low-latency transport for the small TP2 collectives (a pinned-host-memory GPU mailbox) that
-> replaces the host-staged allreduce in the captured decode graph on systems where CUDA P2P is
-> unavailable (GeForce/WDDM). See [Native Windows 11 TP2 on two GeForce GPUs](#native-windows-11-tp2-on-two-geforce-gpus),
-> [docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md) and [docs/PROVENANCE.md](docs/PROVENANCE.md)
-> for the full story, measurements, and attribution. See [NOTICE](NOTICE) for the required
-> Apache-2.0 §4(b) attribution.
+> What this branch adds on top of both:
+>
+> - a **native Windows 11 build of the TP2 engine** (no WSL2, no Docker, no NCCL);
+> - a **pinned-host-memory peer-mailbox transport** for the small TP2 collectives, captured into
+>   the decode CUDA graph, replacing the host-staged allreduce on systems where CUDA peer access
+>   is unavailable -- see [Native Windows 11 TP2 on two GeForce GPUs](#native-windows-11-tp2-on-two-geforce-gpus)
+>   and [docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md);
+> - **vision (image input) working under `--tp 2`** -- a dual-replicated vision tower with
+>   per-rank encode, a per-item pixel budget with automatic downscale, and MTP + image prefill
+>   fixed -- see [Vision on TP2](#vision-on-tp2);
+> - a second registered **Qwen3.8-27B NVFP4 artifact schema** (`nvfp4-split`) so the
+>   [Ostfralla](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) export loads on two
+>   GPUs -- see [Tested Qwen3.8-27B NVFP4 NInfer artifacts](#tested-qwen38-27b-nvfp4-ninfer-artifacts).
+>
+> See [docs/PROVENANCE.md](docs/PROVENANCE.md) for the full layer-by-layer attribution and
+> [NOTICE](NOTICE) for the required Apache-2.0 §4(b) attribution.
 
 > **The base fork.** Upstream is [Neroued/ninfer](https://github.com/Neroued/ninfer); the TP2
 > base of this tree branches from its commit `feaf4dd` and adds two things to the 27B execution
@@ -50,6 +59,7 @@ runtime:
 | [Qwen3.8-27B](https://huggingface.co/neroued/Qwen3.8-27B-NInfer) | `groupwise-int` | `qwen3_8_27b.ninfer` | 18,210,531,328 bytes (16.96 GiB) | `eec39564993d6e9c7d5e383382a760f093465c9d163ec9a1bd6b80199514bf3e` |
 | [Qwen3.8-27B NVFP4](https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer) | `nvfp4` | `qwen3_8_27b_nvfp4.ninfer` | 21,492,695,040 bytes (20.02 GiB) | `bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32` |
 | [Qwen3.6-35B-A3B](https://huggingface.co/neroued/Qwen3.6-35B-A3B-NInfer) | `groupwise-int` | `qwen3_6_35b_a3b.ninfer` | 22,783,246,080 bytes (21.22 GiB) | `1fb9ea0b5b8561e49d9604115ec89e5d9f2b6f6434e32c37c57fffd480a325d2` |
+| [Qwen3.8-27B NVFP4 — Ostfralla export](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) | `nvfp4-split` | `qwen3_8_27b_nvfp4.ninfer` | 18,324,067,840 bytes (17.07 GiB) | `eaf8ad124256d0a0c1ebbbca442ca58eee4f97ab34a60a0b4d57e2b41e2c56d2` |
 
 Qwen3.6-27B and Qwen3.8-27B each expose two registered weight profiles. The version-2 artifact
 identity selects the profile without a separate runtime flag; Qwen3.8 uses target key
@@ -57,16 +67,26 @@ identity selects the profile without a separate runtime flag; Qwen3.8 uses targe
 Core MMA for prefill and A16 NVFP4 kernels for decode. The Qwen3.8 `nvfp4` profile preserves its
 source's mixed allocation: NVFP4 MLP weights in Text layers 0–55 and row-scaled FP8 for the token
 embedding, attention input/output projections, GDN Q/K/V/Z and output projections, output head, and
-remaining MLP weights. All four 27B artifacts retain the same Text, Vision, MTP, prefix-reuse, CLI,
-and serving routes.
+remaining MLP weights. All four upstream 27B artifacts retain the same Text, Vision, MTP,
+prefix-reuse, CLI, and serving routes.
+
+The `nvfp4-split` row is the split-storage Qwen3.8-27B NVFP4 export published by Ostfralla: the same
+checkpoint with separate GDN a/b control projections, BF16 early attention input projections and
+W8G32 vocabulary planes. Its tensor schema differs from the neroued `nvfp4` artifact, so it is
+accepted under its own registered identity; see
+[Tested Qwen3.8-27B NVFP4 NInfer artifacts](#tested-qwen38-27b-nvfp4-ninfer-artifacts) for what was
+verified on the two-GPU machine.
 
 ## Native Windows 11 TP2 on two GeForce GPUs
 
 This fork is an experiment answering one question: **is tensor-parallel inference practical on
-native Windows 11 with two consumer GeForce cards, where CUDA P2P is unavailable?**
+native Windows 11 with two consumer GeForce cards?**
 
 On the tested system (2 × RTX 5060 Ti 16 GB, WDDM, asymmetric PCIe — see
-[Hardware](#hardware-tested)), `cudaDeviceCanAccessPeer(0, 1) == 0`. The TP2 engine's fallback
+[Hardware](#hardware-tested-windows-tp2-results)), `cudaDeviceCanAccessPeer(0, 1) == 0` — CUDA
+peer access was not available between the two cards in this Windows 11 / WDDM configuration. That
+is a measured property of the tested machine and driver, not a general statement about Windows.
+The TP2 engine's fallback
 transport was a host-staged allreduce: each of the ~128 collectives per decode round walked a
 four-hop cross-device event chain plus driver-staged copy-engine transfers, at ~277 µs per 10 KiB
 reduction — regardless of the fact that the useful payload only needs ~3.3 µs of PCIe time. The
@@ -97,6 +117,49 @@ sensitivity, and the communication decomposition are in
 [benchmarks/windows-tp2-benchmarks.md](benchmarks/windows-tp2-benchmarks.md) and
 [docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md).
 
+### Transport architecture: staged allreduce → pinned-host peer mailbox
+
+Both transports compute the same thing — an exact BF16 elementwise sum of the two devices' partial
+activations after each row-parallel projection. They differ in how many times the request crosses
+the driver and the PCIe link.
+
+**Old path (base-fork staged allreduce, one collective):**
+
+```
+GPU0 ─cudaMemcpyAsync→ host staging ─cross-device event chain (4 hops)→ host staging ─copy→ GPU1
+GPU1 ─cudaMemcpyAsync→ host staging ─(same chain, second leg)───────────→ host staging ─copy→ GPU0
+        each device then reads the peer partial and reduces
+```
+
+Four WDDM submission round trips and four driver-staged copies per reduction, ~128 reductions per
+decode token. The useful payload needed ~3.3 µs of PCIe time; the choreography cost ~277 µs. Under
+WDDM each cross-device submission pays a fixed driver cost independent of size, and the event
+waits serialize the two devices' streams — the cards idle at 8–12% utilization waiting, not
+transferring and not computing.
+
+**Optimized path (this fork's peer mailbox, one collective):**
+
+```
+GPU0 ─store partial→ pinned WB host slot[0] ─flag→ poll peer flag ─read slot[1]─→ GPU0 reduces
+GPU1 ─store partial→ pinned WB host slot[1] ─flag→ poll peer flag ─read slot[0]─→ GPU1 reduces
+        both directions run concurrently inside the captured CUDA graph
+```
+
+One PCIe write, one flag round-trip, one PCIe read per device, all GPU-initiated from
+`peer_exchange_sum_kernel` — no events, no copy engine, no driver round trip inside the exchange.
+The mailbox operations are *captured into the decode CUDA graph* (slots are claimed once per call
+site at capture time, so every replay fires every slot exactly once; the host resets flags between
+replays and a bounded spin with an aggregate hang word prevents a silent deadlock inside WDDM's TDR
+window). This removes the fixed per-collective synchronization/staging overhead rather than
+accelerating the payload: a 40 KiB exchange costs the same transport floor (~17–19 µs) as a 10 KiB
+one, of which only ~13 µs is payload time at Gen3 ×4.
+
+Selection is conservative: the mailbox serves a collective only when `--tp 2` + CUDA graphs are
+active, the stream is capturing, and the payload fits one slot; everything else — eager execution,
+oversized payloads, `NINFER_TP2_MAILBOX=0` — takes the unchanged staged path. The full design,
+correctness argument (exact-sum check against the staged path, bit-identical repeated runs), and
+remaining bottlenecks are in [docs/windows-peer-mailbox.md](docs/windows-peer-mailbox.md).
+
 ### What was done
 
 - **Windows port of the TP2 code** (from [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows),
@@ -110,19 +173,117 @@ sensitivity, and the communication decomposition are in
 - **Correctness**: exact-BF16-sum comparison against the staged path (`mailbox_probe`), eager and
   CUDA-graph modes, bit-identical repeated runs across 512/1024/2048-token generations, zero graph
   failures, zero fallback events in the final long run.
+- **Vision on TP2** (new in this fork): the vision tower is bound twice, once per rank device, and
+  each rank encodes the image locally into its own vision context, publishing the embeddings through
+  the already-validated peer-mailbox publish path; the text TP2 prefill consumes them. The tp2
+  vision workspace is sized for one item capped at 2048 merged tokens, and the frontend clamps
+  `image_max_pixels`/`video_max_pixels` to that budget (2,097,152 px) so `smart_resize` downscales
+  oversized media instead of the request plan rejecting it; MTP + image prefill gathers rope
+  positions over the vision-merged axis; a request-scoped prefill failure now tears down only that
+  request's lane instead of killing the worker. See [Vision on TP2](#vision-on-tp2).
+- **Second Qwen3.8-27B NVFP4 artifact schema** (`nvfp4-split`, new in this fork): TP2 column-shard
+  siblings of the BF16 fused attention input projection kernels plus the registered identity, so the
+  split-storage Ostfralla export loads and serves on two GPUs. See
+  [Tested Qwen3.8-27B NVFP4 NInfer artifacts](#tested-qwen38-27b-nvfp4-ninfer-artifacts).
+
+### Vision on TP2
+
+Image input works under `--tp 2` in this fork — the base fork rejected `--tp 2 --vision` at startup
+because its vision encoder had no split path. What "vision on TP2" means here:
+
+- **Dual-replicated tower, per-rank encode** (architecture E of the phase-3A audit): each rank
+  materializes its own full copy of the vision weights (282 MiB per GPU) and encodes the image
+  locally with the unmodified tp1 vision code, so there is zero cross-GPU traffic during encode.
+  The resulting embeddings are published to the peer through the existing validated
+  `PeerMailbox` publish path and consumed by the text TP2 prefill — no CUDA P2P, no NCCL.
+- **Vision is prefill-only**: encode runs once per image prompt (measured 0.047–0.048 s per image)
+  and never enters the MTP decode loop or the captured decode graph; decode speed after an image
+  prompt is identical to the text-only TP2 path.
+- **Per-item pixel budget with automatic downscale**: at `--tp 2` the vision workspace is sized for
+  one item capped at 2048 merged tokens (2,097,152 px after `smart_resize`; one merged token = a
+  32 × 32 pixel block). The frontend clamps the preprocessor's `image_max_pixels` and
+  `video_max_pixels` to exactly that budget, so a 15.75 MP photo is downscaled before encoding
+  instead of being rejected by the plan-time envelope check; `--tp 1` keeps upstream behavior.
+- **MTP + image prompts work**: the tp2 draft stage gathers rope positions over the vision-merged
+  axis (mirroring the tp1 final-chunk stage), so `--spec mtp` with any image no longer crashes
+  mid-prefill with non-contiguous positions. Measured MTP acceptance on image prompts (server
+  smoke test, three image requests): 2.80–3.32 tokens/round (60–80%).
+- **A failed request no longer kills the worker**: a request-scoped prefill exception tears down
+  only that request's lane (abort/reset/complete-error) and serving continues; a sticky CUDA device
+  error still escalates to a full engine stop.
+
+Measured on 2 × RTX 5060 Ti 16 GB, Qwen3.8-27B NVFP4 (`nvfp4` artifact), single request, greedy,
+CUDA graphs on (`research/phase3a-vision-validation.md`):
+
+| Vision workload | Measured |
+|---|---:|
+| vision encode, per image (chart / natural photo) | 0.047–0.048 s |
+| text prefill including image embeddings | 806–824 tok/s over 457–468 prompt tokens |
+| time to first token, 468-token multimodal prompt | ~0.62 s |
+| decode after an image prompt (MTP0) | 35.65–35.73 tok/s (unchanged from text-only) |
+| text TP2 regression on the same tree | MTP0 35.83 / MTP3 66.68 / MTP4 68.86–68.87 tok/s |
+| per-GPU memory cost of vision | 282 MiB weights + ~0.5 GiB total incl. workspace/transient |
+
+Determinism: reruns with identical parameters produced bit-identical output (SHA-256 compared
+across runs). The published tp2 validation covers still-image prompts through both the CLI
+(`scripts/phase3a-vision-verify.cmd`) and the server (image requests with `--spec mtp`, small and
+auto-downscaled 15.75 MP images, with the engine serving follow-up text requests afterwards).
+Video passes through the same clamped preprocessor path but was not part of the published tp2
+validation. Vision remains mutually exclusive with `--rope yarn` (the encoder ropes 2-D image-grid
+positions through its own table), and `--spec dflash` remains text-only.
+
+Run an image prompt through the CLI on two GPUs:
+
+```bat
+build-windows\apps\ninfer.exe models\qwen3_8_27b_nvfp4.ninfer --tp 2 --devices 0,1 ^
+  --vision --greedy --max-new 128 ^
+  --messages examples\cli\messages\image_chart.json
+```
+
+The committed design and audit behind this path are in
+[research/phase3a-vision-architecture.md](research/phase3a-vision-architecture.md),
+[research/phase3a-vision-memory.md](research/phase3a-vision-memory.md),
+[research/phase3a-vision-tp2-design.md](research/phase3a-vision-tp2-design.md) and
+[research/phase3a-vision-validation.md](research/phase3a-vision-validation.md).
+
+### Tested Qwen3.8-27B NVFP4 NInfer artifacts
+
+Two published Qwen3.8-27B NVFP4 NInfer artifacts have been tested with this Windows TP2
+implementation on the 2 × RTX 5060 Ti 16 GB machine. No claim is made about other Qwen3.8
+artifacts; the engine accepts only the registered identities in the table above.
+
+| Artifact | Identity | Size | Tested with |
+|---|---|---:|---|
+| [neroued/Qwen3.8-27B-nvfp4-NInfer](https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer) | `qwen3.8-27b` / `nvfp4` | 21,492,695,040 bytes (20.02 GiB) | the primary artifact: every Windows-TP2 benchmark on this page, plus the full vision validation above |
+| [Ostfralla/Qwen3.8-27B-NVFP4-NInfer](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) | `qwen3.8-27b` / `nvfp4-split` | 18,324,067,840 bytes (17.07 GiB) | functional TP2 serving smoke test: loads both GPUs and serves at `--max-context 131072` with MTP3 (`--lm-head-draft`) |
+
+The Ostfralla export stores the same checkpoint with a different tensor layout (separate GDN a/b
+control projections, BF16 early attention input projections, W8G32 vocabulary planes). Because the
+engine selects the binding schema from the manifest identity — and the plain `nvfp4` identity is
+already taken by the neroued mixed FP8/NVFP4 layout — this fork registers that layout as
+`nvfp4-split` and adds the TP2 column-shard kernels it needs (the BF16 fused attention input
+projection at the halved shard geometry). The published Ostfralla file declares `nvfp4` in its
+manifest; loading it with this engine requires that identity field to read `nvfp4-split`. The
+tested copy differs from the published file only in those six manifest bytes — the weight payload
+is byte-identical (verified by comparing the manifest object tables and sampled payload ranges at
+identical offsets across the whole file, plus the file tail).
 
 ### Limitations
 
-- Tested on **one machine** (see [Hardware](#hardware-tested)); no claim of portability to other
-  GPUs, drivers, or PCIe topologies.
-- Consumer GeForce / WDDM specific behaviour: no CUDA P2P, and the mailbox is what makes the
-  fallback path cheap here. Linux/NCCL systems may behave completely differently; **no Linux
-  comparison is claimed**.
+- Tested on **one machine** (see [Hardware](#hardware-tested-windows-tp2-results)); no claim of
+  portability to other GPUs, drivers, or PCIe topologies.
+- Consumer GeForce / WDDM specific behaviour: no CUDA P2P on the tested configuration, and the
+  mailbox is what makes the fallback path cheap here. Linux/NCCL systems may behave completely
+  differently; **no Linux comparison is claimed**.
 - The mailbox installs whenever `--tp 2` and CUDA graphs are enabled, regardless of whether P2P
   works on the host — on P2P-capable systems (e.g. the 2 × RTX 5090 the base fork targets) the
   direct path may be preferable and `NINFER_TP2_MAILBOX=0` restores the staged transport.
 - MTP performance depends on draft acceptance rate; long-generation tok/s differs from
   512-token benchmarks.
+- Vision at `--tp 2` is sized for one media item per request capped at 2048 merged tokens
+  (2,097,152 px); larger media is downscaled to that budget, and an item that still exceeds the
+  envelope after preprocessing is rejected at request-plan time with a clear error. YaRN remains
+  mutually exclusive with `--vision` at any `--tp`.
 - Remaining bottleneck after the mailbox is synchronization/lockstep waiting plus memory-bound
   GEMM (~60% of a round), not useful PCIe bandwidth — the 40 KiB exchanges sit at the ~17–19 µs
   transport floor while only ~13 µs is payload time.
@@ -318,9 +479,15 @@ hf download neroued/Qwen3.8-27B-nvfp4-NInfer \
 hf download neroued/Qwen3.6-35B-A3B-NInfer \
   qwen3_6_35b_a3b.ninfer \
   --local-dir models
+
+# Or the split-storage Qwen3.8-27B NVFP4 export (Windows-TP2 fork; see
+# "Tested Qwen3.8-27B NVFP4 NInfer artifacts" for the identity relabel it needs):
+hf download Ostfralla/Qwen3.8-27B-NVFP4-NInfer \
+  qwen3_8_27b_nvfp4.ninfer \
+  --local-dir models
 ```
 
-Current NInfer builds accept only the version-2 artifact container, and all five downloads above
+Current NInfer builds accept only the version-2 artifact container, and all six downloads above
 are version 2. Migration applies only to Qwen3.6 artifacts downloaded before their version-2
 publication; both Qwen3.8-27B profiles were published directly as version 2. Migrate an older exact
 local file in place:
@@ -449,7 +616,8 @@ entirely inside the reasoning stream:
 - `--max-concurrency 1` is arithmetic, not policy, at 1M -- one sequence costs 16.66 GiB per device
   without MTP and 17.69 GiB with it, so a second slot cannot fit on a 32 GiB card.
 - MTP speculative decoding (`--spec mtp --draft-tokens 1..5`, optionally `--lm-head-draft`) works
-  at `--tp 2` including at 1M. `--spec dflash` and `--vision` are rejected at `--tp 2`.
+  at `--tp 2` including at 1M. In this fork `--vision` also works at `--tp 2` (see
+  [Vision on TP2](#vision-on-tp2)); `--spec dflash` is rejected at `--tp 2`.
 
 See the [CLI guide](docs/cli.md) and [HTTP serving](docs/serving.md) for the full option contract.
 
@@ -631,9 +799,10 @@ when the resource is not present.
 
 ### Limitations
 
-- **Vision is `--tp 1` only.** The Vision encoder runs on the primary device against replicated
-  weights and has no split path, so `--tp 2 --vision` is rejected at startup. YaRN is likewise
-  rejected together with `--vision`, because the encoder ropes 2-D image-grid positions.
+- **Vision works at `--tp 2` in this fork** (see [Vision on TP2](#vision-on-tp2)): the base fork
+  ran the Vision encoder on the primary device only and rejected `--tp 2 --vision` at startup;
+  this fork dual-replicates the tower and encodes per rank. YaRN is still rejected together with
+  `--vision`, because the encoder ropes 2-D image-grid positions.
 - **DFlash is unchanged and is rejected at `--tp 2`.** It remains a 35B-A3B text-only backend, and
   that target has no tensor-parallel path at all.
 - **No NVLink, and no peer-to-peer on GeForce.** `cudaDeviceCanAccessPeer` reports 0 between two
@@ -709,12 +878,16 @@ All three registered model IDs support:
   usage accounting;
 - prompt-rendered function tools and parsed tool calls.
 
+At `--tp 2` the Windows-TP2 fork's published validation covers image prompts (see
+[Vision on TP2](#vision-on-tp2)); the multimodal list above is the upstream `--tp 1` contract,
+where the 32,768 merged-token envelope applies instead of the tp2 per-item budget.
+
 The 35B-A3B target additionally supports text-only DFlash speculative decoding with draft windows
 from one to fifteen.
 
 ## Current limits
 
-- Only the five `(model_id, weights_id)` artifact identities listed above are accepted product
+- Only the six `(model_id, weights_id)` artifact identities listed above are accepted product
   identities.
 - Execution is specialized for the RTX 5090. One CUDA device is the default; the 27B execution
   package also runs on exactly two with `--tp 2 --devices A,B`, which is a capacity feature rather
@@ -749,6 +922,10 @@ from one to fifteen.
 
 - [Windows peer mailbox transport (technical writeup)](docs/windows-peer-mailbox.md)
 - [Benchmark results and methodology (this fork)](benchmarks/windows-tp2-benchmarks.md)
+- [Vision-on-TP2 phase 3A research notes](research/phase3a-vision-architecture.md) — architecture
+  audit, [memory map](research/phase3a-vision-memory.md),
+  [TP2 design](research/phase3a-vision-tp2-design.md),
+  [validation record](research/phase3a-vision-validation.md)
 - [Provenance and attribution audit](docs/PROVENANCE.md)
 - [Windows build notes (Russian)](docs/windows-tp2.md)
 
@@ -764,7 +941,17 @@ from one to fifteen.
 | Motherboard | MSI PRO Z690-A |
 | Driver | 581.57 (WDDM) |
 | Toolchain | MSVC 14.44 (VS 2022), CMake 4.0.2, Ninja, CUDA 13.1.80, vcpkg manifest deps |
-| CUDA P2P | `cudaDeviceCanAccessPeer(0,1) == 0` (GeForce/WDDM) |
+| CUDA P2P | `cudaDeviceCanAccessPeer(0,1) == 0` (this machine/driver, GeForce/WDDM) |
+
+The topology is unfavorable for tensor parallelism — one card on the CPU-attached slot, the second
+behind the chipset at Gen3 ×4 — and CUDA peer access was not available between the cards under this
+Windows 11 / WDDM driver. The measured result of the transport investigation is that for the small,
+latency-critical TP2 messages of this engine the dominant cost was the staged protocol's fixed
+synchronization overhead, not raw PCIe payload bandwidth, so useful TP2 decode throughput was still
+reached after replacing the protocol (see
+[benchmarks/windows-tp2-benchmarks.md](benchmarks/windows-tp2-benchmarks.md) §Communication
+microbenchmarks). That conclusion is specific to this engine's message sizes and this machine; it is
+not a claim that PCIe bandwidth is irrelevant in general.
 
 ## Building (native Windows)
 
@@ -774,8 +961,8 @@ with a shared-memory overflow — see [docs/windows-tp2.md](docs/windows-tp2.md)
 checkout for the FFmpeg/libcurl/zlib manifest dependencies.
 
 ```bat
-git clone --branch windows-tp2 <this-repo>
-cd ninfer
+git clone --branch windows-tp2 https://github.com/ivanov84/ninfer-windows-tp2
+cd ninfer-windows-tp2
 git clone https://github.com/microsoft/vcpkg third_party\vcpkg
 cmd /c scripts\build-windows.cmd all
 :: or, with a non-PATH CUDA:
@@ -796,9 +983,11 @@ build-windows\apps\ninfer.exe models\qwen3_8_27b_nvfp4.ninfer --tp 2 --devices 0
 ```
 
 `--tp 2 --devices 0,1` splits the model across both cards; `--spec mtp --draft-tokens N` selects
-MTP speculative decoding; `NINFER_TP2_MAILBOX=0` in the environment forces the staged transport
-(A/B testing). Diagnostics: `tools/tp2/mailbox_probe.cu` (mailbox vs staged, exact-sum check),
-`tools/tp2/reduce_bench.cu` (per-collective latency), `tools/tp2/graph_launch_probe.cu`.
+MTP speculative decoding; add `--vision` and a `--messages` multimodal JSON file (see
+[Vision on TP2](#vision-on-tp2)) for image prompts; `NINFER_TP2_MAILBOX=0` in the environment
+forces the staged transport (A/B testing). Diagnostics: `tools/tp2/mailbox_probe.cu` (mailbox vs
+staged, exact-sum check), `tools/tp2/reduce_bench.cu` (per-collective latency),
+`tools/tp2/graph_launch_probe.cu`.
 
 ## Benchmark methodology
 
@@ -822,14 +1011,20 @@ Raw per-run data: [benchmarks/windows-tp2-final.csv](benchmarks/windows-tp2-fina
 
 This fork stands on three layers of prior work, none of which it claims ownership of:
 
-- [Neroued/ninfer](https://github.com/Neroued/ninfer) — the engine itself (upstream, Apache-2.0);
+- [Neroued/ninfer](https://github.com/Neroued/ninfer) — the engine itself, including the Vision
+  tower, MTP speculative decoding and serving routes (upstream, Apache-2.0);
 - [wamansou/ninfer-tp2-1m](https://github.com/wamansou/ninfer-tp2-1m) (Wael Mansour) — the TP2 +
-  YaRN fork this branch builds on (base commit `6a355d5`);
+  YaRN fork this branch builds on: the `--tp 2` execution, the staged event-ordered allreduce that
+  this fork optimizes, the cross-device CUDA graph bridge, and YaRN 1M-context scaling
+  (base commit `6a355d5`);
 - [natpate/ninfer-windows](https://github.com/natpate/ninfer-windows) — the native Windows port
   whose compatibility layer was cherry-picked into this branch.
 
-The peer-mailbox transport itself is the work of this fork. The full audit — which files came
-from where, what was inspiration only, and what is external benchmark reference — is
+The work of this fork (the Windows-TP2 layer): the native Windows 11 TP2 bring-up and benchmark
+campaigns, the peer-mailbox transport, vision-on-TP2 (dual-replicated tower, per-rank encode,
+per-item pixel budget, MTP + image prefill fix, request-lane failure isolation), and the
+`nvfp4-split` artifact support for the Ostfralla Qwen3.8-27B NVFP4 export. The full audit — which
+files came from where, what was inspiration only, and what is external benchmark reference — is
 [docs/PROVENANCE.md](docs/PROVENANCE.md); the Apache-2.0 §4(b) attribution lives in
 [NOTICE](NOTICE).
 

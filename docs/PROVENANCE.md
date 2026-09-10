@@ -11,7 +11,8 @@ it records the license position of each source. It is the authoritative attribut
 ```
 Neroued/ninfer                (upstream engine, Apache-2.0, master @ 863aa8a*)
    └── wamansou/ninfer-tp2-1m (TP2 + YaRN 1M fork, feaf4dd + 6a355d5)
-          └── THIS FORK       (windows-tp2 branch: 6a355d5 + c0a64bb + docs)
+          └── THIS FORK       (windows-tp2 branch: 6a355d5 + c0a64bb + docs
+                               + vision-TP2 / nvfp4-split layer e67bac9..7b0852f)
                    │
                    └── cherry-picks from natpate/ninfer-windows
                        (native Windows port, itself a fork of Neroued/ninfer)
@@ -83,6 +84,30 @@ layer — a third-hand origin we do not independently verify; the two-hop chain
 Not copied from any external repository; no public implementation of this transport was
 referenced.
 
+### 4b. Vision-on-TP2 and the split-storage artifact profile — **original work of this fork**
+(`e67bac9`, `2c65596`, `bb90399`, `7f96fb2`, `7b0852f`)
+
+- **Vision at `--tp 2`**: the base fork rejected `--tp 2 --vision` at startup. This layer
+  dual-binds the vision tower per rank (`bindings.cpp` — every `vision/` object on a Replicated
+  placement, ~282 MiB per GPU), runs the unmodified tp1 vision encode on each rank, publishes the
+  embeddings to the peer through the existing PeerMailbox publish path, and consumes them in the
+  text TP2 prefill (`layouts_impl.h`, `text_context_impl.h`); it sizes the tp2 vision workspace
+  for one item capped at 2048 merged tokens and clamps the frontend preprocessor budgets so
+  `smart_resize` downscales oversized media (`prepared_prompt.h`, `frontend.cpp`), fixes the MTP
+  draft-stage rope-position gather over the vision-merged axis, and isolates request-scoped
+  prefill failures to the failing lane (`concurrent_executor.h`). Design/audit record:
+  `research/phase3a-vision-{architecture,memory,tp2-design,validation}.md`; verification harness:
+  `scripts/phase3a-vision-verify.cmd`.
+- **`qwen3.8-27b / nvfp4-split` artifact identity** (`package.cpp`, plus BF16 column-shard
+  siblings of the fused attention input projection kernels): the split-storage Qwen3.8-27B NVFP4
+  export published by Ostfralla (separate GDN a/b projections, BF16 early attention input
+  projections, W8G32 vocabulary planes) needs a binding distinct from the neroued mixed
+  FP8/NVFP4 `nvfp4` schema already registered upstream, so the schema is registered under its own
+  identity. The tested artifact file is the published Ostfralla file with the six manifest bytes
+  of the identity string relabeled; the weight payload is byte-identical (manifest object tables
+  compared, payload ranges sampled at identical absolute offsets across the whole file, plus the
+  file tail).
+
 ### 5. Inspiration only — **no code reused**
 
 - `syv-ai/qwen38-27b-rtx3090` — a single-RTX-3090 vLLM serving recipe for the same model family
@@ -111,6 +136,11 @@ referenced.
 | `6a355d5` | Wael Mansour | TP2 + YaRN 1M fork (branch parent of this work) |
 | `c0a64bb` | Dmitriy Ivanov | Windows port (cherry-picked from natpate, attributed above) + original peer-mailbox transport + diagnostics |
 | (this branch, docs commit) | Dmitriy Ivanov | README/docs/benchmarks/NOTICE/provenance + local-path cleanup |
+| `e67bac9` | Dmitriy Ivanov | vision at `--tp 2`: dual-replicated tower + per-rank encode (phase 3A) |
+| `2c65596` | Dmitriy Ivanov | Windows test infra (LF-pinned fixtures, cudart flavor for tp2 tests) |
+| `bb90399` | Dmitriy Ivanov | BF16 TP2 column-shard attention input kernels + `qwen3.8-27b/nvfp4-split` profile |
+| `7f96fb2` | Dmitriy Ivanov | BF16 wrapper split-path fix; verified Ostfralla `nvfp4-split` loads and serves at ctx 131072 |
+| `7b0852f` | Dmitriy Ivanov | vision TP2 fixes (release r4): pixel-budget clamp/downscale, MTP+vision rope fix, request-lane failure recovery |
 
 The `c0a64bb` commit message itself credits the Windows layer to natpate's fork; the per-file
 mapping above supersedes the squash in precision.

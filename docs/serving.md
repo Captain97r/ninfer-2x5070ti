@@ -39,9 +39,10 @@ server must accept image or video input. Speculative residency is likewise froze
 cannot be combined with `--vision`. A later request cannot enable a capability omitted at startup.
 
 `--tp 2` splits one model across two GPUs and requires an explicit `--devices A,B` naming one
-distinct device per rank. It supports `--spec mtp` (with `--draft-tokens` and `--lm-head-draft`);
-it does not support `--spec dflash` or `--vision`, and both are rejected at startup with a message
-naming the unsupported feature.
+distinct device per rank. It supports `--spec mtp` (with `--draft-tokens` and `--lm-head-draft`)
+and, in the Windows-TP2 fork, `--vision` (one media item capped at 2048 merged tokens per request,
+auto-downscaled — see the fork README's "Vision on TP2"); it does not support `--spec dflash`,
+which is rejected at startup with a message naming the unsupported feature.
 
 ```bash
 ./build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
@@ -194,8 +195,11 @@ OpenAI image and video sources may be HTTP(S) URLs or base64 data URLs.
 Text and media requests use one complete-prompt context contract. After chat-template rendering and
 media-token expansion, the result must fit Engine `--max-context`. The current Vision runtime also
 has a 32,768 merged-token envelope (131,072 raw patches); the effective Vision limit is therefore
-`min(--max-context, 32768)`. There is no fixed image/video item-count limit: item count is admitted
-through aggregate source-byte, decoded-pixel, raw-patch, Vision-token, and live-memory budgets.
+`min(--max-context, 32768)`. At `--tp 2` the Windows-TP2 fork additionally sizes the vision
+workspace for one media item capped at 2048 merged tokens and clamps the preprocessor pixel budgets
+to that item (2,097,152 px, auto-downscale). There is no fixed image/video item-count limit: item
+count is admitted through aggregate source-byte, decoded-pixel, raw-patch, Vision-token, and
+live-memory budgets.
 
 Media cache misses run as independent decode → resize → BF16-pack tasks on a bounded host worker
 pool. Prepared payloads are keyed by SHA-256 of the acquired bytes plus modality, so repeated media

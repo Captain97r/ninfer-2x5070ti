@@ -60,6 +60,14 @@ The modifications add, in summary:
   * a pinned-host-memory peer mailbox transport (ops::PeerMailbox,
     peer_exchange_sum_kernel) for the small captured TP2 collectives, with the
     staged event-ordered path retained as the automatic fallback
+  * vision support at --tp 2: the vision tower bound and materialized per rank
+    (dual-replicated, 282 MiB per GPU), per-rank vision encode feeding the text
+    TP2 prefill, a per-item pixel budget (2048 merged tokens / 2,097,152 px)
+    with automatic smart_resize downscale, the MTP+vision rope-position fix in
+    the tp2 draft stage, and per-request prefill-failure lane recovery
+  * a second registered Qwen3.8-27B NVFP4 artifact identity (nvfp4-split) with
+    TP2 column-shard siblings of the BF16 fused attention input projection
+    kernels, so the split-storage Ostfralla export loads on two GPUs
   * MTP-related cleanup, build fixes, and the tp2 diagnostic set
     (mailbox_probe, reduce_bench, graph_launch_probe, profile analysis scripts)
   * documentation and benchmark records of the Windows-TP2 results
@@ -78,7 +86,9 @@ Model artifacts
 ---------------
 The published artifacts are derived from Qwen/Qwen3.6-27B, Qwen/Qwen3.8-27B and
 Qwen/Qwen3.6-35B-A3B, and from the packed-weight repackagings named in the
-README's License section. Those source repositories are distributed under the
+README's License section; the additional split-storage Qwen3.8-27B NVFP4 export
+tested by this fork (published by Ostfralla) is a repackaging of the same
+Qwen/Qwen3.8-27B checkpoint. Those source repositories are distributed under the
 Apache License, Version 2.0.
 
 Vendored dependencies retain their own license files under third_party/.
