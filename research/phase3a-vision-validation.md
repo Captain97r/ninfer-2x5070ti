@@ -104,7 +104,36 @@ no leak across the twelve full load/encode/prefill/decode cycles of this session
 - The tp2 vision envelope caps merged items at 2048 (documented in the design doc);
   oversized video prompts are rejected loudly at plan time.
 
-## 7. Reproduction
+## 7. Media pixel and vision-token budgets (measured limits)
+
+Every attached image passes three budget layers (per-item), then a request-wide token budget:
+
+| layer | image | video | over-budget behavior | source |
+|---|---|---|---|---|
+| decode (per item) | 64 Mp decoded | 128 Mp decoded | hard error "decoded media pixels exceed processor limit" | `media/decode/decode.h` policy defaults |
+| encoded bytes (per prompt) | 256 MiB aggregate (`kMaximumPromptMediaBytes`) | same | hard error "request media bytes exceed processor budget" | `include/ninfer/types.h` |
+| smart_resize (per item, artifact) | min 65,536 px / max 16,777,216 px | min 4,096 px / max 25,165,824 px (frames*h*w) | **auto downscale** (or upscale below min) | `preprocessor_config.json` size.shortest/longest_edge in the artifact |
+| tp2 clamp (per item, tp>1 only) | max 2,097,152 px (= 2048 merged tokens x 32x32 px) | same | **auto downscale** before the plan ever sees it | `frontend.cpp` vs `kTp2ItemMergedPixels` |
+| vision tokens (per request) | `min(max_context, 32,768)` merged tokens total across all items | same | hard error "vision tokens exceed processor budget" | `frontend.cpp`, `kMaximumVisionTokens` |
+| tp2 workspace (per item) | 2048 merged tokens | same | hard error "vision item exceeds the Program workspace envelope" (unreachable when the clamp is active) | `layouts_impl.h`, `request_plan_impl.h` |
+| aspect ratio | max 200:1 | max 200:1 | hard error | `smart_resize_*` |
+
+Plus: attached items count is capped by `min(max_raw_patches/4, max_vision_tokens)` minimum-grid
+extents, and image geometry rounds to multiples of 32 px (patch 16 x merge 2).
+
+**Empirical confirmation (12 Mp image, `--tp 2 --max-context 8192`)**: a 4000x3000 PNG is
+silently downscaled by the tp2 clamp to ~2 Mp, producing a 2057-token prompt (2048 vision +
+9 text) - 0.467 s vision encode, correct answer. The same image at the default
+`--max-context 2048` is rejected with "prepared prompt has 2057 tokens, exceeding Engine
+max_context 2048" - the pixel path accepted it, the CONTEXT budget did not. At tp1 the same
+image would stay 12 Mp -> ~11.7k vision tokens (no tp2 clamp; the artifact's own 16.7 Mp
+max-pixel budget applies) and needs a proportionally larger `--max-context`.
+
+Practical guidance: at tp2 each image costs at most 2048 context tokens (2 Mp) and the whole
+request's vision tokens are capped by `--max-context`; at tp1 a large image can consume up to
+`min(max_context, 32768)` tokens.
+
+## 8. Reproduction
 
 ```
 build-windows-131\apps\ninfer.exe Qwen3.8-27b-nvfp4.ninfer --tp 2 --devices 0,1 ^
