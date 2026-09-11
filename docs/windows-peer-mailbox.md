@@ -13,7 +13,7 @@ sqlite traces summarized in the phase-2C report) and are specific to one machine
 |---|---|
 | OS / driver | Windows 11 x64, WDDM, driver 581.57 |
 | GPUs | 2 × RTX 5060 Ti 16 GB (`sm_120a`) |
-| GPU0 | CPU-attached slot, PCIe 5.0 ×16 max (runs ×8 under load; M.2 shares the CPU lanes) |
+| GPU0 | CPU-attached slot, PCIe 5.0 ×8 (the RTX 5060 Ti is an ×8 card — ×8 is its full link width, not a degraded ×16) |
 | GPU1 | Z690 chipset, PCIe 3.0 ×4 (~3.16 GiB/s staging bandwidth, measured) |
 | CUDA P2P | `cudaDeviceCanAccessPeer(0,1) == 0` |
 

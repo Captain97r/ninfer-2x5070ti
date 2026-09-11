@@ -9,8 +9,8 @@ the methodology common to every run is in the README's Benchmark methodology sec
 ## Machine
 
 2 × RTX 5060 Ti 16 GB (`sm_120a`) · Windows 11 x64 native (WDDM, driver 581.57) ·
-MSI PRO Z690-A · i3-12100F · 64 GB RAM · GPU0 on a CPU-attached slot (PCIe 5.0 ×16 max, ×8 under
-load), GPU1 on the chipset (PCIe 3.0 ×4) · `cudaDeviceCanAccessPeer(0,1) == 0`.
+MSI PRO Z690-A · i3-12100F · 64 GB RAM · GPU0 on a CPU-attached slot (PCIe 5.0 ×8 — the RTX 5060
+Ti is an ×8 card), GPU1 on the chipset (PCIe 3.0 ×4) · `cudaDeviceCanAccessPeer(0,1) == 0`.
 
 Model: `qwen3_8_27b_nvfp4.ninfer` (Qwen3.8-27B NVFP4, SHA-256 verified against the published
 artifact). Single request, greedy (temperature 0), `--no-thinking`, `--ignore-eos`,

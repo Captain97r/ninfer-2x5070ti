@@ -935,7 +935,7 @@ from one to fifteen.
 |---|---|
 | OS | Windows 11 x64, native (no WSL2/VM/Docker) |
 | GPUs | 2 × NVIDIA GeForce RTX 5060 Ti 16 GB (`sm_120a`), same VBIOS |
-| GPU0 slot | CPU-attached (Z690 PEG), PCIe 5.0 ×16 max — degrades to ×8 under load when an M.2 slot shares the CPU lanes |
+| GPU0 slot | CPU-attached (Z690 PEG), PCIe 5.0 ×8 (the RTX 5060 Ti is an ×8 card — ×8 is its full link width, not a degraded ×16) |
 | GPU1 slot | Z690 chipset, PCIe 3.0 ×4 (~3.16 GiB/s measured staging bandwidth) |
 | CPU / RAM | Intel Core i3-12100F / 64 GB |
 | Motherboard | MSI PRO Z690-A |
