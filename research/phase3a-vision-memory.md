@@ -47,11 +47,14 @@ the envelope at request-plan time (request_plan_impl.h:146-148,
 IMAGE at 48x48 = 576 merged tokens (37.21 MiB workspace). Only extreme videos approach the
 uncapped envelope.
 
-**Policy: at tp == 2 cap the frozen single-item envelope at 2048 merged tokens**
-(8192 patches): workspace 132.31 MiB + output 20 MiB per GPU. Images always fit (max
-576); videos up to ~7 frame-pairs at 48x48 (or many more at lower resolution, e.g. 24x24
--> 46 frame-pairs). Anything larger is rejected loudly at plan time by the existing check.
-tp1 keeps `min(capacity, 32768)` unchanged — no upstream behavior change.
+**Policy: at tp == 2 cap the frozen single-item envelope at 16,384 merged tokens** (the
+artifact's own 16,777,216-px image budget; raised from the initial 2048 cap after VRAM was
+re-measured on the 16 GB boards — see phase3a-vision-validation.md): workspace 1058.50 MiB +
+output 160.00 MiB per GPU at full 32k capacity (529.25 MiB + 80 MiB at 8k, all
+capacity-scaled by `min(max_context, 16'384)`). Images always fit; videos up to the same
+merged budget at the artifact's video pixel limits. Anything larger is rejected loudly at
+plan time by the existing check. tp1 keeps `min(capacity, 32768)` unchanged — no upstream
+behavior change.
 
 ## 2. Feasibility table with the tp2 envelope cap (architecture E)
 
@@ -60,7 +63,7 @@ text-only workspace + output transient):
 
 | Context | vision weights | vision workspace (capped) | output transient | total extra/GPU | GPU0 est. reserved | GPU0 est. free |
 |---:|---:|---:|---:|---:|---:|---:|
-| 8k | 282 MiB | max(183, 132) = 183 MiB (unchanged) | 80 MiB (cap: min(2048,cap)=2048 -> 20 MiB) | ~0.44-0.50 GiB | ~11.9 GiB | ~2.5 GiB |
+| 8k | 282 MiB | max(183, 529) = 529 MiB | 80 MiB (cap: min(16384,cap)=8192 -> 80 MiB) | ~0.8 GiB | ~11.4 GiB | ~3.15 GiB (measured) |
 | 32k | 282 MiB | 183 MiB (unchanged) | 20 MiB | ~0.50 GiB | ~11.9 GiB | ~2.5 GiB |
 | 64k | 282 MiB | 183 MiB | 20 MiB | ~0.50 GiB | 11.9 + 4 GiB int8 KV = 15.9 | ~0 (bf16 impossible either way; int8 borderline) |
 | 100k | 282 MiB | 183 MiB | 20 MiB | ~0.50 GiB | not feasible at any dtype (8 GiB int8 KV) | - |
@@ -86,7 +89,7 @@ peak 2 x ~50 MiB active but on separate devices.
 ## 4. Decision
 
 **Recommended architecture: E — dual-replicated Vision with per-rank independent encode,
-plus a tp2-only single-item envelope cap of 2048 merged tokens.**
+plus a tp2-only single-item envelope cap of 16,384 merged tokens.**
 
 - Both GPUs hold the full 282.01 MiB vision tower and run the SAME item encode
   independently — bit-identical inputs, bit-identical kernels, bit-identical outputs,

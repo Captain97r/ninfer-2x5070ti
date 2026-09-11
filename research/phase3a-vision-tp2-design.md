@@ -36,7 +36,7 @@ tp2 text machinery that consumes the embeddings afterwards.
 | VisionContext (weights view + workspace) | existing | NEW instance |
 | request transient (output [5120, merged]) | existing RequestMemory | NEW peer RequestMemory on execution.dev[1] |
 | patch payload upload [P,1536] BF16 | per-item upload | per-item upload (same host source) |
-| vision workspace envelope | capped 2048-merged (tp2) | same |
+| vision workspace envelope | capped 16,384-merged (tp2, raised from 2048 after VRAM re-measurement) | same |
 | scatter into text x[r] | ops::scatter, rank 0 stream | ops::scatter, rank 1 stream |
 | MTP stem visual overlap | scatter into rank 0 embedding root | none (rank 1 consumes hidden, not embeddings) |
 
@@ -56,7 +56,7 @@ same weights bytes — outputs are bit-identical by construction; verified in 3A
    - layouts_impl.h `validate_target_options`: same removal.
    - CLI/serve help text + types.h comment updates.
 3. **Workspace envelope policy** (layouts_impl.h build_workspace_plan)
-   - tp2: `merged = min(capacity, kTp2VisionItemMergedLimit=2048)`; tp1 unchanged.
+   - tp2: `merged = min(capacity, kTp2VisionItemMergedLimit)` (16,384 since the 16 GB re-measurement); tp1 unchanged.
    - Existing request-plan check rejects oversized items loudly (unchanged).
 4. **Request memory for rank 1**
    - `Qwen3_6_27BInstance` gains `request_memory_peer` bound to `execution.dev[1]`
@@ -92,7 +92,7 @@ same weights bytes — outputs are bit-identical by construction; verified in 3A
   one 16 GB GPU, so the tp1 comparison is component-level (Level 1) + determinism +
   qualitative grounding checks.
 - **Level 3**: small/medium/large images, aspect ratios, multi-image prompt, image+video
-  mix rejected gracefully (video over the 2048-merged cap -> loud plan-time error).
+  mix rejected gracefully (video over the 16,384-merged cap -> loud plan-time error).
 
 ## 5. Validation of the text path (3A-5/3A-6)
 

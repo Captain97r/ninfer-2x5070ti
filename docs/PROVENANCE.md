@@ -92,7 +92,7 @@ referenced.
   placement, ~282 MiB per GPU), runs the unmodified tp1 vision encode on each rank, publishes the
   embeddings to the peer through the existing PeerMailbox publish path, and consumes them in the
   text TP2 prefill (`layouts_impl.h`, `text_context_impl.h`); it sizes the tp2 vision workspace
-  for one item capped at 2048 merged tokens and clamps the frontend preprocessor budgets so
+  for one item capped at 16,384 merged tokens and clamps the frontend preprocessor budgets so
   `smart_resize` downscales oversized media (`prepared_prompt.h`, `frontend.cpp`), fixes the MTP
   draft-stage rope-position gather over the vision-merged axis, and isolates request-scoped
   prefill failures to the failing lane (`concurrent_executor.h`). Design/audit record:

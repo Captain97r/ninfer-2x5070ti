@@ -598,14 +598,15 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     if (plan.features.vision) {
         constexpr std::uint32_t kFrontendMergedLimit  = 32768;
         constexpr std::uint32_t kFrontendSegmentLimit = 768 / 2;
-        // tp2 single-item envelope cap. The vision workspace is sized for ONE item (the request
-        // plan rejects any item larger than the envelope at request time), and the uncapped
-        // min(capacity, 32768) envelope reserves 2117 MiB + 320 MiB of transient PER GPU -- which
-        // does not coexist with a 10.08 GiB text shard + KV on 16 GB boards. A 2048-merged
-        // (8192-patch) item is 2,097,152 px after smart_resize; the frontend clamps the
-        // preprocessor budget to exactly that (kTp2ItemMergedPixels), so properly preprocessed
-        // media never reaches the plan-time rejection below. Measured cost 132.31 MiB + 20.00 MiB
-        // per GPU. tp1 keeps the uncapped envelope: no upstream behavior change.
+        // tp2 single-item envelope cap: the full artifact image budget (16,777,216 px =
+        // 16,384 merged tokens; prepared_prompt.h kTp2ItemMergedLimit). The vision workspace is
+        // sized for ONE item (the request plan rejects any item larger than the envelope at
+        // request time). At capacity 8k the merged cap stays min(capacity, 16384) = 8192, and
+        // the full 16,384-token envelope costs 1058.50 MiB frozen workspace + 160.00 MiB request
+        // transient PER GPU (tools/tp2/vision_ws_probe.cpp), which still leaves ~2.9 GiB free
+        // beside the 10.08 GiB text shard + KV on 16 GB boards. The frontend clamps the
+        // preprocessor budget to exactly kTp2ItemMergedPixels, so properly preprocessed media
+        // never reaches the plan-time rejection below. tp1 keeps the uncapped envelope.
         const std::uint32_t merged =
             plan.tp > 1 ? std::min<std::uint32_t>(plan.capacity, kTp2ItemMergedLimit)
                         : std::min(plan.capacity, kFrontendMergedLimit);
@@ -741,7 +742,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         // Same tp2 single-item cap as build_workspace_plan: the request transient holds ONE
         // item's [5120, merged] output, and the per-rank budget must track the envelope the
         // request plan will admit items against.
-        constexpr std::uint32_t kTp2ItemMergedLimit = 2048;
+        constexpr std::uint32_t kTp2ItemMergedLimit = 16'384;
         const std::uint32_t merged =
             impl->tp > 1 ? std::min(impl->capacity, kTp2ItemMergedLimit)
                         : std::min(impl->capacity, static_cast<std::uint32_t>(32768));

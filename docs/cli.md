@@ -208,7 +208,7 @@ device used at the default `--tp 1`; when both are given they must agree on the 
 Tensor-parallel execution is implemented for the 27B execution package (`qwen3.6-27b` and
 `qwen3.8-27b`, either weight profile). `qwen3.6-35b-a3b` has no tensor-parallel path and rejects
 `--tp 2` at startup, as does `--spec dflash`. In the Windows-TP2 fork `--vision` works at `--tp 2`
-(dual-replicated tower, per-rank encode, one media item capped at 2048 merged tokens per request —
+(dual-replicated tower, per-rank encode, one media item capped at 16,384 merged tokens (the artifact full 16.7 MP budget) per request —
 see the fork README's "Vision on TP2"); upstream rejected `--tp 2 --vision` at startup. `--spec mtp`
 is supported at `--tp 2`,
 with one behavioral difference: compatible-prefix reuse is downgraded to a full prefill, because

@@ -40,7 +40,7 @@ cannot be combined with `--vision`. A later request cannot enable a capability o
 
 `--tp 2` splits one model across two GPUs and requires an explicit `--devices A,B` naming one
 distinct device per rank. It supports `--spec mtp` (with `--draft-tokens` and `--lm-head-draft`)
-and, in the Windows-TP2 fork, `--vision` (one media item capped at 2048 merged tokens per request,
+and, in the Windows-TP2 fork, `--vision` (one media item capped at 16,384 merged tokens (the artifact full 16.7 MP budget) per request,
 auto-downscaled — see the fork README's "Vision on TP2"); it does not support `--spec dflash`,
 which is rejected at startup with a message naming the unsupported feature.
 
@@ -196,7 +196,7 @@ Text and media requests use one complete-prompt context contract. After chat-tem
 media-token expansion, the result must fit Engine `--max-context`. The current Vision runtime also
 has a 32,768 merged-token envelope (131,072 raw patches); the effective Vision limit is therefore
 `min(--max-context, 32768)`. At `--tp 2` the Windows-TP2 fork additionally sizes the vision
-workspace for one media item capped at 2048 merged tokens and clamps the preprocessor pixel budgets
+workspace for one media item capped at 16,384 merged tokens and clamps the preprocessor pixel budgets
 to that item (2,097,152 px, auto-downscale). There is no fixed image/video item-count limit: item
 count is admitted through aggregate source-byte, decoded-pixel, raw-patch, Vision-token, and
 live-memory budgets.
