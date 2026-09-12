@@ -639,16 +639,34 @@ public:
         if (options.max_context == 0) {
             throw std::invalid_argument("frontend max_context must be nonzero");
         }
-        // tp>1 runs the vision workspace envelope capped at one kTp2ItemMergedLimit item per
-        // request (the runtime layout plan sizes vision for exactly ONE item). Clamp the
-        // artifact's preprocessor budgets to that envelope so smart_resize downscales oversized
-        // media instead of the request plan rejecting it mid-flight; tp1 keeps upstream
-        // behavior byte for byte.
+        // tp>1 runs the vision workspace envelope sized for ONE item of at most
+        // image_max_tokens merged tokens (the runtime layout plan uses the same value), so
+        // clamp the artifact's preprocessor budgets to that envelope: smart_resize then
+        // downscales oversized media aspect-preservingly instead of the request plan
+        // rejecting it mid-flight. tp1 keeps upstream behavior byte for byte (the option is
+        // simply ignored there).
         if (options.tensor_parallel > 1) {
-            processor.image_max_pixels =
-                std::min(processor.image_max_pixels, kTp2ItemMergedPixels);
-            processor.video_max_pixels =
-                std::min(processor.video_max_pixels, kTp2ItemMergedPixels);
+            if (options.image_max_tokens == 0 ||
+                options.image_max_tokens > kTp2ItemMergedLimit) {
+                throw std::invalid_argument("image_max_tokens must be 1.." +
+                                            std::to_string(kTp2ItemMergedLimit) +
+                                            " merged vision tokens");
+            }
+            const std::uint64_t item_pixels =
+                options.image_max_tokens * kMergedTokenPixels;
+            // The budget must stay at or above the artifact's own min-pixel floors (image
+            // 65,536 px here), or smart_resize would fail every media item against an
+            // unsatisfiable min>max configuration.
+            const std::uint64_t min_pixels =
+                std::max(processor.image_min_pixels, processor.video_min_pixels);
+            if (item_pixels < min_pixels) {
+                throw std::invalid_argument(
+                    "image_max_tokens must be at least " +
+                    std::to_string((min_pixels + kMergedTokenPixels - 1) / kMergedTokenPixels) +
+                    " merged vision tokens to hold the artifact's minimum media size");
+            }
+            processor.image_max_pixels = std::min(processor.image_max_pixels, item_pixels);
+            processor.video_max_pixels = std::min(processor.video_max_pixels, item_pixels);
         }
         const std::uint64_t vision_tokens =
             std::min<std::uint64_t>(options.max_context, kMaximumVisionTokens);

@@ -86,6 +86,10 @@ struct SequencePlanningInputs {
     // channels) is the model's own extent divided by `tp`, because each device holds only its own
     // head shard. Page COUNTS are not divided: all devices carry the same pages.
     int tp = 1;
+    // Per-item vision budget in merged vision tokens when `tp > 1` (mirrors
+    // EngineOptions::image_max_tokens / FrontendOptions::image_max_tokens; 1..16384, default
+    // 2048 = 2,097,152 px). Sizes the frozen vision-encode workspace and the request transient.
+    std::uint32_t image_max_tokens = ninfer::kDefaultImageMaxTokens;
 };
 
 } // namespace ninfer::targets::qwen3_6::detail::NINFER_QWEN36_RUNTIME_NS
@@ -114,6 +118,8 @@ struct SequencePlanImpl<NINFER_QWEN36_VARIANT> {
     bool use_cuda_graph = true;
     int device          = 0;
     int tp              = 1;
+    // Mirrors SequencePlanningInputs::image_max_tokens (tp>1 per-item vision budget).
+    std::uint32_t image_max_tokens = ninfer::kDefaultImageMaxTokens;
     NINFER_QWEN36_RUNTIME_NS::PersistentLayout persistent;
     NINFER_QWEN36_RUNTIME_NS::WorkspacePlan workspace;
     std::size_t request_transient_capacity_bytes = 0;

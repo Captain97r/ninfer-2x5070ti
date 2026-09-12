@@ -598,17 +598,16 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     if (plan.features.vision) {
         constexpr std::uint32_t kFrontendMergedLimit  = 32768;
         constexpr std::uint32_t kFrontendSegmentLimit = 768 / 2;
-        // tp2 single-item envelope cap: the full artifact image budget (16,777,216 px =
-        // 16,384 merged tokens; prepared_prompt.h kTp2ItemMergedLimit). The vision workspace is
-        // sized for ONE item (the request plan rejects any item larger than the envelope at
-        // request time). At capacity 8k the merged cap stays min(capacity, 16384) = 8192, and
-        // the full 16,384-token envelope costs 1058.50 MiB frozen workspace + 160.00 MiB request
-        // transient PER GPU (tools/tp2/vision_ws_probe.cpp), which still leaves ~2.9 GiB free
-        // beside the 10.08 GiB text shard + KV on 16 GB boards. The frontend clamps the
-        // preprocessor budget to exactly kTp2ItemMergedPixels, so properly preprocessed media
-        // never reaches the plan-time rejection below. tp1 keeps the uncapped envelope.
+        // tp>1 single-item envelope cap: EngineOptions::image_max_tokens (1..16384 merged
+        // tokens, default 2048 = 2,097,152 px; 16384 equals the artifact's full 16,777,216-px
+        // image budget). The vision workspace is sized for ONE item (the request plan rejects
+        // any item larger than the envelope at request time); the effective cap stays
+        // min(max_context, image_max_tokens), so a small --max-context still bounds the
+        // envelope. The frontend clamps the preprocessor budget to image_max_tokens *
+        // kMergedTokenPixels, so properly preprocessed media never reaches the plan-time
+        // rejection below. tp1 keeps the uncapped envelope.
         const std::uint32_t merged =
-            plan.tp > 1 ? std::min<std::uint32_t>(plan.capacity, kTp2ItemMergedLimit)
+            plan.tp > 1 ? std::min<std::uint32_t>(plan.capacity, plan.image_max_tokens)
                         : std::min(plan.capacity, kFrontendMergedLimit);
         out.vision_encode          = schedule::VisionContext::workspace_capacity_bytes(
             merged, std::min(merged, kFrontendSegmentLimit));
@@ -689,6 +688,14 @@ std::uint32_t validate_target_options(DeviceContext& device, const EngineOptions
     if (options.tp != 1 && options.tp != 2) {
         throw std::invalid_argument("tensor-parallel width must be 1 or 2");
     }
+    if (options.tp > 1) {
+        if (options.image_max_tokens == 0 ||
+            options.image_max_tokens > kMaximumImageMaxTokens) {
+            throw std::invalid_argument(
+                "image_max_tokens must be in [1," +
+                std::to_string(kMaximumImageMaxTokens) + "] merged vision tokens");
+        }
+    }
     if (options.tp == 2) {
         // MTP is split-aware (sharded stem/attention/post-mixer, sharded draft head with an
         // allgather before the proposal argmax, per-device GDN replay records and per-device
@@ -734,6 +741,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->use_cuda_graph      = inputs.use_cuda_graph;
     impl->device              = inputs.device;
     impl->tp                  = inputs.tp;
+    impl->image_max_tokens    = inputs.image_max_tokens;
     impl->kv_dtype            = inputs.kv_dtype;
     impl->kv_quant_group      = inputs.kv_quant_group;
     impl->persistent          = persistent_layout(*impl);
@@ -742,9 +750,8 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         // Same tp2 single-item cap as build_workspace_plan: the request transient holds ONE
         // item's [5120, merged] output, and the per-rank budget must track the envelope the
         // request plan will admit items against.
-        constexpr std::uint32_t kTp2ItemMergedLimit = 16'384;
         const std::uint32_t merged =
-            impl->tp > 1 ? std::min(impl->capacity, kTp2ItemMergedLimit)
+            impl->tp > 1 ? std::min(impl->capacity, impl->image_max_tokens)
                         : std::min(impl->capacity, static_cast<std::uint32_t>(32768));
         impl->request_transient_capacity_bytes =
             schedule::VisionContext::output_transient_bytes(merged);
@@ -849,6 +856,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .use_cuda_graph = options.use_cuda_graph,
         .device         = options.device,
         .tp             = options.tp,
+        .image_max_tokens = options.image_max_tokens,
     };
     const std::uint32_t logical_pages = page_count(inputs.capacity);
     const std::uint32_t minimum_pages = std::max(logical_pages, inputs.max_concurrency);

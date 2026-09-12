@@ -116,6 +116,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--max-pending-requests N] [--pending-timeout-ms N] "
            "[--prefill-chunk N] [--log-stats-interval-ms N] [--device N] [--tp 1|2] "
            "[--devices N,N] "
+           "[--image-max-tokens N] "
            "[--max-request-mib N] [--media-cache-mib N] [--media-live-mib N] "
            "[--media-preprocess-threads N] "
            "[--request-log-jsonl FILE] "
@@ -156,6 +157,13 @@ std::string serve_usage_text(const char* argv0) {
            "across two GPUs and requires --devices; it supports --spec mtp but not --spec "
            "dflash. Vision input is tp2-capable: the Vision tower is dual-replicated and each "
            "rank encodes the item against its own copy, so --vision works at --tp 2.\n"
+           "       --image-max-tokens bounds each attached image/video to N merged vision "
+           "tokens at --tp 2 (default " +
+           std::to_string(ninfer::kDefaultImageMaxTokens) +
+           " = 2,097,152 px; larger media is downscaled with aspect preserved, never "
+           "rejected; at most " +
+           std::to_string(ninfer::kMaximumImageMaxTokens) +
+           ", the artifact's full image budget). Ignored at --tp 1.\n"
            "       --devices lists one device id per --tp rank, e.g. --devices 1 for --tp 1, or "
            "--devices 0,1 for --tp 2. When given together with --device they must agree on the "
            "primary device.\n"
@@ -294,6 +302,15 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--devices") {
             options.devices  = parse_devices(require_value("--devices"));
             devices_explicit = true;
+        } else if (arg == "--image-max-tokens") {
+            const int tokens = parse_nonnegative_int(
+                require_value("--image-max-tokens"), "image-max-tokens");
+            if (tokens == 0 || static_cast<std::uint32_t>(tokens) > ninfer::kMaximumImageMaxTokens) {
+                throw std::invalid_argument("--image-max-tokens must be in [1," +
+                                            std::to_string(ninfer::kMaximumImageMaxTokens) +
+                                            "]");
+            }
+            options.image_max_tokens = static_cast<std::uint32_t>(tokens);
         } else if (arg == "--kv-dtype") {
             options.kv_cache = parse_kv_dtype(require_value("--kv-dtype"));
         } else if (arg == "--spec") {

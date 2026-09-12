@@ -70,6 +70,13 @@ enum class RopeMode : std::uint8_t {
 // Product ceiling on any YaRN-extended context, independent of factor/origin.
 inline constexpr std::uint32_t kMaximumYarnContext = 1048576;
 
+// Per-item Vision budget (merged vision tokens) at tp > 1: 2048 by default (2,097,152 px,
+// one 32x32-px block per merged token), 16384 at most -- the artifact's own 16,777,216-px
+// image budget, so nothing larger is useful. Oversized media is downscaled
+// aspect-preservingly to fit; tp == 1 keeps the artifact's own preprocessor budgets.
+inline constexpr std::uint32_t kDefaultImageMaxTokens  = 2048;
+inline constexpr std::uint32_t kMaximumImageMaxTokens  = 16'384;
+
 enum class SpeculativeBackend : std::uint8_t {
     None,
     Mtp,
@@ -119,6 +126,11 @@ struct EngineOptions {
     std::size_t media_live_bytes  = kDefaultMediaLiveBytes;
     // Zero selects a bounded worker count from the detected host concurrency.
     std::uint32_t media_preprocess_threads = 0;
+    // Per-item vision budget in merged vision tokens when `tp > 1` (kDefaultImageMaxTokens by
+    // default, which clamps each attached image/video to 2,097,152 px with aspect-preserving
+    // downscale; at most kMaximumImageMaxTokens, the artifact's own 16,777,216-px image budget).
+    // Ignored at tp == 1 (upstream keeps the artifact's own preprocessor budgets there).
+    std::uint32_t image_max_tokens           = kDefaultImageMaxTokens;
     bool enable_vision                     = false;
     bool use_cuda_graph                    = true;
     LoadProgress load_progress;

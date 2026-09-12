@@ -38,6 +38,9 @@ struct Options {
     SpeculativeOptions speculative;
     bool enable_vision  = false;
     bool use_cuda_graph = true;
+    // Per-item vision budget in merged vision tokens at --tp 2 (default 2048 = 2,097,152 px,
+    // aspect-preserving auto-downscale of larger media). Ignored at --tp 1.
+    std::uint32_t image_max_tokens = ninfer::kDefaultImageMaxTokens;
 
     bool raw_output      = false;
     bool print_token_ids = false;

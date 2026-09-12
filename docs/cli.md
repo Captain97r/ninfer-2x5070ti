@@ -145,6 +145,7 @@ measured recommendation rather than a semantic limit.
 | `--device N` | CUDA device index | `0` |
 | `--tp 1\|2` | tensor-parallel width; `2` splits the model across two GPUs | `1` |
 | `--devices A,B` | one CUDA device index per `--tp` rank; required for `--tp 2` | `--device` |
+| `--image-max-tokens N` | per-item image/video budget in merged vision tokens at `--tp 2`; larger media is downscaled with aspect preserved | `2048` |
 | `--kv-dtype bf16\|int8` | KV-cache storage | `bf16` |
 | `--spec mtp\|dflash` | speculative backend | off |
 | `--draft-tokens N` | MTP `1..5`; DFlash `1..15` | unset |
@@ -208,8 +209,9 @@ device used at the default `--tp 1`; when both are given they must agree on the 
 Tensor-parallel execution is implemented for the 27B execution package (`qwen3.6-27b` and
 `qwen3.8-27b`, either weight profile). `qwen3.6-35b-a3b` has no tensor-parallel path and rejects
 `--tp 2` at startup, as does `--spec dflash`. In the Windows-TP2 fork `--vision` works at `--tp 2`
-(dual-replicated tower, per-rank encode, one media item capped at 16,384 merged tokens (the artifact full 16.7 MP budget) per request —
-see the fork README's "Vision on TP2"); upstream rejected `--tp 2 --vision` at startup. `--spec mtp`
+(dual-replicated tower, per-rank encode, one media item per request capped at `--image-max-tokens`
+merged vision tokens — default 2048 = 2,097,152 px, at most 16384 = the artifact full 16.7 MP
+budget — see the fork README's "Vision on TP2"); upstream rejected `--tp 2 --vision` at startup. `--spec mtp`
 is supported at `--tp 2`,
 with one behavioral difference: compatible-prefix reuse is downgraded to a full prefill, because
 the MTP head resumes from a retained target hidden state that only the primary device holds. The

@@ -176,8 +176,9 @@ remaining bottlenecks are in [docs/windows-peer-mailbox.md](docs/windows-peer-ma
 - **Vision on TP2** (new in this fork): the vision tower is bound twice, once per rank device, and
   each rank encodes the image locally into its own vision context, publishing the embeddings through
   the already-validated peer-mailbox publish path; the text TP2 prefill consumes them. The tp2
-  vision workspace is sized for one item capped at 16,384 merged tokens (the artifact's full
-  16,777,216-px image budget; `min(max_context, 16'384)` at runtime), and the frontend clamps
+  vision workspace is sized for one item capped at `--image-max-tokens` merged tokens (2048 by
+  default = 2,097,152 px; 1..16384, where 16384 is the artifact's full 16,777,216-px image budget;
+  `min(max_context, image_max_tokens)` at runtime), and the frontend clamps
   `image_max_pixels`/`video_max_pixels` to that budget so `smart_resize` downscales
   oversized media instead of the request plan rejecting it; MTP + image prefill gathers rope
   positions over the vision-merged axis; a request-scoped prefill failure now tears down only that
@@ -201,13 +202,15 @@ because its vision encoder had no split path. What "vision on TP2" means here:
   and never enters the MTP decode loop or the captured decode graph; decode speed after an image
   prompt is identical to the text-only TP2 path.
 - **Per-item pixel budget with automatic downscale**: at `--tp 2` the vision workspace is sized for
-  one item capped at 16,384 merged tokens - the artifact's full 16,777,216-px (16.7 MP) image
-  budget (one merged token = a
-  32 × 32 pixel block), further bounded by `min(max_context, 16'384)`. The frontend clamps the preprocessor's `image_max_pixels` and
-  `video_max_pixels` to exactly that budget, so media beyond the artifact limit is downscaled
-  before encoding instead of being rejected by the plan-time envelope check; a full 16.7 MP
-  image encodes as 16,384 vision tokens (measured: 15.9 s vision encode, correct answer,
-  12.72 GiB planned per GPU at a 32k context on 16 GB boards). `--tp 1` keeps upstream behavior.
+  one item capped at `--image-max-tokens` merged vision tokens (default 2048 = 2,097,152 px; range
+  1..16384, where 16384 is the artifact's full 16,777,216-px (16.7 MP) image budget; one merged
+  token = a 32 × 32 pixel block), further bounded by `min(max_context, image_max_tokens)`. The
+  frontend clamps the preprocessor's `image_max_pixels` and `video_max_pixels` to exactly that
+  budget, so media beyond the limit is downscaled aspect-preservingly before encoding instead of
+  being rejected by the plan-time envelope check (llama-server `--image-max-tokens` semantics).
+  Raising the budget costs vision workspace VRAM at startup (measured at 16384: 15.9 s vision
+  encode for a full 16.7 MP image, correct answer, 12.72 GiB planned per GPU at a 32k context on
+  16 GB boards). `--tp 1` keeps upstream behavior.
 - **MTP + image prompts work**: the tp2 draft stage gathers rope positions over the vision-merged
   axis (mirroring the tp1 final-chunk stage), so `--spec mtp` with any image no longer crashes
   mid-prefill with non-contiguous positions. Measured MTP acceptance on image prompts (server
@@ -284,8 +287,9 @@ identical offsets across the whole file, plus the file tail).
   direct path may be preferable and `NINFER_TP2_MAILBOX=0` restores the staged transport.
 - MTP performance depends on draft acceptance rate; long-generation tok/s differs from
   512-token benchmarks.
-- Vision at `--tp 2` is sized for one media item per request capped at 16,384 merged tokens
-  (the artifact's full 16,777,216-px budget; `min(max_context, 16'384)` at runtime); larger media
+- Vision at `--tp 2` is sized for one media item per request capped at `--image-max-tokens`
+  merged vision tokens (default 2048 = 2,097,152 px; at most 16384, the artifact's full
+  16,777,216-px budget; `min(max_context, image_max_tokens)` at runtime); larger media
   is downscaled to that budget, and an item that still exceeds the
   envelope after preprocessing is rejected at request-plan time with a clear error. YaRN remains
   mutually exclusive with `--vision` at any `--tp`.
@@ -533,8 +537,13 @@ Use `--messages FILE` instead of `--prompt` for chat history, images, or videos:
   --messages examples/cli/messages/image_chart.json \
   --max-context 8192 \
   --max-new 128 \
-  --vision
+  --vision \
+  --image-max-tokens 4096
 ```
+
+At `--tp 2`, `--image-max-tokens N` bounds each attached image/video to N merged vision tokens
+(default 2048 = 2,097,152 px; 1..16384) with aspect-preserving downscale of larger media; it is
+ignored at `--tp 1`.
 
 Answer content is written to stdout. Loading progress, reasoning, timing, throughput, memory, and
 speculative-decoding statistics are written to stderr. See the [CLI guide](docs/cli.md) and

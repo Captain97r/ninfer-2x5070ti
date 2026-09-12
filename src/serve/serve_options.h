@@ -42,6 +42,10 @@ struct ServeOptions {
     std::size_t media_cache_bytes          = kDefaultMediaCacheBytes;
     std::size_t media_live_bytes           = kDefaultMediaLiveBytes;
     std::uint32_t media_preprocess_threads = 0;
+    // Per-item vision budget in merged vision tokens at --tp 2 (default 2048 = 2,097,152 px,
+    // aspect-preserving auto-downscale of larger media; 16384 = the artifact's full image
+    // budget). Ignored at --tp 1.
+    std::uint32_t image_max_tokens         = ninfer::kDefaultImageMaxTokens;
     std::size_t response_store_max_records = kDefaultResponseStoreRecords;
     std::size_t response_store_max_bytes   = kDefaultResponseStoreBytes;
     int device                             = 0;

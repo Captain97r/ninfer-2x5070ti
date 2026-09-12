@@ -22,14 +22,15 @@ inline constexpr std::uint64_t kMaximumVisionRawPatches =
 // layout plan), so the frontend clamps the preprocessor's max-pixel budgets to that item budget:
 // smart_resize downscales oversized media instead of the request plan rejecting it at admission.
 inline constexpr std::uint64_t kMergedTokenPixels    = 32ULL * 32ULL;
-// The full artifact image budget is 16,777,216 px (preprocessor_config.json longest_edge), which
-// is exactly 16,384 merged tokens (16,777,216 / 32 / 32); the tp2 envelope now covers it whole.
-// VRAM cost vs the former 2048 cap: +926.2 MiB frozen vision workspace + 140 MiB request
-// transient PER RANK in vision mode (tools/tp2/vision_ws_probe.cpp numbers), leaving ~2.9 GiB
-// free per GPU at an 8k context on 16 GB boards. The effective per-item cap at runtime remains
-// min(max_context, kTp2ItemMergedLimit), so a small --max-context still bounds the envelope.
+// The upper bound of EngineOptions::image_max_tokens: the full artifact image budget is
+// 16,777,216 px (preprocessor_config.json longest_edge), which is exactly 16,384 merged tokens
+// (16,777,216 / 32 / 32); no larger per-item budget is useful. The default is
+// ninfer::kDefaultImageMaxTokens (2048 merged tokens = 2,097,152 px), and the runtime envelope
+// stays min(max_context, image_max_tokens), so a small --max-context still bounds it.
 inline constexpr std::uint64_t kTp2ItemMergedLimit  = 16'384;
-inline constexpr std::uint64_t kTp2ItemMergedPixels = kTp2ItemMergedLimit * kMergedTokenPixels;
+static_assert(kTp2ItemMergedLimit ==
+              static_cast<std::uint64_t>(ninfer::kMaximumImageMaxTokens));
+static_assert(kMergedTokenPixels * kTp2ItemMergedLimit == 16'777'216ULL);
 
 struct PreparedMediaPayload {
     // Exact row-major BF16 input consumed by the Vision patch projection.
