@@ -103,8 +103,7 @@ void launch_tma(const std::uint8_t* activation_codes, const std::uint8_t* activa
     const dim3 grid(Geometry::kOutputRows / Schedule::kBlockN, tokens / Schedule::kBlockM);
 #ifdef _WIN32
     Nvfp4TmaDescriptorBlock block(stream);
-    CUDA_CHECK(cudaMemcpyAsync(block.device, &descriptors, sizeof(descriptors),
-                               cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(nvfp4_copy_tma_descriptors(block.device, descriptors, stream));
     nvfp4_w4a4_tma_kernel<Geometry, Schedule>
         <<<grid, Schedule::kThreads, kSharedBytes, stream>>>(block.device, alpha, epilogue, output);
 #else

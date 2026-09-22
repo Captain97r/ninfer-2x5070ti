@@ -20,8 +20,8 @@ There is no defensible percentage forecast for the complete engine yet. The
 previous attention tuning qualified a 13-22% operator latency reduction, while
 its two single whole-engine runs differed by only about 3.1% in TG. This is not
 a statistically established application speedup. Quality qualification and direct performance measurements govern acceptance. A
-working CUDA timeline is needed for reliable attribution of bottleneck fractions;
-exact optimizations can still be tested directly while that tooling is repaired.
+software CUDA timeline now identifies bulk prefill transfers as a priority;
+overlap and software-trace timing limits still prevent a speedup forecast.
 
 ## Foundation and hardware
 
@@ -106,15 +106,22 @@ The older [untuned](../diagnostics/baseline-100k.json) and
 2,232 PP tok/s and 160.07 versus 165.07 TG tok/s. The new longer-generation run
 is a new baseline, not another optimization result.
 
-A bounded profiling attempt uncovered a tooling limitation. Installed Nsight
-Systems 2026.1.3 explicitly reports that driver CUDA API version 13.4 is not
-supported and falls back to its 13.3 libraries. Hardware/node capture exited with
-`0xC0000409`; software/graph capture exited with `0xC0000005`. The latter exported
-partial NVTX data but no CUDA kernel, runtime-API or memcpy event tables. Neither
-trace is usable for bottleneck percentages. Ordinary unprofiled inference passed.
-The version warning is direct evidence of an unsupported combination, not proof
-of the precise crash cause. Use a matching Nsight release before selecting an
-optimization from GPU/CPU timing attribution. [NVIDIA profiling guide](https://docs.nvidia.com/nsight-systems/UserGuide/).
+The installed Nsight Systems 2026.1.3 could not capture usable CUDA activity with
+this driver's CUDA 13.4 API. A locally extracted, NVIDIA-signed **2026.5.1** now
+produces a usable software CUDA trace (`cuda-sw,nvtx`, graph-level tracing).
+Hardware/node tracing still fails on this host. No driver or system installation
+was changed. [Release notes](https://docs.nvidia.com/nsight-systems/ReleaseNotes/index.html),
+[profiling guide](https://docs.nvidia.com/nsight-systems/UserGuide/).
+
+The measured 8K prefill spans 2.706 seconds. Its 2,064 cross-device 10 MiB copy
+calls occupy 1.918 seconds of host API time; some calls stall for milliseconds.
+They represent 20.156 GiB of logical peer traffic, or 40.313 GiB across the two
+host-staging legs. Descriptor allocation, upload and free total only 19.5 ms of
+host API time. These observations prioritize explicit pinned bulk staging over
+descriptor caching. They are overlapping measurements, not additive critical-path
+fractions or a predicted speedup. Software-trace copy durations imply impossible
+PCIe bandwidth, so they cannot establish physical transfer bandwidth. Graph-level
+TG tracing also cannot attribute individual decode kernels.
 
 ## Correctness work that must precede tuning
 
@@ -138,6 +145,38 @@ Sanitizer memcheck with stream-ordered race tracking reported zero errors. A rea
 8K-prompt/256-token TP2+MTP3 inference check passed. These checks qualify the fix;
 the original unsafe ordering was established by source inspection, without claiming
 that the old build's output corruption was reproduced.
+
+### Windows tensor-map visibility and captured ownership
+
+The Windows ordinary and fused NVFP4 TMA kernels now acquire each host-uploaded
+map through the tensor-map proxy in every issuing CTA. Stream ordering alone does
+not replace this visibility requirement. Captured descriptor uploads now own an
+immutable host block through a CUDA user object; the graph retains it after the
+capture function returns and until graph users retire. Eager uploads keep their
+existing path, and the Linux grid-constant path is unchanged.
+[Tensor-map requirements](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html),
+[CUDA user objects](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html#cuda-user-objects).
+
+The captured lifetime issue is relevant to the existing NVFP4 GDN projection
+snapshot benchmark's graph route. Normal shipping prefill is eager, and MTP3
+verification does not use this large-token TMA graph route. This source-level
+finding does not establish corruption in previous shipping model responses.
+
+The lifetime regression alternates two live ordinary/fused bindings, destroys
+captured graph definitions after instantiation, scrubs expired host stack frames,
+and verifies every replay against independent FP64 dot/SwiGLU oracles. Its inputs
+are exactly representable by the existing activation format, allowing tighter
+A16-level criteria without changing production precision. The original arbitrary
+fixture exceeded its A4 gross-error bound; a separate CPU quantization calculation
+reproduced the observed value exactly. That failed stimulus is not relabeled a pass.
+The ordinary lossy-A4 numerical suites remain unchanged.
+
+Both GPUs passed this regression and the existing NVFP4 numerical suites; all
+three TP2 projection suites passed. The full 18-case response panel matches the
+frozen reference exactly. Three measured repetitions at 8K and 100K retain the
+same speculative counts and essentially unchanged throughput. This stage makes
+no performance-improvement claim. Compute Sanitizer memcheck, including stream-ordered
+race checks, reported zero errors. [Validation record](../diagnostics/tma-descriptor-validation.json).
 
 ### Quality qualification: implemented checks and remaining limits
 

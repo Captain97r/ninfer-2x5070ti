@@ -9,6 +9,7 @@
 #include <cuda_runtime.h>
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -20,6 +21,46 @@ struct alignas(128) Nvfp4W4a4TmaDescriptors {
     CUtensorMap a_scales;
     CUtensorMap b_scales;
 };
+
+#ifdef _WIN32
+inline void CUDART_CB nvfp4_destroy_captured_tma_descriptors(void* pointer) {
+    // CUDA user-object callbacks must not call CUDA APIs. This is ordinary aligned CPU memory.
+    delete static_cast<Nvfp4W4a4TmaDescriptors*>(pointer);
+}
+
+inline cudaError_t nvfp4_copy_tma_descriptors(Nvfp4W4a4TmaDescriptors* destination,
+                                             const Nvfp4W4a4TmaDescriptors& descriptors,
+                                             cudaStream_t stream) {
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    cudaGraph_t graph = nullptr;
+    cudaError_t result = cudaStreamGetCaptureInfo(stream, &status, nullptr, &graph);
+    if (result != cudaSuccess) { return result; }
+    if (status == cudaStreamCaptureStatusNone) {
+        return cudaMemcpyAsync(destination, &descriptors, sizeof(descriptors),
+                               cudaMemcpyHostToDevice, stream);
+    }
+    if (status != cudaStreamCaptureStatusActive || graph == nullptr) {
+        return cudaErrorStreamCaptureInvalidated;
+    }
+
+    // A captured memcpy retains its host address, not the source bytes. Give each captured
+    // launch an immutable descriptor block that outlives the graph and its pending executions.
+    auto source = std::make_unique<Nvfp4W4a4TmaDescriptors>(descriptors);
+    cudaUserObject_t owner = nullptr;
+    result = cudaUserObjectCreate(&owner, source.get(), nvfp4_destroy_captured_tma_descriptors,
+                                   1, cudaUserObjectNoDestructorSync);
+    if (result != cudaSuccess) { return result; }
+    const Nvfp4W4a4TmaDescriptors* captured_source = source.release();
+    result = cudaGraphRetainUserObject(graph, owner, 1, cudaGraphUserObjectMove);
+    if (result != cudaSuccess) {
+        (void)cudaUserObjectRelease(owner, 1);
+        return result;
+    }
+    // The graph owns cleanup from here, including a later memcpy or capture failure.
+    return cudaMemcpyAsync(destination, captured_source, sizeof(descriptors),
+                           cudaMemcpyHostToDevice, stream);
+}
+#endif
 
 inline void nvfp4_check_driver(CUresult status, const char* operation) {
     if (status == CUDA_SUCCESS) { return; }
@@ -179,6 +220,23 @@ __device__ __forceinline__ void nvfp4_tma_load_2d(void* destination, const CUten
                  : "memory");
 }
 
+#ifdef _WIN32
+// A host upload orders the bytes in global memory, but the TMA engine reads them through the
+// tensor-map proxy. Every block's issuing thread must acquire each map at system scope before
+// its first tensor copy; stream ordering and the shared-memory barrier do not replace this.
+__device__ __forceinline__ void
+nvfp4_tma_acquire_descriptors(const Nvfp4W4a4TmaDescriptors* descriptors) {
+    asm volatile("fence.proxy.tensormap::generic.acquire.sys [%0], 128;"
+                 : : "l"(&descriptors->a_codes) : "memory");
+    asm volatile("fence.proxy.tensormap::generic.acquire.sys [%0], 128;"
+                 : : "l"(&descriptors->b_codes) : "memory");
+    asm volatile("fence.proxy.tensormap::generic.acquire.sys [%0], 128;"
+                 : : "l"(&descriptors->a_scales) : "memory");
+    asm volatile("fence.proxy.tensormap::generic.acquire.sys [%0], 128;"
+                 : : "l"(&descriptors->b_scales) : "memory");
+}
+#endif
+
 // The TMA hardware reads the tensor map from the address named by the descriptor pointer, so
 // the map may live in kernel parameter space or in global memory.
 // NINFER_NVFP4_TMA_DESCRIPTOR_PARAM selects the kernel parameter representation. On
@@ -227,6 +285,7 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_w4a4
         if (threadIdx.x == 0) {
 #ifdef _WIN32
             const Nvfp4W4a4TmaDescriptors* descriptor_block = descriptors;
+            nvfp4_tma_acquire_descriptors(descriptor_block);
 #else
             const Nvfp4W4a4TmaDescriptors* descriptor_block = &descriptors;
 #endif

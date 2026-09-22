@@ -1,0 +1,119 @@
+{
+  "kind": "correctness",
+  "inference_math_changed": false,
+  "configuration": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "prefill_chunk": 1024,
+    "kv_cache": "int8-group64",
+    "mtp_draft_tokens": 3,
+    "proposal_head": "optimized",
+    "use_cuda_graph": true,
+    "decode_path": "mtp_cuda_graph",
+    "decode_graph_prime": {
+      "primed": true,
+      "output_tokens": 9
+    },
+    "repetitions": 3,
+    "warmup": 1,
+    "corpus_path": "build/bench_corpus_100000.ids",
+    "corpus_tokens": 100000
+  },
+  "performance": [
+    {
+      "workload": "pp8192+tg256",
+      "before": {
+        "prefill_tok_s_mean": 3044.391896,
+        "prefill_tok_s_stddev": 1.021591831,
+        "decode_output_tok_s_mean": 199.5390602,
+        "decode_output_tok_s_stddev": 0.1974572013
+      },
+      "after": {
+        "prefill_tok_s_mean": 3046.377661,
+        "prefill_tok_s_stddev": 1.527022864,
+        "decode_output_tok_s_mean": 199.4101882,
+        "decode_output_tok_s_stddev": 0.1054479202
+      },
+      "speculative_counts_unchanged": true
+    },
+    {
+      "workload": "pp100000+tg512",
+      "before": {
+        "prefill_tok_s_mean": 2238.04726,
+        "prefill_tok_s_stddev": 0.917087111,
+        "decode_output_tok_s_mean": 172.2789089,
+        "decode_output_tok_s_stddev": 0.06835352797
+      },
+      "after": {
+        "prefill_tok_s_mean": 2237.491658,
+        "prefill_tok_s_stddev": 0.5458312378,
+        "decode_output_tok_s_mean": 172.2572415,
+        "decode_output_tok_s_stddev": 0.1904613089
+      },
+      "speculative_counts_unchanged": true
+    }
+  ],
+  "notes": [
+    "Performance comparison is a regression screen; no speedup claimed.",
+    "Synthetic cycling token corpus has high draft acceptance and is not a quality evaluation.",
+    "Old unsafe descriptor visibility/lifetime established by source inspection; previous shipping-response corruption not claimed.",
+    "Linux grid-constant path retained but Linux execution not tested locally."
+  ],
+  "name": "Windows NVFP4 tensor-map visibility and captured descriptor ownership",
+  "validation": {
+    "descriptor_test": {
+      "target": "ninfer_nvfp4_tma_descriptors_test",
+      "physical_devices": [
+        0,
+        1
+      ],
+      "passed": true,
+      "oracle": "Independent FP64 dot/SwiGLU over represented inputs; exactly representable activation stimulus, A16-level criteria",
+      "shapes": {
+        "N": 34816,
+        "K": 5120,
+        "T": 1024
+      },
+      "execution": "Four alternating eager passes; two live graph executables, definitions destroyed, host stack scrubbed, every replay checked"
+    },
+    "existing_nvfp4_targets": [
+      "ninfer_linear_nvfp4_a4_test",
+      "ninfer_linear_add_nvfp4_test",
+      "ninfer_linear_swiglu_nvfp4_test"
+    ],
+    "existing_nvfp4_physical_devices": [
+      0,
+      1
+    ],
+    "tp2_targets": [
+      "ninfer_linear_split_test",
+      "ninfer_linear_add_split_test",
+      "ninfer_linear_swiglu_split_test"
+    ],
+    "all_operator_tests_passed": true,
+    "sanitizer": {
+      "tool": "Compute Sanitizer memcheck",
+      "track_stream_ordered_races": "all",
+      "device": 0,
+      "errors": 0
+    },
+    "quality": {
+      "reference": "diagnostics/quality-reference.json",
+      "cases": 18,
+      "all_observables_equal": true,
+      "task_passes": 16,
+      "new_task_failures": 0
+    }
+  },
+  "fixture_diagnosis": {
+    "original_actual": -1.0625,
+    "original_input_fp64": -1.281718134880066,
+    "independent_quantized_activation_dot": -1.0642983572823665,
+    "diagnostic_dot_rounded_bf16": -1.0625,
+    "resolution": "Exactly representable lifetime-specific inputs and tighter criteria, with generic lossy-A4 suites unchanged."
+  }
+}

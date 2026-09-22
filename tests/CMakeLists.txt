@@ -409,6 +409,12 @@ ninfer_add_linear_test(ninfer_linear_q6_a16_test ops/linear/test_q6_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_w8_a16_test ops/linear/test_w8_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_nvfp4_a16_test ops/linear/test_nvfp4_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_nvfp4_a4_test ops/linear/test_nvfp4_a4.cpp)
+ninfer_add_op_test(ninfer_nvfp4_tma_descriptors_test
+  SOURCES ops/test_nvfp4_tma_descriptors.cpp
+          ops/linear/linear_test_common.cpp
+          ops/linear_swiglu/linear_swiglu_test_common.cpp
+  LIBRARIES ninfer_ops)
+set_tests_properties(ninfer_nvfp4_tma_descriptors_test PROPERTIES TIMEOUT 600)
 ninfer_add_linear_test(ninfer_linear_fp8_a16_test ops/linear/test_fp8_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_fp8_a8_test ops/linear/test_fp8_a8.cpp)
 ninfer_add_op_test(ninfer_linear_bf16_a16_test

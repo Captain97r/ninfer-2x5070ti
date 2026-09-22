@@ -238,6 +238,16 @@ void validate_profile(const Profile& profile) {
 
 } // namespace
 
+std::vector<std::uint16_t> make_profile_activation(const Profile& profile, std::int32_t tokens) {
+    return make_activation(profile, tokens);
+}
+
+std::vector<double> oracle_fp64(const Profile& profile,
+                               const quantized_weight::PackedWeight& weight,
+                               const std::vector<std::uint16_t>& activation, std::int32_t tokens) {
+    return linear_swiglu_oracle_fp64(profile, weight, activation, tokens);
+}
+
 int run_profile(std::string_view label, const Profile& profile,
                 std::span<const std::int32_t> token_cases) {
     validate_profile(profile);

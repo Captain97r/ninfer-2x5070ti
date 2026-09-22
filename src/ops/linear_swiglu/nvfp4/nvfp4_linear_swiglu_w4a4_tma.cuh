@@ -91,6 +91,7 @@ __global__ __launch_bounds__(
         if (threadIdx.x == 0) {
 #ifdef _WIN32
             const Nvfp4W4a4TmaDescriptors* descriptor_block = descriptors;
+            nvfp4_tma_acquire_descriptors(descriptor_block);
 #else
             const Nvfp4W4a4TmaDescriptors* descriptor_block = &descriptors;
 #endif

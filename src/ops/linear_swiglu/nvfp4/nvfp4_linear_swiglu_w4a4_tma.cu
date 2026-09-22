@@ -70,8 +70,7 @@ void launch_impl(const std::uint8_t* activation_codes, const std::uint8_t* activ
     Nvfp4W4a4TmaDescriptors* device_descriptors = nullptr;
     CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&device_descriptors),
                                sizeof(Nvfp4W4a4TmaDescriptors), stream));
-    CUDA_CHECK(cudaMemcpyAsync(device_descriptors, &descriptors, sizeof(descriptors),
-                               cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(nvfp4_copy_tma_descriptors(device_descriptors, descriptors, stream));
     nvfp4_linear_swiglu_w4a4_tma_kernel<Geometry, M256N128S3>
         <<<grid, M256N128S3::kThreads, kSharedBytes, stream>>>(device_descriptors, alpha, output);
     CUDA_CHECK(cudaFreeAsync(device_descriptors, stream));
