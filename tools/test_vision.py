@@ -130,18 +130,23 @@ def main():
     def png_chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
-    width, height = 2560, 1440
-    scanlines = (b"\x00" + bytes((0, 0, 255)) * width) * height
-    png = (b"\x89PNG\r\n\x1a\n"
-           + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-           + png_chunk(b"IDAT", zlib.compress(scanlines)) + png_chunk(b"IEND", b""))
-    large = {"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}},
-        {"type": "text", "text": "What is the background color of this image? Answer only the color name."},
-    ]}
-    answer = chat("oversized_image_downscale", [large], limit=32)
-    assert re.fullmatch(r"\s*blue[.!]?\s*", answer, re.IGNORECASE), answer
-    cases[-1]["source_dimensions"] = [width, height]
+    # The second image reaches the default 2048-token envelope exactly: 8192 patches,
+    # merged 2x2, with no resize. Together these exercise both preprocessing branches.
+    for name, width, height in (
+        ("oversized_image_downscale", 2560, 1440),
+        ("exact_capacity_image", 2048, 1024),
+    ):
+        scanlines = (b"\x00" + bytes((0, 0, 255)) * width) * height
+        png = (b"\x89PNG\r\n\x1a\n"
+               + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+               + png_chunk(b"IDAT", zlib.compress(scanlines)) + png_chunk(b"IEND", b""))
+        large = {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}},
+            {"type": "text", "text": "What is the background color of this image? Answer only the color name."},
+        ]}
+        answer = chat(name, [large], limit=32)
+        assert re.fullmatch(r"\s*blue[.!]?\s*", answer, re.IGNORECASE), answer
+        cases[-1]["source_dimensions"] = [width, height]
 
     answer = chat("text_after_images", [{"role": "user", "content": "Reply with exactly: vision ready"}], limit=16)
     assert "vision ready" in answer.lower(), answer

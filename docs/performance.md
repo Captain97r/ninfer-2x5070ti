@@ -61,6 +61,27 @@ matches its prior reference. Eight responses hit the 1,024-token cap and one
 Python response stops after 40 tokens, so these remain throughput/parity checks,
 not completed-task scores. [Evidence](../diagnostics/post-display-validation.json).
 
+## Local dual-5070-Ti workspace sizing
+
+The family planner now uses the actual TP2 shard dimensions, rank-specific Op
+scratch bounds and phase lifetimes. Kernel arithmetic, precision and sampling are
+unchanged. With chunk 1024, MTP3 and vision with 2,048 image tokens, workspace per card falls from
+202,320,384 to 138,741,504 bytes: **60.63 MiB saved per GPU**. Vision now determines
+the allocation; text-only capacity is 117,743,616 bytes.
+
+Independent arena-composition checks and the real-model prefix-state regression
+pass. All 29 saved short, stochastic and retrieval responses match exactly at
+196,608-token capacity; task scores remain 16/18, 5/7 and 4/4. At 199,680 tokens, both
+near-limit ledger tasks, exact context exhaustion and post-session recovery pass.
+Eight image/text checks pass, including an image using the full 2,048-token budget.
+These image checks use short histories at the larger allocation.
+
+The 199,680-token load uses 14,930 MiB per card in NVML; primary-rank CUDA startup
+headroom is 317,718,528 bytes (303 MiB). A conservative 32 MiB allowance for observed
+prefill allocation growth leaves 271 MiB, above the selected 256 MiB engineering
+reserve. This is a measured operating profile, not a vendor guarantee or a broad
+model-accuracy result. [Evidence](../diagnostics/tp2-workspace-validation.json).
+
 ## Local RTX 5070 Ti attention tuning
 
 The 70-SM `sm_120` profile automatically selects 70 active splits per KV head for INT8-G64

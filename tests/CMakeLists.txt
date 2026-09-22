@@ -186,6 +186,14 @@ ninfer_add_test(ninfer_qwen3_8_27b_tp2_parity_test
 # import lib alongside ninfer_core's static one and fails with LNK2005 duplicate symbols.
 target_link_libraries(ninfer_qwen3_8_27b_tp2_parity_test PRIVATE ${NINFER_CUDART_TARGET})
 set_tests_properties(ninfer_qwen3_8_27b_tp2_parity_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 5400)
+ninfer_add_test(ninfer_qwen3_8_27b_tp2_workspace_test
+  SOURCES targets/qwen3_6_27b/test_tp2_workspace.cpp
+  LIBRARIES ninfer_engine)
+target_include_directories(ninfer_qwen3_8_27b_tp2_workspace_test PRIVATE
+  ${PROJECT_SOURCE_DIR}/src/targets/qwen3_6/export
+  ${PROJECT_SOURCE_DIR}/src/targets/qwen3_6_27b/export)
+target_link_libraries(ninfer_qwen3_8_27b_tp2_workspace_test PRIVATE ${NINFER_CUDART_TARGET})
+set_tests_properties(ninfer_qwen3_8_27b_tp2_workspace_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 ninfer_add_test(ninfer_qwen3_6_27b_load_plan_test
   SOURCES targets/qwen3_6_27b/test_load_plan.cpp
   NEEDS_SOURCE_DIR

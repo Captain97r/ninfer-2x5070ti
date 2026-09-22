@@ -23,6 +23,12 @@
 namespace ninfer::targets::qwen3_6_27b::detail {
 namespace {
 
+void validate_workspace_tp(std::int32_t tp) {
+    if (tp != 1 && tp != 2) {
+        throw std::invalid_argument("27B leaf workspace requires tp 1 or 2");
+    }
+}
+
 std::vector<GraphExecutionProfile>
 graph_profiles_through(std::uint32_t max_frontier,
                        const std::vector<std::uint32_t>& preferred_ends) {
@@ -97,20 +103,68 @@ std::size_t gdn_record_workspace_bytes(const Tensor& hidden,
             parent.qtype, parent.n, parent.k, text_policy(parent), batch, width, width));
 }
 
+// TP2 calls different closed Ops from TP1. Query those concrete shard routes rather than
+// dividing a parent's scratch: activation quantization keeps K for column splits, and the
+// residual-bearing rank and plain rank may select different scratch profiles.
+struct ProjectionWorkspaceProfile {
+    QType qtype;
+    ops::LinearPolicy policy;
+};
+
+ProjectionWorkspaceProfile projection_workspace_profile(WeightsProfile profile) {
+    switch (profile) {
+    case WeightsProfile::Qwen36GroupwiseInt:
+    case WeightsProfile::Qwen38GroupwiseInt:
+        return {QType::Q4G64_F16S, ops::LinearPolicy::A16Only};
+    case WeightsProfile::Qwen36Nvfp4:
+        return {QType::NVFP4, kNvfp4TextPolicy};
+    case WeightsProfile::Qwen38Nvfp4:
+        return {QType::FP8_E4M3FN_ROW_BF16S, kFp8TextPolicy};
+    }
+    throw std::logic_error("invalid 27B weights profile");
+}
+
+std::size_t row_parallel_workspace_bytes(QType qtype, std::int32_t input_rows,
+                                         ops::LinearPolicy policy, std::int32_t first,
+                                         std::int32_t last) {
+    return std::max(
+        ops::linear_add_workspace_capacity_bytes(qtype, TextConfig::hidden, input_rows,
+                                                 policy, first, last),
+        ops::linear_workspace_capacity_bytes(qtype, TextConfig::hidden, input_rows,
+                                             policy, first, last));
+}
+
+std::size_t row_parallel_projection_workspace_bytes(WeightsProfile weights_profile,
+                                                    std::int32_t input_rows,
+                                                    std::int32_t first, std::int32_t last) {
+    auto profile = projection_workspace_profile(weights_profile);
+    if (profile.qtype == QType::Q4G64_F16S) { profile.qtype = QType::Q5G64_F16S; }
+    return row_parallel_workspace_bytes(profile.qtype, input_rows, profile.policy, first, last);
+}
+
 std::size_t post_mixer_workspace_bytes(QType gate_up_qtype, QType down_qtype,
-                                       ops::LinearPolicy policy, std::int32_t first,
-                                       std::int32_t last) {
+                                        ops::LinearPolicy policy, std::int32_t first,
+                                        std::int32_t last, std::int32_t tp) {
     WorkspaceLayoutBuilder layout;
-    (void)layout.alloc(DType::BF16, {TextConfig::intermediate, last});
+    (void)layout.alloc(DType::BF16, {TextConfig::intermediate / tp, last});
     {
         auto scope = layout.scope();
-        (void)layout.alloc_bytes(ops::linear_swiglu_workspace_capacity_bytes(
-            gate_up_qtype, 2 * TextConfig::intermediate, TextConfig::hidden, policy, first, last));
+        const std::size_t bytes = tp == 2
+            ? ops::linear_swiglu_column_parallel_workspace_capacity_bytes(
+                  gate_up_qtype, policy, first, last)
+            : ops::linear_swiglu_workspace_capacity_bytes(
+                  gate_up_qtype, 2 * TextConfig::intermediate, TextConfig::hidden, policy,
+                  first, last);
+        (void)layout.alloc_bytes(bytes);
     }
     {
         auto scope = layout.scope();
-        (void)layout.alloc_bytes(ops::linear_add_workspace_capacity_bytes(
-            down_qtype, TextConfig::hidden, TextConfig::intermediate, policy, first, last));
+        const std::size_t bytes = tp == 2
+            ? row_parallel_workspace_bytes(down_qtype, TextConfig::intermediate / 2, policy,
+                                            first, last)
+            : ops::linear_add_workspace_capacity_bytes(
+                  down_qtype, TextConfig::hidden, TextConfig::intermediate, policy, first, last);
+        (void)layout.alloc_bytes(bytes);
     }
     return layout.peak_bytes(1);
 }
@@ -319,21 +373,24 @@ void Variant::mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& we
 }
 
 std::size_t Variant::mtp_attention_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                       std::int32_t last) {
+                                                                       std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     WorkspaceLayoutBuilder layout;
-    (void)layout.alloc(DType::BF16, {TextConfig::mtp_attention_input_rows, last});
+    (void)layout.alloc(DType::BF16, {TextConfig::mtp_attention_input_rows / tp, last});
     return layout.peak_bytes(1);
 }
 
 std::size_t Variant::mtp_kv_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                std::int32_t last) {
+                                                                std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     return 0;
 }
 
 std::size_t Variant::mtp_q_gate_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                    std::int32_t last) {
+                                                                    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     return 0;
 }
@@ -341,8 +398,15 @@ std::size_t Variant::mtp_q_gate_projection_workspace_capacity_bytes(std::int32_t
 std::size_t Variant::attention_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
                                                                    qwen3_6::TextPhase,
                                                                    std::int32_t first,
-                                                                   std::int32_t last) {
+                                                                   std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        const auto profile = projection_workspace_profile(weights_profile);
+        if (profile.qtype == QType::Q4G64_F16S) { return 0; }
+        return ops::attn_input_proj_column_parallel_workspace_capacity_bytes(
+            profile.qtype, profile.policy, first, last);
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -358,8 +422,13 @@ std::size_t Variant::attention_projection_workspace_capacity_bytes(WeightsProfil
 }
 
 std::size_t Variant::attention_output_projection_workspace_capacity_bytes(
-    WeightsProfile weights_profile, qwen3_6::TextPhase, std::int32_t first, std::int32_t last) {
+    WeightsProfile weights_profile, qwen3_6::TextPhase, std::int32_t first, std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        return row_parallel_projection_workspace_bytes(weights_profile, TextConfig::query_size / 2,
+                                                        first, last);
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -381,8 +450,15 @@ std::size_t Variant::attention_output_projection_workspace_capacity_bytes(
 std::size_t Variant::gdn_input_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
                                                                    qwen3_6::TextPhase,
                                                                    std::int32_t first,
-                                                                   std::int32_t last) {
+                                                                   std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        const auto profile = projection_workspace_profile(weights_profile);
+        if (profile.qtype == QType::Q4G64_F16S) { return 0; }
+        return ops::gdn_input_proj_column_parallel_workspace_capacity_bytes(
+            profile.qtype, profile.policy, first, last);
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -399,8 +475,16 @@ std::size_t Variant::gdn_input_projection_workspace_capacity_bytes(WeightsProfil
 
 std::size_t Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
     WeightsProfile weights_profile, qwen3_6::TextPhase, std::int32_t batch_size, std::int32_t first,
-    std::int32_t last) {
+    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        const auto profile = projection_workspace_profile(weights_profile);
+        return std::max(
+            kMinimumLeafWorkspaceBytes,
+            ops::gdn_input_proj_conv_snapshot_column_parallel_workspace_capacity_bytes(
+                profile.qtype, profile.policy, batch_size, first, last));
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -424,8 +508,16 @@ std::size_t Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
 
 std::size_t Variant::gdn_input_projection_record_workspace_capacity_bytes(
     WeightsProfile weights_profile, qwen3_6::TextPhase, std::int32_t batch_size, std::int32_t first,
-    std::int32_t last) {
+    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        const auto profile = projection_workspace_profile(weights_profile);
+        return std::max(
+            kMinimumLeafWorkspaceBytes,
+            ops::gdn_input_proj_conv_record_column_parallel_workspace_capacity_bytes(
+                profile.qtype, profile.policy, batch_size, first, last));
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -450,8 +542,13 @@ std::size_t Variant::gdn_input_projection_record_workspace_capacity_bytes(
 std::size_t Variant::gdn_output_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
                                                                     qwen3_6::TextPhase,
                                                                     std::int32_t first,
-                                                                    std::int32_t last) {
+                                                                    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
+    if (tp == 2) {
+        return row_parallel_projection_workspace_bytes(weights_profile, TextConfig::value_dim / 2,
+                                                        first, last);
+    }
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -470,28 +567,33 @@ std::size_t Variant::gdn_output_projection_workspace_capacity_bytes(WeightsProfi
 }
 
 std::size_t Variant::gdn_norm_control_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                          std::int32_t last) {
+                                                                          std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
+    if (tp == 2) {
+        return ops::gdn_gating_proj_column_parallel_workspace_capacity_bytes(first, last);
+    }
     return ops::gdn_norm_gating_proj_workspace_capacity_bytes(TextConfig::gdn_value_heads,
                                                               TextConfig::hidden, first, last);
 }
 
 std::size_t Variant::post_mixer_workspace_capacity_bytes(WeightsProfile weights_profile,
                                                          qwen3_6::TextPhase, std::int32_t first,
-                                                         std::int32_t last) {
+                                                         std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
         return post_mixer_workspace_bytes(QType::Q4G64_F16S, QType::Q5G64_F16S,
-                                          ops::LinearPolicy::A16Only, first, last);
+                                          ops::LinearPolicy::A16Only, first, last, tp);
     case WeightsProfile::Qwen36Nvfp4:
         return post_mixer_workspace_bytes(QType::NVFP4, QType::NVFP4, kNvfp4TextPolicy, first,
-                                          last);
+                                          last, tp);
     case WeightsProfile::Qwen38Nvfp4: {
         const std::size_t nvfp4 =
-            post_mixer_workspace_bytes(QType::NVFP4, QType::NVFP4, kNvfp4TextPolicy, first, last);
+            post_mixer_workspace_bytes(QType::NVFP4, QType::NVFP4, kNvfp4TextPolicy, first, last, tp);
         const std::size_t fp8 = post_mixer_workspace_bytes(
-            QType::FP8_E4M3FN_ROW_BF16S, QType::FP8_E4M3FN_ROW_BF16S, kFp8TextPolicy, first, last);
+            QType::FP8_E4M3FN_ROW_BF16S, QType::FP8_E4M3FN_ROW_BF16S, kFp8TextPolicy, first, last, tp);
         return std::max(nvfp4, fp8);
     }
     }
@@ -858,11 +960,12 @@ void Variant::mtp_post_mixer(const std::array<Tensor, 2>& hidden,
 }
 
 std::size_t Variant::mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
-                                                             std::int32_t last) {
+                                                             std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     WorkspaceLayoutBuilder layout;
-    (void)layout.alloc(DType::BF16, {TextConfig::mtp_mlp_gate_up_rows, last});
-    (void)layout.alloc(DType::BF16, {TextConfig::intermediate, last});
+    (void)layout.alloc(DType::BF16, {TextConfig::mtp_mlp_gate_up_rows / tp, last});
+    (void)layout.alloc(DType::BF16, {TextConfig::intermediate / tp, last});
     (void)layout.alloc(DType::BF16, {TextConfig::hidden, last});
     return layout.peak_bytes(1);
 }

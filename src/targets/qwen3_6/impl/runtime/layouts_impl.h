@@ -276,51 +276,66 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                      std::int32_t batch_size, std::int32_t min_width,
                                      std::int32_t max_width, ops::GqaExecutionEnvelope envelope) {
         auto stage = layout.scope();
-        (void)workspace_recipe::text_attention_projection<TextConfig>(layout, last);
-        scratch(layout, Variant::attention_projection_workspace_capacity_bytes(plan.weights_profile,
-                                                                               phase, first, last));
-        (void)workspace_recipe::text_attention_results<TextConfig>(layout, last);
+        (void)workspace_recipe::text_attention_projection<TextConfig>(layout, last, plan.tp);
+        scratch(layout, Variant::attention_projection_workspace_capacity_bytes(
+                            plan.weights_profile, phase, first, last, plan.tp));
+        (void)workspace_recipe::text_attention_results<TextConfig>(layout, last, plan.tp);
         scratch(layout, ops::gqa_attention_workspace_capacity_bytes(
-                            TextConfig::query_heads, plan.kv_dtype, envelope, batch_size, min_width,
-                            max_width));
+                            TextConfig::query_heads / plan.tp, plan.kv_dtype, envelope, batch_size,
+                            min_width, max_width));
         scratch(layout, Variant::attention_output_projection_workspace_capacity_bytes(
-                            plan.weights_profile, phase, first, last));
+                            plan.weights_profile, phase, first, last, plan.tp));
     };
     const auto gdn_stage = [&](WorkspaceLayoutBuilder& layout, std::int32_t first,
                                std::int32_t last, qwen3_6::TextPhase phase, GdnWorkspacePath path,
                                std::int32_t batch_size, std::int32_t min_width,
                                std::int32_t max_width) {
         auto stage = layout.scope();
-        (void)workspace_recipe::gdn_control<TextConfig>(layout, last);
-        scratch(layout, Variant::gdn_norm_control_projection_workspace_capacity_bytes(first, last));
-        (void)workspace_recipe::gdn_projection<TextConfig>(layout, last);
+        (void)workspace_recipe::gdn_control<TextConfig>(layout, last, plan.tp);
+        if (plan.tp == 2) {
+            (void)workspace_recipe::gdn_projection<TextConfig>(layout, last, plan.tp);
+        }
+        scratch(layout, Variant::gdn_norm_control_projection_workspace_capacity_bytes(first, last,
+                                                                                      plan.tp));
+        if (plan.tp == 1) {
+            (void)workspace_recipe::gdn_projection<TextConfig>(layout, last, plan.tp);
+        }
         if (path == GdnWorkspacePath::Snapshot) {
-            scratch(layout, Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
-                                plan.weights_profile, phase, batch_size, min_width, max_width));
-        } else if (path == GdnWorkspacePath::ReplayRecord) {
-            scratch(layout, Variant::gdn_input_projection_record_workspace_capacity_bytes(
-                                plan.weights_profile, phase, batch_size, min_width, max_width));
-        } else {
-            (void)workspace_recipe::gdn_prefill_conv<TextConfig>(layout, last);
-            scratch(layout, Variant::gdn_input_projection_workspace_capacity_bytes(
-                                plan.weights_profile, phase, first, last));
-        }
-        (void)workspace_recipe::gdn_recurrent_output<TextConfig>(layout, last);
-        if (path == GdnWorkspacePath::Prefill) {
             scratch(layout,
-                    ops::gated_delta_net_workspace_capacity_bytes(
-                        TextConfig::gdn_key_heads, TextConfig::gdn_value_heads, true, first, last));
+                    Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
+                        plan.weights_profile, phase, batch_size, min_width, max_width, plan.tp));
+        } else if (path == GdnWorkspacePath::ReplayRecord) {
+            scratch(layout,
+                    Variant::gdn_input_projection_record_workspace_capacity_bytes(
+                        plan.weights_profile, phase, batch_size, min_width, max_width, plan.tp));
+        } else {
+            (void)workspace_recipe::gdn_prefill_conv<TextConfig>(layout, last, plan.tp);
+            scratch(layout, Variant::gdn_input_projection_workspace_capacity_bytes(
+                                plan.weights_profile, phase, first, last, plan.tp));
         }
-        (void)workspace_recipe::gdn_normalized_output<TextConfig>(layout, last);
+        (void)workspace_recipe::gdn_recurrent_output<TextConfig>(layout, last, plan.tp);
+        // TP2 allocates both outputs before invoking the recurrent Op; TP1 allocates the
+        // normalized output afterwards. Keep that real lifetime when shrinking the bound.
+        if (plan.tp == 2) {
+            (void)workspace_recipe::gdn_normalized_output<TextConfig>(layout, last, plan.tp);
+        }
+        if (path == GdnWorkspacePath::Prefill) {
+            scratch(layout, ops::gated_delta_net_workspace_capacity_bytes(
+                                TextConfig::gdn_key_heads / plan.tp,
+                                TextConfig::gdn_value_heads / plan.tp, true, first, last));
+        }
+        if (plan.tp == 1) {
+            (void)workspace_recipe::gdn_normalized_output<TextConfig>(layout, last, plan.tp);
+        }
         scratch(layout, Variant::gdn_output_projection_workspace_capacity_bytes(
-                            plan.weights_profile, phase, first, last));
+                            plan.weights_profile, phase, first, last, plan.tp));
     };
     const auto post_mixer_stage = [&](WorkspaceLayoutBuilder& layout, std::int32_t first,
                                       std::int32_t last, qwen3_6::TextPhase phase) {
         auto stage = layout.scope();
         (void)workspace_recipe::post_mixer_hidden<TextConfig>(layout, last);
         scratch(layout, Variant::post_mixer_workspace_capacity_bytes(plan.weights_profile, phase,
-                                                                     first, last));
+                                                                     first, last, plan.tp));
     };
     const auto target_body = [&](WorkspaceLayoutBuilder& layout, std::int32_t first,
                                  std::int32_t last, qwen3_6::TextPhase phase, GdnWorkspacePath path,
@@ -330,31 +345,49 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         gdn_stage(layout, first, last, phase, path, batch_size, min_width, max_width);
         post_mixer_stage(layout, first, last, phase);
     };
+    const auto tp_logits = [&](WorkspaceLayoutBuilder& layout, std::int32_t columns) {
+        auto head = layout.scope();
+        matrix(layout, DType::BF16, TextConfig::output_rows / plan.tp, columns);
+        // Both captured rank-zero gathering and replicated eager/full-head gathering keep
+        // the incoming peer shard live beside the local shard, aligned at this exact cursor.
+        scratch(layout, std::max(ops::allgather_columns_workspace_capacity_bytes(
+                                     TextConfig::output_rows / plan.tp, columns),
+                                 ops::gather_columns_to_rank0_workspace_capacity_bytes(
+                                     TextConfig::output_rows / plan.tp, columns)));
+    };
     const auto proposal_scratch = [&](WorkspaceLayoutBuilder& layout, std::int32_t columns) {
-        if (plan.proposal_head == ProposalHead::Optimized) {
-            if (plan.tp > 1) {
+        if (plan.tp == 2) {
+            if (plan.proposal_head == ProposalHead::Full) {
+                tp_logits(layout, columns);
+            } else {
+                auto head = layout.scope();
+                matrix(layout, DType::BF16, Variant::draft_head_rows / plan.tp, columns);
                 scratch(layout, ops::argmax_row_parallel_workspace_capacity_bytes(
                                     Variant::draft_head_rows / plan.tp, columns));
-            } else {
-                matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
             }
+        } else if (plan.proposal_head == ProposalHead::Optimized) {
+            matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
         }
     };
     const auto mtp_stem = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
                               bool preembedded) {
-        (void)workspace_recipe::mtp_stem<TextConfig>(layout, tokens, !preembedded);
+        (void)workspace_recipe::mtp_stem<TextConfig>(layout, tokens, plan.tp == 2 || !preembedded,
+                                                     plan.tp);
     };
     const auto mtp_full_core = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
-                                   ops::GqaExecutionEnvelope envelope) {
+                                   ops::GqaExecutionEnvelope envelope, std::int32_t batch = 1) {
         auto core = layout.scope();
+        if (plan.tp == 2) { matrix(layout, DType::BF16, TextConfig::hidden, tokens); }
         mtp_stem(layout, tokens, false);
-        (void)workspace_recipe::mtp_attention_projection<TextConfig>(layout, tokens);
-        scratch(layout, Variant::mtp_attention_projection_workspace_capacity_bytes(tokens, tokens));
-        (void)workspace_recipe::mtp_attention_results<TextConfig>(layout, tokens);
+        (void)workspace_recipe::mtp_attention_projection<TextConfig>(layout, tokens, plan.tp);
+        scratch(layout, Variant::mtp_attention_projection_workspace_capacity_bytes(tokens, tokens,
+                                                                                   plan.tp));
+        (void)workspace_recipe::mtp_attention_results<TextConfig>(layout, tokens, plan.tp);
         scratch(layout, ops::gqa_attention_workspace_capacity_bytes(
-                            TextConfig::query_heads, plan.kv_dtype, envelope, 1, tokens, tokens));
+                            TextConfig::query_heads / plan.tp, plan.kv_dtype, envelope, batch,
+                            tokens / batch, tokens / batch));
         (void)workspace_recipe::mtp_post_attention<TextConfig>(layout, tokens);
-        scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(tokens, tokens));
+        scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(tokens, tokens, plan.tp));
     };
     const auto mtp_full_call = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
                                    ops::GqaExecutionEnvelope envelope, bool build_proposal) {
@@ -370,257 +403,274 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                        std::int32_t last, bool preembedded) {
         auto call = layout.scope();
         if (plan.tp > 1) {
-            // tp2 only: the final-chunk stage's own one-column all-reduce staging, distinct from
-            // the chunk-wide [hidden, T] staging planned by tp_mtp_call_roots.
-            matrix(layout, DType::BF16, TextConfig::hidden, 1);
+            matrix(layout, DType::BF16, TextConfig::hidden, last);
+            matrix(layout, DType::BF16, TextConfig::hidden, 1); // final-column staging
         }
         matrix(layout, DType::BF16, TextConfig::hidden, 1);
         matrix(layout, DType::BF16, TextConfig::hidden, 1);
         {
             auto bulk = layout.scope();
             mtp_stem(layout, last, preembedded);
-            matrix(layout, DType::BF16, TextConfig::kv_size, last);
-            matrix(layout, DType::BF16, TextConfig::kv_size, last);
-            scratch(layout, Variant::mtp_kv_projection_workspace_capacity_bytes(first, last));
-            matrix(layout, DType::BF16, TextConfig::kv_size, last);
+            matrix(layout, DType::BF16, TextConfig::kv_size / plan.tp, last);
+            matrix(layout, DType::BF16, TextConfig::kv_size / plan.tp, last);
+            scratch(layout,
+                    Variant::mtp_kv_projection_workspace_capacity_bytes(first, last, plan.tp));
+            matrix(layout, DType::BF16, TextConfig::kv_size / plan.tp, last);
         }
-        matrix(layout, DType::BF16, TextConfig::query_size, 1);
-        matrix(layout, DType::BF16, TextConfig::query_size, 1);
-        scratch(layout, Variant::mtp_q_gate_projection_workspace_capacity_bytes(1, 1));
-        matrix(layout, DType::BF16, TextConfig::query_size, 1);
-        matrix(layout, DType::I32, 3, 1);
-        matrix(layout, DType::BF16, TextConfig::query_size, 1);
-        scratch(layout, ops::gqa_attention_workspace_capacity_bytes(
-                            TextConfig::query_heads, plan.kv_dtype, text_envelope, 1, 1, 1));
-        matrix(layout, DType::BF16, TextConfig::hidden, 1);
-        matrix(layout, DType::BF16, TextConfig::hidden, 1);
-        scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(1, 1));
+        matrix(layout, DType::BF16, TextConfig::query_size / plan.tp, 1);
+        matrix(layout, DType::BF16, TextConfig::query_size / plan.tp, 1);
+        scratch(layout, Variant::mtp_q_gate_projection_workspace_capacity_bytes(1, 1, plan.tp));
+        if (plan.tp == 2) {
+            // a/o/mh are allocated before each rank's qn and optional MRoPE gather.
+            matrix(layout, DType::BF16, TextConfig::query_size / plan.tp, 1);
+            matrix(layout, DType::BF16, TextConfig::hidden, 1);
+            matrix(layout, DType::BF16, TextConfig::hidden, 1);
+        }
+        matrix(layout, DType::BF16, TextConfig::query_size / plan.tp, 1);
+        if (plan.tp == 1 || plan.features.vision) { matrix(layout, DType::I32, 3, 1); }
+        if (plan.tp == 1) { matrix(layout, DType::BF16, TextConfig::query_size, 1); }
+        scratch(layout,
+                ops::gqa_attention_workspace_capacity_bytes(TextConfig::query_heads / plan.tp,
+                                                            plan.kv_dtype, text_envelope, 1, 1, 1));
+        if (plan.tp == 1) {
+            matrix(layout, DType::BF16, TextConfig::hidden, 1);
+            matrix(layout, DType::BF16, TextConfig::hidden, 1);
+        }
+        scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(1, 1, plan.tp));
         proposal_scratch(layout, 1);
     };
 
-    // Tensor-parallel additions, live for a whole call rather than one stage:
-    //   * `allreduce staging`  - the peer's contribution to every row-parallel reduce ([hidden, T]
-    //                            BF16, one per device, allocated once per call and reused by all
-    //                            128 reduces).
-    //   * `vocabulary half`    - this device's own half of the logits, before the gather. Full
-    //                            logits go into persistent RoundState storage: both ranks for
-    //                            replicated calls, rank zero for captured MTP. Only the columns
-    //                            that actually get a logit are planned: one in prefill (the bonus
-    //                            token), `batch` in ordinary decode, and `batch * verify_width`
-    //                            in target verification, including padded columns.
-    //   * `packed peer logits` - the gather's temporary peer shard, aligned after the live local
-    //                            vocabulary half. Its scoped peak is planned here; it is not
-    //                            carried through unrelated layer stages. One-column gathers
-    //                            need no peer scratch.
-    // Every OTHER extent in this plan is still the tp1 (whole-model) extent: at tp == 2 each
-    // device's real per-stage need is at most that, so planning it whole is a safe over-estimate.
-    // Sizing the sharded stages exactly is a follow-up (it only buys workspace bytes back).
-    const auto tp_call_roots = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
-                                   std::int32_t logit_columns, bool captured_target = false) {
-        if (plan.tp <= 1) { return; }
-        matrix(layout, DType::BF16, TextConfig::hidden, tokens);
-        matrix(layout, DType::BF16, TextConfig::output_rows / plan.tp, logit_columns);
-        scratch(layout, ops::allgather_columns_workspace_capacity_bytes(
-                            TextConfig::output_rows / plan.tp, logit_columns));
-        if (captured_target) {
-            // Same arena cursor after the live shard; these are alternative scoped peaks. The
-            // common per-rank bound covers rank zero's incoming shard and the eager fallback.
-            scratch(layout, ops::gather_columns_to_rank0_workspace_capacity_bytes(
-                                TextConfig::output_rows / plan.tp, logit_columns));
-        }
-    };
-
-    // The MTP round's own tp2 additions. Its three all-reduces share ONE [hidden, T] staging
-    // buffer per device (allocated once per MTP call, reused by the stem's fc, the attention
-    // output projection and the post-mixer). The proposal head also needs this device's
-    // own half of its logits. Optimized proposals reduce those shards with rank-local argmax
-    // scratch; full-head proposals still gather into persistent RoundState logits. Every other
-    // MTP extent is planned at the tp1 width, over-planning rather than under-planning tp2.
-    const auto tp_mtp_call_roots = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
-                                       std::int32_t logit_columns) {
-        if (plan.tp <= 1) { return; }
-        matrix(layout, DType::BF16, TextConfig::hidden, tokens);
-        matrix(layout, DType::BF16,
-               (plan.proposal_head == ProposalHead::Optimized ? Variant::draft_head_rows
-                                                              : TextConfig::output_rows) /
-                   plan.tp,
-               logit_columns);
-        if (plan.proposal_head == ProposalHead::Full) {
-            scratch(layout, ops::allgather_columns_workspace_capacity_bytes(
-                                TextConfig::output_rows / plan.tp, logit_columns));
-        }
-    };
-
     WorkspacePlan out;
-    WorkspaceLayoutBuilder text_prefill;
-    text_common_root(text_prefill, chunk);
-    tp_call_roots(text_prefill, chunk, 1);
-    target_body(text_prefill, 1, chunk, qwen3_6::TextPhase::Prefill, GdnWorkspacePath::Prefill, 1,
-                1, chunk, text_envelope);
-    scratch(text_prefill, ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, 1, 1));
-    out.text_prefill = finish(text_prefill);
-
-    for (std::int32_t batch = 1; batch <= static_cast<std::int32_t>(plan.max_concurrency);
-         ++batch) {
-        WorkspaceLayoutBuilder ordinary;
-        matrix(ordinary, DType::BF16, TextConfig::hidden, batch);
-        tp_call_roots(ordinary, batch, batch);
-        target_body(ordinary, batch, batch, qwen3_6::TextPhase::Verify, GdnWorkspacePath::Snapshot,
-                    batch, 1, 1, text_envelope);
-        scratch(ordinary,
-                ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, batch, batch));
-        out.ordinary_round = std::max(out.ordinary_round, finish(ordinary));
-    }
-
-    if (plan.features.mtp()) {
-        WorkspaceLayoutBuilder mtp_prefill;
-        text_common_root(mtp_prefill, chunk);
-        tp_call_roots(mtp_prefill, chunk, 1);
-        tp_mtp_call_roots(mtp_prefill, chunk, 1);
-        target_body(mtp_prefill, 1, chunk, qwen3_6::TextPhase::Prefill, GdnWorkspacePath::Prefill,
+    if (plan.tp == 2) {
+        // These roots/scopes mirror the TP2 TextContext call boundaries. In particular, the
+        // text head retires before MTP, MTP staging retires before proposal argmax, and each
+        // AR iteration reuses its predecessor's arena span. No measured peak enters sizing.
+        const auto prefill_capacity = [&](bool prepare_mtp) {
+            WorkspaceLayoutBuilder layout;
+            text_common_root(layout, chunk);
+            matrix(layout, DType::BF16, TextConfig::hidden, chunk); // text allreduce staging
+            target_body(layout, 1, chunk, qwen3_6::TextPhase::Prefill, GdnWorkspacePath::Prefill, 1,
+                        1, chunk, text_envelope);
+            tp_logits(layout, 1);
+            scratch(layout, ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, 1, 1));
+            if (prepare_mtp) {
+                matrix(layout, DType::I32, 1, chunk); // rank-zero shifted ids
+                if (plan.features.vision) {
+                    matrix(layout, DType::BF16, TextConfig::hidden, chunk);
+                    (void)workspace_recipe::visual_scatter_indices(layout, chunk);
+                }
+                mtp_prefill_chunk(layout, 1, chunk, plan.features.vision);
+                if (drafts > 1) {
+                    auto iteration = layout.scope();
+                    matrix(layout, DType::BF16, TextConfig::hidden, 1);
+                    mtp_full_call(layout, 1, text_envelope, true);
+                }
+            }
+            return finish(layout);
+        };
+        out.text_prefill = prefill_capacity(false);
+        if (plan.features.mtp()) { out.mtp_prefill = prefill_capacity(true); }
+        for (std::int32_t batch = 1; batch <= static_cast<std::int32_t>(plan.max_concurrency);
+             ++batch) {
+            WorkspaceLayoutBuilder ordinary;
+            matrix(ordinary, DType::BF16, TextConfig::hidden, batch);
+            matrix(ordinary, DType::BF16, TextConfig::hidden, batch); // allreduce staging
+            target_body(ordinary, batch, batch, qwen3_6::TextPhase::Verify,
+                        GdnWorkspacePath::Snapshot, batch, 1, 1, text_envelope);
+            tp_logits(ordinary, batch);
+            // The ordinary caller resets the text arena before sampling.
+            out.ordinary_round = std::max(
+                {out.ordinary_round, finish(ordinary),
+                 ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, batch, batch)});
+            if (plan.features.mtp()) {
+                const std::int32_t aggregate = batch * verify;
+                WorkspaceLayoutBuilder target;
+                matrix(target, DType::BF16, TextConfig::hidden, aggregate);
+                matrix(target, DType::BF16, TextConfig::hidden, aggregate);
+                target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
+                            GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
+                tp_logits(target, aggregate); // includes masked/padded physical columns
+                WorkspaceLayoutBuilder alignment;
+                mtp_full_core(alignment, aggregate, text_envelope, batch);
+                WorkspaceLayoutBuilder ar;
+                mtp_full_core(ar, batch, text_envelope, batch);
+                WorkspaceLayoutBuilder proposal;
+                proposal_scratch(proposal, batch);
+                const auto accept = ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
+                    TextConfig::token_domain, drafts, drafts, batch, batch);
+                // Acceptance retires before the compact decision's separate aligned peak.
+                const auto decision =
+                    plan.use_cuda_graph
+                        ? ops::speculative_replicate_decision_workspace_capacity_bytes(drafts,
+                                                                                       batch)
+                        : 0;
+                out.mtp_round      = std::max({out.mtp_round, finish(target), finish(alignment),
+                                               finish(ar), finish(proposal), accept, decision});
+                out.ordinary_round = std::max(out.ordinary_round, finish(alignment));
+            }
+        }
+    } else {
+        WorkspaceLayoutBuilder text_prefill;
+        text_common_root(text_prefill, chunk);
+        target_body(text_prefill, 1, chunk, qwen3_6::TextPhase::Prefill, GdnWorkspacePath::Prefill,
                     1, 1, chunk, text_envelope);
-        matrix(mtp_prefill, DType::I32, 1, chunk);
-        if (plan.features.vision) {
-            matrix(mtp_prefill, DType::BF16, TextConfig::hidden, chunk);
-            (void)workspace_recipe::visual_scatter_indices(mtp_prefill, chunk);
-        }
-        mtp_prefill_chunk(mtp_prefill, 1, chunk, plan.features.vision);
-        for (std::int32_t i = 1; i < drafts; ++i) {
-            matrix(mtp_prefill, DType::BF16, TextConfig::hidden, 1);
-            mtp_full_call(mtp_prefill, 1, text_envelope, true);
-        }
-        out.mtp_prefill = finish(mtp_prefill);
-
-        WorkspaceLayoutBuilder mtp_batch;
-        tp_mtp_call_roots(mtp_batch, verify, 1);
-        mtp_full_call(mtp_batch, verify, text_envelope, false);
-        WorkspaceLayoutBuilder mtp_ar;
-        tp_mtp_call_roots(mtp_ar, 1, 1);
-        mtp_full_call(mtp_ar, 1, text_envelope, true);
-        WorkspaceLayoutBuilder mtp_align;
-        tp_mtp_call_roots(mtp_align, 1, 1);
-        mtp_full_call(mtp_align, 1, text_envelope, false);
-        WorkspaceLayoutBuilder mtp_proposal;
-        tp_mtp_call_roots(mtp_proposal, 1, 1);
-        proposal_scratch(mtp_proposal, 1);
-        const std::size_t accept = ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
-            TextConfig::token_domain, drafts, drafts, 1, 1);
-        out.mtp_round = std::max({accept, finish(mtp_batch), finish(mtp_ar), finish(mtp_proposal)});
-        out.ordinary_round = std::max(out.ordinary_round, finish(mtp_align));
+        scratch(text_prefill,
+                ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, 1, 1));
+        out.text_prefill = finish(text_prefill);
 
         for (std::int32_t batch = 1; batch <= static_cast<std::int32_t>(plan.max_concurrency);
              ++batch) {
-            const std::int32_t aggregate = batch * verify;
-            WorkspaceLayoutBuilder target;
-            matrix(target, DType::BF16, TextConfig::hidden, aggregate);
-            tp_call_roots(target, aggregate, aggregate, plan.use_cuda_graph);
-            target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
-                        GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
-
-            const auto mtp_decode_core = [&](WorkspaceLayoutBuilder& layout, std::int32_t width) {
-                const std::int32_t tokens = batch * width;
-                auto core                 = layout.scope();
-                mtp_stem(layout, tokens, false);
-                (void)workspace_recipe::mtp_attention_projection<TextConfig>(layout, tokens);
-                scratch(layout,
-                        Variant::mtp_attention_projection_workspace_capacity_bytes(tokens, tokens));
-                (void)workspace_recipe::mtp_attention_results<TextConfig>(layout, tokens);
-                scratch(layout, ops::gqa_attention_workspace_capacity_bytes(
-                                    TextConfig::query_heads, plan.kv_dtype, text_envelope, batch,
-                                    width, width));
-                (void)workspace_recipe::mtp_post_attention<TextConfig>(layout, tokens);
-                scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(tokens, tokens));
-            };
-
-            WorkspaceLayoutBuilder alignment;
-            tp_mtp_call_roots(alignment, batch * verify, batch);
-            mtp_decode_core(alignment, verify);
-            WorkspaceLayoutBuilder ar;
-            tp_mtp_call_roots(ar, batch, batch);
-            mtp_decode_core(ar, 1);
-            WorkspaceLayoutBuilder proposal;
-            tp_mtp_call_roots(proposal, batch, batch);
-            proposal_scratch(proposal, batch);
-            const std::size_t batch_accept =
-                ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
-                    TextConfig::token_domain, drafts, drafts, batch, batch);
-            // Verification and acceptance retire their arena scopes before decision replication.
-            // Its queried per-rank bound is therefore a separate peak (256 bytes for B1/K3),
-            // including when capture uses a mailbox and keeps the fallback scratch reserved.
-            const std::size_t decision = plan.tp == 2 && plan.use_cuda_graph
-                ? ops::speculative_replicate_decision_workspace_capacity_bytes(drafts, batch)
-                : 0;
-            out.mtp_round = std::max({out.mtp_round, finish(target), finish(alignment), finish(ar),
-                                      finish(proposal), batch_accept, decision});
+            WorkspaceLayoutBuilder ordinary;
+            matrix(ordinary, DType::BF16, TextConfig::hidden, batch);
+            target_body(ordinary, batch, batch, qwen3_6::TextPhase::Verify,
+                        GdnWorkspacePath::Snapshot, batch, 1, 1, text_envelope);
+            scratch(ordinary,
+                    ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, batch, batch));
+            out.ordinary_round = std::max(out.ordinary_round, finish(ordinary));
         }
-    }
 
-    if (plan.features.dflash()) {
-        if constexpr (!Variant::supports_dflash) {
-            throw std::logic_error("unsupported target reached DFlash scratch planning");
-        } else {
-            const auto dflash_context_capacity = [&](std::int32_t tokens, bool compact_input) {
-                WorkspaceLayoutBuilder layout;
-                if (compact_input) {
-                    matrix(layout, DType::BF16, DFlashConfig::feature_rows, tokens);
-                }
-                (void)workspace_recipe::dflash_context<DFlashConfig>(layout, tokens);
-                {
-                    auto layer = layout.scope();
-                    (void)workspace_recipe::dflash_context_layer<DFlashConfig>(layout, tokens);
-                }
-                return finish(layout);
-            };
-            const auto dflash_proposal_capacity = [&](std::int32_t width, std::int32_t batch) {
-                WorkspaceLayoutBuilder layout;
-                const std::int32_t tokens = width * batch;
-                matrix(layout, DType::BF16, DFlashConfig::hidden, tokens);
-                {
-                    auto attention = layout.scope();
-                    (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
-                    scratch(layout,
-                            std::max(ops::swa_workspace_capacity_bytes({0, plan.capacity}, width,
-                                                                       width, batch),
-                                     ops::bidirectional_gqa_attention_workspace_capacity_bytes(
-                                         {0, plan.capacity}, width, width, batch)));
-                    scratch(layout, ops::linear_add_workspace_capacity_bytes(
-                                        QType::W8G32_F16S, DFlashConfig::hidden,
-                                        DFlashConfig::query_size, tokens, tokens));
-                }
-                {
-                    auto mlp = layout.scope();
-                    (void)workspace_recipe::dflash_mlp<DFlashConfig>(layout, tokens);
-                    scratch(layout, ops::linear_swiglu_workspace_capacity_bytes(
-                                        QType::W8G32_F16S, 2 * DFlashConfig::intermediate,
-                                        DFlashConfig::hidden, tokens, tokens));
-                    scratch(layout, ops::linear_add_workspace_capacity_bytes(
-                                        QType::W8G32_F16S, DFlashConfig::hidden,
-                                        DFlashConfig::intermediate, tokens, tokens));
-                }
-                matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
-                matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
-                if (plan.proposal_head == ProposalHead::Optimized) {
-                    matrix(layout, DType::BF16, Variant::draft_head_rows, drafts * batch);
-                } else {
-                    matrix(layout, DType::BF16, TextConfig::output_rows, drafts * batch);
-                }
-                return finish(layout);
-            };
+        if (plan.features.mtp()) {
+            WorkspaceLayoutBuilder mtp_prefill;
+            text_common_root(mtp_prefill, chunk);
+            target_body(mtp_prefill, 1, chunk, qwen3_6::TextPhase::Prefill,
+                        GdnWorkspacePath::Prefill, 1, 1, chunk, text_envelope);
+            matrix(mtp_prefill, DType::I32, 1, chunk);
+            if (plan.features.vision) {
+                matrix(mtp_prefill, DType::BF16, TextConfig::hidden, chunk);
+                (void)workspace_recipe::visual_scatter_indices(mtp_prefill, chunk);
+            }
+            mtp_prefill_chunk(mtp_prefill, 1, chunk, plan.features.vision);
+            for (std::int32_t i = 1; i < drafts; ++i) {
+                matrix(mtp_prefill, DType::BF16, TextConfig::hidden, 1);
+                mtp_full_call(mtp_prefill, 1, text_envelope, true);
+            }
+            out.mtp_prefill = finish(mtp_prefill);
 
-            out.dflash_context = dflash_context_capacity(chunk, false);
+            WorkspaceLayoutBuilder mtp_batch;
+            mtp_full_call(mtp_batch, verify, text_envelope, false);
+            WorkspaceLayoutBuilder mtp_ar;
+            mtp_full_call(mtp_ar, 1, text_envelope, true);
+            WorkspaceLayoutBuilder mtp_align;
+            mtp_full_call(mtp_align, 1, text_envelope, false);
+            WorkspaceLayoutBuilder mtp_proposal;
+            proposal_scratch(mtp_proposal, 1);
+            const std::size_t accept =
+                ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
+                    TextConfig::token_domain, drafts, drafts, 1, 1);
+            out.mtp_round =
+                std::max({accept, finish(mtp_batch), finish(mtp_ar), finish(mtp_proposal)});
+            out.ordinary_round = std::max(out.ordinary_round, finish(mtp_align));
+
             for (std::int32_t batch = 1; batch <= static_cast<std::int32_t>(plan.max_concurrency);
                  ++batch) {
-                const std::int32_t aggregate = verify * batch;
+                const std::int32_t aggregate = batch * verify;
                 WorkspaceLayoutBuilder target;
                 matrix(target, DType::BF16, TextConfig::hidden, aggregate);
                 target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
                             GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
-                const std::size_t accept =
+
+                const auto mtp_decode_core = [&](WorkspaceLayoutBuilder& layout,
+                                                 std::int32_t width) {
+                    const std::int32_t tokens = batch * width;
+                    auto core                 = layout.scope();
+                    mtp_stem(layout, tokens, false);
+                    (void)workspace_recipe::mtp_attention_projection<TextConfig>(layout, tokens,
+                                                                                 plan.tp);
+                    scratch(layout, Variant::mtp_attention_projection_workspace_capacity_bytes(
+                                        tokens, tokens, plan.tp));
+                    (void)workspace_recipe::mtp_attention_results<TextConfig>(layout, tokens,
+                                                                              plan.tp);
+                    scratch(layout, ops::gqa_attention_workspace_capacity_bytes(
+                                        TextConfig::query_heads / plan.tp, plan.kv_dtype,
+                                        text_envelope, batch, width, width));
+                    (void)workspace_recipe::mtp_post_attention<TextConfig>(layout, tokens);
+                    scratch(layout, Variant::mtp_post_mixer_workspace_capacity_bytes(tokens, tokens,
+                                                                                     plan.tp));
+                };
+
+                WorkspaceLayoutBuilder alignment;
+                mtp_decode_core(alignment, verify);
+                WorkspaceLayoutBuilder ar;
+                mtp_decode_core(ar, 1);
+                WorkspaceLayoutBuilder proposal;
+                proposal_scratch(proposal, batch);
+                const std::size_t batch_accept =
                     ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
                         TextConfig::token_domain, drafts, drafts, batch, batch);
-                const std::size_t proposal = dflash_proposal_capacity(verify, batch);
-                out.dflash_round           = std::max({out.dflash_round, finish(target), accept,
-                                                       dflash_context_capacity(aggregate, true), proposal});
+                out.mtp_round = std::max({out.mtp_round, finish(target), finish(alignment),
+                                          finish(ar), finish(proposal), batch_accept});
+            }
+        }
+
+        if (plan.features.dflash()) {
+            if constexpr (!Variant::supports_dflash) {
+                throw std::logic_error("unsupported target reached DFlash scratch planning");
+            } else {
+                const auto dflash_context_capacity = [&](std::int32_t tokens, bool compact_input) {
+                    WorkspaceLayoutBuilder layout;
+                    if (compact_input) {
+                        matrix(layout, DType::BF16, DFlashConfig::feature_rows, tokens);
+                    }
+                    (void)workspace_recipe::dflash_context<DFlashConfig>(layout, tokens);
+                    {
+                        auto layer = layout.scope();
+                        (void)workspace_recipe::dflash_context_layer<DFlashConfig>(layout, tokens);
+                    }
+                    return finish(layout);
+                };
+                const auto dflash_proposal_capacity = [&](std::int32_t width, std::int32_t batch) {
+                    WorkspaceLayoutBuilder layout;
+                    const std::int32_t tokens = width * batch;
+                    matrix(layout, DType::BF16, DFlashConfig::hidden, tokens);
+                    {
+                        auto attention = layout.scope();
+                        (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
+                        scratch(layout,
+                                std::max(ops::swa_workspace_capacity_bytes({0, plan.capacity},
+                                                                           width, width, batch),
+                                         ops::bidirectional_gqa_attention_workspace_capacity_bytes(
+                                             {0, plan.capacity}, width, width, batch)));
+                        scratch(layout, ops::linear_add_workspace_capacity_bytes(
+                                            QType::W8G32_F16S, DFlashConfig::hidden,
+                                            DFlashConfig::query_size, tokens, tokens));
+                    }
+                    {
+                        auto mlp = layout.scope();
+                        (void)workspace_recipe::dflash_mlp<DFlashConfig>(layout, tokens);
+                        scratch(layout, ops::linear_swiglu_workspace_capacity_bytes(
+                                            QType::W8G32_F16S, 2 * DFlashConfig::intermediate,
+                                            DFlashConfig::hidden, tokens, tokens));
+                        scratch(layout, ops::linear_add_workspace_capacity_bytes(
+                                            QType::W8G32_F16S, DFlashConfig::hidden,
+                                            DFlashConfig::intermediate, tokens, tokens));
+                    }
+                    matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
+                    matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
+                    if (plan.proposal_head == ProposalHead::Optimized) {
+                        matrix(layout, DType::BF16, Variant::draft_head_rows, drafts * batch);
+                    } else {
+                        matrix(layout, DType::BF16, TextConfig::output_rows, drafts * batch);
+                    }
+                    return finish(layout);
+                };
+
+                out.dflash_context = dflash_context_capacity(chunk, false);
+                for (std::int32_t batch = 1;
+                     batch <= static_cast<std::int32_t>(plan.max_concurrency); ++batch) {
+                    const std::int32_t aggregate = verify * batch;
+                    WorkspaceLayoutBuilder target;
+                    matrix(target, DType::BF16, TextConfig::hidden, aggregate);
+                    target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
+                                GdnWorkspacePath::ReplayRecord, batch, verify, verify,
+                                text_envelope);
+                    const std::size_t accept =
+                        ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
+                            TextConfig::token_domain, drafts, drafts, batch, batch);
+                    const std::size_t proposal = dflash_proposal_capacity(verify, batch);
+                    out.dflash_round =
+                        std::max({out.dflash_round, finish(target), accept,
+                                  dflash_context_capacity(aggregate, true), proposal});
+                }
             }
         }
     }
@@ -639,7 +689,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         const std::uint32_t merged =
             plan.tp > 1 ? std::min<std::uint32_t>(plan.capacity, plan.image_max_tokens)
                         : std::min(plan.capacity, kFrontendMergedLimit);
-        out.vision_encode          = schedule::VisionContext::workspace_capacity_bytes(
+        out.vision_encode = schedule::VisionContext::workspace_capacity_bytes(
             merged, std::min(merged, kFrontendSegmentLimit));
     }
 

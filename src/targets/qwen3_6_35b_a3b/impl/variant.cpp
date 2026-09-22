@@ -18,6 +18,12 @@
 namespace ninfer::targets::qwen3_6_35b_a3b::detail {
 namespace {
 
+void validate_workspace_tp(std::int32_t tp) {
+    if (tp != 1) {
+        throw std::invalid_argument("35B leaf workspace supports only tp 1");
+    }
+}
+
 std::vector<GraphExecutionProfile>
 graph_profiles_through(std::uint32_t max_frontier,
                        const std::vector<std::uint32_t>& preferred_ends) {
@@ -225,13 +231,15 @@ void Variant::mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& we
 }
 
 std::size_t Variant::mtp_attention_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                       std::int32_t last) {
+                                                                       std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     return 0;
 }
 
 std::size_t Variant::mtp_kv_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                std::int32_t last) {
+                                                                std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     WorkspaceLayoutBuilder layout;
     (void)layout.alloc(DType::BF16, {TextConfig::query_size, last});
@@ -240,7 +248,8 @@ std::size_t Variant::mtp_kv_projection_workspace_capacity_bytes(std::int32_t fir
 }
 
 std::size_t Variant::mtp_q_gate_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                    std::int32_t last) {
+                                                                    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     validate_token_interval(first, last);
     WorkspaceLayoutBuilder layout;
     (void)layout.alloc(DType::BF16, {TextConfig::kv_size, last});
@@ -251,7 +260,8 @@ std::size_t Variant::mtp_q_gate_projection_workspace_capacity_bytes(std::int32_t
 std::size_t Variant::attention_projection_workspace_capacity_bytes(WeightsProfile,
                                                                    qwen3_6::TextPhase,
                                                                    std::int32_t first,
-                                                                   std::int32_t last) {
+                                                                   std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::attn_input_proj_workspace_capacity_bytes(
         QType::W8G32_F16S, 9216, TextConfig::hidden, ops::LinearPolicy::A16Only, first, last);
 }
@@ -259,7 +269,8 @@ std::size_t Variant::attention_projection_workspace_capacity_bytes(WeightsProfil
 std::size_t Variant::attention_output_projection_workspace_capacity_bytes(WeightsProfile,
                                                                           qwen3_6::TextPhase,
                                                                           std::int32_t first,
-                                                                          std::int32_t last) {
+                                                                          std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::linear_add_workspace_capacity_bytes(QType::W8G32_F16S, TextConfig::hidden,
                                                     TextConfig::query_size,
                                                     ops::LinearPolicy::A16Only, first, last);
@@ -268,7 +279,8 @@ std::size_t Variant::attention_output_projection_workspace_capacity_bytes(Weight
 std::size_t Variant::gdn_input_projection_workspace_capacity_bytes(WeightsProfile,
                                                                    qwen3_6::TextPhase,
                                                                    std::int32_t first,
-                                                                   std::int32_t last) {
+                                                                   std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::gdn_input_proj_workspace_capacity_bytes(
         QType::W8G32_F16S, 12288, TextConfig::hidden, ops::LinearPolicy::A16Only, first, last);
 }
@@ -277,7 +289,8 @@ std::size_t Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(Weig
                                                                             qwen3_6::TextPhase,
                                                                             std::int32_t batch_size,
                                                                             std::int32_t first,
-                                                                            std::int32_t last) {
+                                                                            std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::gdn_input_proj_conv_snapshot_workspace_capacity_bytes(
         TextConfig::key_dim, TextConfig::key_dim, TextConfig::value_dim, batch_size, first, last);
 }
@@ -286,7 +299,8 @@ std::size_t Variant::gdn_input_projection_record_workspace_capacity_bytes(Weight
                                                                           qwen3_6::TextPhase,
                                                                           std::int32_t batch_size,
                                                                           std::int32_t first,
-                                                                          std::int32_t last) {
+                                                                          std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return std::max(kMinimumLeafWorkspaceBytes,
                     ops::gdn_input_proj_conv_record_workspace_capacity_bytes(
                         TextConfig::key_dim, TextConfig::key_dim, TextConfig::value_dim, batch_size,
@@ -296,20 +310,23 @@ std::size_t Variant::gdn_input_projection_record_workspace_capacity_bytes(Weight
 std::size_t Variant::gdn_output_projection_workspace_capacity_bytes(WeightsProfile,
                                                                     qwen3_6::TextPhase,
                                                                     std::int32_t first,
-                                                                    std::int32_t last) {
+                                                                    std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::linear_add_workspace_capacity_bytes(QType::W8G32_F16S, TextConfig::hidden,
                                                     TextConfig::value_dim,
                                                     ops::LinearPolicy::A16Only, first, last);
 }
 
 std::size_t Variant::gdn_norm_control_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                          std::int32_t last) {
+                                                                          std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::gdn_norm_gating_proj_workspace_capacity_bytes(TextConfig::gdn_value_heads,
                                                               TextConfig::hidden, first, last);
 }
 
 std::size_t Variant::post_mixer_workspace_capacity_bytes(WeightsProfile, qwen3_6::TextPhase,
-                                                         std::int32_t first, std::int32_t last) {
+                                                         std::int32_t first, std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return std::max(
         ops::sparse_moe_workspace_capacity_bytes(QType::Q4G64_F16S, QType::Q5G64_F16S, first, last),
         ops::sparse_moe_workspace_capacity_bytes(QType::Q4G64_F16S, QType::Q6G64_F16S, first,
@@ -317,7 +334,8 @@ std::size_t Variant::post_mixer_workspace_capacity_bytes(WeightsProfile, qwen3_6
 }
 
 std::size_t Variant::mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
-                                                             std::int32_t last) {
+                                                             std::int32_t last, std::int32_t tp) {
+    validate_workspace_tp(tp);
     return ops::sparse_moe_workspace_capacity_bytes(QType::W8G32_F16S, QType::W8G32_F16S, first,
                                                     last);
 }

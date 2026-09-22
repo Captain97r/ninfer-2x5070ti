@@ -56,8 +56,8 @@ struct TextAttentionProjectionRoots {
 };
 
 // `tp` narrows every head-sharded extent to the calling device's own share. The hidden/residual
-// axis is replicated and therefore never divided. Startup layout simulation calls these with the
-// default tp == 1, which over-plans a tp2 device rather than under-planning it.
+// axis is replicated and therefore never divided. Startup layout simulation passes the same
+// tensor-parallel width as execution; the default is the TP1/reference schedule.
 template <class Config, class Allocator>
 TextAttentionProjectionRoots text_attention_projection(Allocator& allocator, std::int32_t tokens,
                                                        std::int32_t tp = 1) {

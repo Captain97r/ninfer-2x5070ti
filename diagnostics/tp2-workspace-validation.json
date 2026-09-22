@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "hardware": {
+    "os": "native Windows WDDM",
+    "display": "moved to motherboard; inference GPUs display-disabled in capacity reports",
+    "gpus": [
+      {
+        "ordinal": 0,
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "sm_count": 70,
+        "compute_capability": "12.0",
+        "total_cuda_bytes": 17066033152
+      },
+      {
+        "ordinal": 1,
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "sm_count": 70,
+        "compute_capability": "12.0",
+        "total_cuda_bytes": 17066033152
+      }
+    ],
+    "cuda_peer_access_both_directions": false,
+    "cuda_compile_version": "13.3",
+    "cuda_runtime_driver_version": "13.4"
+  },
+  "model": {
+    "artifact": "registered NInfer v2 Qwen3.8-27B mixed NVFP4, embedded MTP",
+    "filename": "qwen3_8_27b_nvfp4.ninfer",
+    "native_rope_ceiling": 262144
+  },
+  "settings": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "concurrency": 1,
+    "kv": "explicit=context, INT8 group64",
+    "prefill_chunk": 1024,
+    "mtp_drafts": 3,
+    "proposal_head": "optimized",
+    "cuda_graph": true,
+    "vision": true,
+    "image_max_tokens": 2048,
+    "rope": "native",
+    "prefix_reuse": "enabled for capacity, saved-response panels, prefix regression and vision; disabled for near-limit qualification"
+  },
+  "workspace": {
+    "before_bytes_per_rank": 202320384,
+    "after_bytes_per_rank": 138741504,
+    "saved_bytes_per_rank": 63578880,
+    "change": "Shape-aware TP2 leaf queries and actual arena lifetimes; intended inference arithmetic unchanged.",
+    "independent_composition_check": {
+      "source": "build/post-display/workspace-plan-test.log",
+      "passed": true,
+      "cases": [
+        {
+          "chunk": 1024,
+          "B": 1,
+          "K": 3,
+          "vision": 0,
+          "optimized": 1,
+          "context": 196608,
+          "text": 117743616,
+          "MTPprefill": 117743616,
+          "ordinary": 4599680,
+          "MTPround": 4599680,
+          "vision_workspace": 0,
+          "capacity": 117743616
+        },
+        {
+          "chunk": 1024,
+          "B": 1,
+          "K": 3,
+          "vision": 1,
+          "optimized": 1,
+          "context": 196608,
+          "text": 117760000,
+          "MTPprefill": 117760000,
+          "ordinary": 4599680,
+          "MTPround": 4599680,
+          "vision_workspace": 138741504,
+          "capacity": 138741504
+        },
+        {
+          "chunk": 128,
+          "B": 8,
+          "K": 5,
+          "vision": 0,
+          "optimized": 0,
+          "context": 262144,
+          "text": 14717952,
+          "MTPprefill": 14717952,
+          "ordinary": 55194624,
+          "MTPround": 55194624,
+          "vision_workspace": 0,
+          "capacity": 55194624
+        },
+        {
+          "chunk": 128,
+          "B": 8,
+          "K": 1,
+          "vision": 1,
+          "optimized": 1,
+          "context": 131072,
+          "text": 14720000,
+          "MTPprefill": 14720000,
+          "ordinary": 18398208,
+          "MTPround": 18398208,
+          "vision_workspace": 138741504,
+          "capacity": 138741504
+        },
+        {
+          "chunk": 1024,
+          "B": 1,
+          "K": 0,
+          "vision": 1,
+          "optimized": 0,
+          "context": 196608,
+          "text": 117760000,
+          "MTPprefill": 0,
+          "ordinary": 1119200,
+          "MTPround": 0,
+          "vision_workspace": 138741504,
+          "capacity": 138741504
+        }
+      ],
+      "scope": "Memory-layout composition, not model numerical or task-quality qualification."
+    },
+    "already_reserved": {
+      "vision_output_bytes_per_rank": 20971520,
+      "shared_text_vision_workspace_bytes_per_rank": 138741504,
+      "graph_allowance_bytes_per_rank": 85983232,
+      "observed_graph_bytes": [
+        2097152,
+        2097152
+      ],
+      "scope": "KV backing and vision output arenas allocated at startup; graph definitions/executables prepared and uploaded before free-memory report. Extra module/driver transients still require workload qualification."
+    }
+  },
+  "reserve": {
+    "engineering_floor_mib": 256,
+    "is_vendor_guarantee": false,
+    "observed_prefill_spike_mib": 32,
+    "observed_gpu_used_mib": [
+      14938,
+      14970
+    ],
+    "observation": "Baseline GPU-wide memory rises during prefill and returns during decode. Conservatively count the full32MiB against CUDA headroom; NVML deltas do not prove identical cudaMemGetInfo deltas.",
+    "candidate_startup_free_bytes": 317718528,
+    "candidate_projected_prefill_free_bytes": 284164096,
+    "candidate_projected_prefill_free_mib": 271,
+    "bytes_per_64token_increment": 1148936,
+    "projection_anchor": "Measured199680 candidate startup and existing163840-to196608 persistent-arena page stride.",
+    "projections": [
+      {
+        "context": 196608,
+        "startup_free_mib": 355.5941,
+        "startup_measured": false,
+        "after_32mib_prefill_allowance_mib": 323.5941,
+        "meets_256mib_projection": true
+      },
+      {
+        "context": 199680,
+        "startup_free_mib": 303.0,
+        "startup_measured": true,
+        "after_32mib_prefill_allowance_mib": 271.0,
+        "meets_256mib_projection": true
+      },
+      {
+        "context": 200704,
+        "startup_free_mib": 285.4686,
+        "startup_measured": false,
+        "after_32mib_prefill_allowance_mib": 253.4686,
+        "meets_256mib_projection": false
+      },
+      {
+        "context": 204800,
+        "startup_free_mib": 215.3431,
+        "startup_measured": false,
+        "after_32mib_prefill_allowance_mib": 183.3431,
+        "meets_256mib_projection": false
+      }
+    ],
+    "pending_decision": "199680 leaves projected271MiB;200704 leaves approximately253.5MiB and misses the floor. Final selection awaits candidate long/near-limit/vision qualification.",
+    "windows_limit": "NVML GPU-wide free is not the CUDA process budget. WDDM SharedUsage includes pinned/driver allocations; it cannot by itself prove spill or absence of spill. Other GPU workloads and driver changes can reduce the reserve."
+  },
+  "artifact_type": "ninfer_tp2_workspace_validation",
+  "scope": "TP2 shard/lifetime workspace sizing only; inference arithmetic, weight/KV precision, kernels and sampling are unchanged. The measured199680 capacity is qualified by the bounded checks below; final long-workload/default selection is recorded separately.",
+  "capacity": {
+    "source_tool": "build/post-display/probe_capacity.py",
+    "rows": [
+      {
+        "context": 163840,
+        "revision": "baseline",
+        "completed": true,
+        "source": "build/post-display/capacity-163840-explicit/report.json",
+        "cuda_startup_free_bytes": 898629632,
+        "cuda_startup_free_mib": 857.0,
+        "workspace_bytes": 202320384,
+        "planned_slack_bytes": 818743552,
+        "smoke_prompt_tokens": 40,
+        "smoke_generated_tokens": 512,
+        "smoke_finish": "output_limit"
+      },
+      {
+        "context": 196608,
+        "revision": "baseline",
+        "completed": true,
+        "source": "build/post-display/capacity-196608-explicit/report.json",
+        "cuda_startup_free_bytes": 309329920,
+        "cuda_startup_free_mib": 295.0,
+        "workspace_bytes": 202320384,
+        "planned_slack_bytes": 230488320,
+        "smoke_prompt_tokens": 40,
+        "smoke_generated_tokens": 512,
+        "smoke_finish": "output_limit"
+      },
+      {
+        "context": 229376,
+        "revision": "baseline",
+        "completed": false,
+        "source": "build/post-display/capacity-229376-explicit/report.json",
+        "outcome": "explicit runtime admission rejected",
+        "runtime_required_bytes": 4599256832,
+        "runtime_available_bytes": 4242447360
+      },
+      {
+        "context": 199680,
+        "revision": "workspace_candidate",
+        "completed": true,
+        "source": "build/post-display/capacity-199680-explicit-workspace/report.json",
+        "cuda_startup_free_bytes": 317718528,
+        "cuda_startup_free_mib": 303.0,
+        "workspace_bytes": 138741504,
+        "planned_slack_bytes": 238918144,
+        "smoke_prompt_tokens": 40,
+        "smoke_generated_tokens": 512,
+        "smoke_finish": "output_limit"
+      }
+    ],
+    "scope": "Startup plus40-prompt/512-output smoke. CUDA free field is primary-rank only; admission uses the tighter pre-runtime CUDA budget of both ranks. These are not near-limit execution tests."
+  },
+  "acceptance": {
+    "composition": "Five independent host-backed arena walks passed, including odd chunks, batching, Vision, MTP-off and full/optimized proposal heads.",
+    "prefix": {
+      "source": "build/post-display/workspace-prefix.xml",
+      "passed": true,
+      "scope": "Actual relinked TP2 real-artifact test; matched cached/cold logits, tokens, MTP state and both-rank egress."
+    },
+    "saved_responses": [
+      {
+        "panel": "short",
+        "source": "build\\quality\\workspace192k-short.json",
+        "cases": 18,
+        "task_passed": 16,
+        "all_observables_equal": true
+      },
+      {
+        "panel": "stochastic",
+        "source": "build\\quality\\workspace192k-stochastic.json",
+        "cases": 7,
+        "task_passed": 5,
+        "all_observables_equal": true
+      },
+      {
+        "panel": "retrieval",
+        "source": "build\\quality\\workspace192k-retrieval.json",
+        "cases": 4,
+        "task_passed": 4,
+        "all_observables_equal": true
+      }
+    ],
+    "near_limit": {
+      "context": 199680,
+      "source": "build/context-qualification/workspace-195k-limit/report.json",
+      "summary": {
+        "complete": true,
+        "all_observations_validated": true,
+        "all_tasks_passed": true,
+        "boundary_status": "passed",
+        "qualification_passed": true
+      },
+      "cases": [
+        {
+          "name": "retrieve-three",
+          "prompt": 199107,
+          "completion": 130,
+          "finish": "stop_token",
+          "task_passed": true,
+          "boundary": null
+        },
+        {
+          "name": "absent-key",
+          "prompt": 199120,
+          "completion": 21,
+          "finish": "stop_token",
+          "task_passed": true,
+          "boundary": null
+        },
+        {
+          "name": "context-boundary",
+          "prompt": 197632,
+          "completion": 2049,
+          "finish": "context_capacity",
+          "task_passed": null,
+          "boundary": {
+            "cached_token_frontier": 199680,
+            "prompt_plus_completion": 199681,
+            "expected_cached_frontier": 199680,
+            "contract": "prompt_tokens + completion_tokens -1 == context at context_capacity",
+            "status": "passed"
+          }
+        },
+        {
+          "name": "post-session-health",
+          "prompt": 40,
+          "completion": 10,
+          "finish": "stop_token",
+          "task_passed": true,
+          "boundary": null
+        }
+      ]
+    },
+    "vision": {
+      "context": 199680,
+      "source": "build/post-display/workspace-vision199680.json",
+      "passed": 8,
+      "failed": 0,
+      "cases": [
+        "chart_ocr_count_position",
+        "stream_left_image",
+        "changed_image_same_question",
+        "two_image_conversation",
+        "thinking_image",
+        "oversized_image_downscale",
+        "exact_capacity_image",
+        "text_after_images"
+      ],
+      "largest_source_dimensions": [
+        2048,
+        1024
+      ],
+      "largest_image_tokens": 2048
+    }
+  },
+  "limits": "Saved task scores remain16/18,5/7 and4/4; exact response parity is bounded regression evidence, not broad accuracy equivalence. Image checks are short histories at the larger allocation. Linux was not executed locally. CUDA startup-free reporting is primary-rank, while both-rank NVML usage is captured in the capacity reports."
+}

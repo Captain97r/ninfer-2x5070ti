@@ -7,7 +7,7 @@ $testNames = @('tensor_slice', 'kv_capacity_tp2', 'peer_mailbox', 'allreduce',
     'argmax_row_parallel', 'peer_transfer', 'peer_transfer_pipeline', 'allgather_columns',
     'linear_nvfp4_a16', 'linear_nvfp4_a4', 'nvfp4_tma_descriptors',
     'mtp_split', 'speculative_round', 'speculative_rank0', 'sampling', 'gdn_headsplit',
-    'gqa_tp2_sm70', 'bench_support')
+    'gqa_tp2_sm70', 'qwen3_8_27b_tp2_workspace', 'bench_support')
 $targets = @($testNames | ForEach-Object { "ninfer_${_}_test" })
 if ($Model) {
     $modelSpec = Get-Content -LiteralPath (Join-Path $workspace 'config\model.json') -Raw | ConvertFrom-Json
