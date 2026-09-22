@@ -38,6 +38,9 @@ ninfer_add_op_bench(ninfer_allgather_columns_bench SOURCES ops/allgather_columns
 target_include_directories(ninfer_allgather_columns_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 ninfer_add_op_bench(ninfer_peer_transfer_bench SOURCES ops/peer_transfer_bench.cpp)
 target_include_directories(ninfer_peer_transfer_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+# Private eager tiled-copy experiment; public transport and numerical launchers stay unchanged.
+ninfer_add_op_bench(ninfer_peer_transfer_pipeline_bench SOURCES ops/peer_transfer_pipeline_bench.cpp)
+target_include_directories(ninfer_peer_transfer_pipeline_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 ninfer_add_op_bench(ninfer_argmax_row_parallel_bench SOURCES ops/argmax_row_parallel_bench.cpp)
 target_include_directories(ninfer_argmax_row_parallel_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 ninfer_add_op_bench(ninfer_causal_conv1d_silu_bench SOURCES ops/causal_conv1d_silu_bench.cu)

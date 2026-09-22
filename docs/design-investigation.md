@@ -476,6 +476,14 @@ GPU work and host submission before choosing between these distinct changes:
   approximation and is excluded from the quality-preserving implementation track.
   Finite evaluation cannot establish that additional lossy compression is lossless.
 
+A bounded 10 MiB eager allreduce experiment now qualifies two/four-tile host
+copies on separate owned D2H streams, retaining the exact full-buffer sum. Two
+tiles reduced complete collective latency by about 3% in both GPU orders, with
+higher CPU enqueue cost. Changing inputs, all outputs/publications, mixed routes,
+pending-owner teardown and sanitizer checks passed. This justifies a separate
+runtime trial; it is not yet a measured PP gain. Both cards report one asynchronous
+copy engine under WDDM. [Evidence](../diagnostics/peer-transfer-pipeline-validation.json).
+
 An example occupancy question is the current down-projection grid at T1024:
 40 times four tiles gives 160 CTAs over 70 SMs. Different tile sizes or staging
 may improve wave utilization, but register/shared-memory pressure can reverse

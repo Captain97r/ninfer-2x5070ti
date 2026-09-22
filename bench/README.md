@@ -1222,3 +1222,33 @@ registers and zero shared/local bytes; the occupancy API permits 20 resident
 warps for four-warp CTAs versus 16 for eight-warp CTAs. These are theoretical
 resource limits. Four warps remains the production choice; no engine gain is
 claimed. [Evidence](../diagnostics/nvfp4-down-cta-validation.json).
+
+## Local eager TP2 transfer pipeline experiment
+
+`ninfer_peer_transfer_pipeline_bench` compares public pinned allreduce with private
+two/four-tile copies for exactly 10 MiB per rank. Each candidate owns one extra
+D2H stream per GPU, ordering events and guarded pinned buffers. Main streams pull
+peer tiles, join all source/host-buffer readers, then use the unchanged full-buffer
+BF16 sum. There is no captured or production routing change in this experiment.
+
+```powershell
+.\tools\build_windows.ps1 -Action Build -Target ninfer_peer_transfer_pipeline_bench
+.\build\windows\bench\ninfer_peer_transfer_pipeline_bench.exe 2 1
+.\build\windows\bench\ninfer_peer_transfer_pipeline_bench.exe 32 31
+```
+
+The reduced run still executes all numerical/lifetime checks. Full-coordinate
+changing inputs prevent repeated tile patterns from hiding wrong-offset copies.
+Every output and pinned publication is checked across consecutive calls, delayed
+producers, mixed routes, both GPU orders, and pending-owner destruction. Timings
+rotate 31 paired batches after eight warmups; all 32 sums in a batch are joined
+before elapsed time is recorded. Host enqueue, complete wall and joined device
+intervals are separate. Final timed outputs are checked before each reset.
+
+Two tiles reduced median joined latency from 1566/1564 us to 1520/1518 us for
+normal/reversed GPU order (about 3% by paired ratio), while increasing host enqueue
+time. Four tiles was slightly slower than two and submitted more work. The full
+correctness matrix passed, including Compute Sanitizer with stream-ordered race
+tracking and zero reported errors. Both GPUs report one asynchronous copy engine
+under WDDM; the result does not claim simultaneous bidirectional DMA or an engine
+PP improvement. [Evidence](../diagnostics/peer-transfer-pipeline-validation.json).
