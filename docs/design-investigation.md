@@ -230,6 +230,19 @@ that exact integer in the response usage, so a long-context check cannot silentl
 exercise a shorter prompt. Prompt counts are report metadata, separate from output
 parity. This mechanism does not itself establish a long-context quality result.
 
+The frozen [retrieval panel](../tests/data/retrieval-panel.json) adds four synthetic
+ledger lookups: 4,068 tokens with the record near 90% of the ledger, 32,758 at 50%,
+99,985 at 5%, and a 99,966-token absent-key control. Keys and values are distinct,
+and requests use different early case identities. The corpus was generated and
+frozen before any model answer was inspected. All four pass on the preserved
+stage-four engine. The [reference](../diagnostics/retrieval-reference.json) retains
+exact prompt counts, typed JSON answers and observable response metadata. This is
+a bounded retrieval screen, not a broad long-context reasoning evaluation.
+
+```powershell
+python tools/run_quality_windows.py --label retrieval-candidate --fixtures tests/data/retrieval-panel.json --baseline diagnostics/retrieval-reference.json
+```
+
 Capture currently returns exit 1 for the two real task failures. Comparison
 returns success only for complete exact parity without new task failures, while
 retaining `all_tasks_passed: false`. The server used for ordinary OMP requests

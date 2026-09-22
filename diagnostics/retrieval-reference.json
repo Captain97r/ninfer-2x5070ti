@@ -1,0 +1,137 @@
+{
+  "schema_version": 2,
+  "mode": "capture",
+  "label": "stage4-retrieval",
+  "date_utc": "2026-09-22T17:20:15.260290+00:00",
+  "contract": {
+    "fixture_sha256": "335e1bdadae8b53a3e427f4bb94fb9b384f55a7c2da5e3c68fbebb3cf8cf23a6",
+    "case_ids": [
+      "retrieve-4k",
+      "retrieve-32k",
+      "retrieve-100k",
+      "absent-100k"
+    ],
+    "image_fixture_sha256": {},
+    "model": "qwen3.8-27b",
+    "context": 102400,
+    "vision": true,
+    "runtime_config": {
+      "artifact_sha256": "bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32",
+      "artifact_bytes": 21492695040,
+      "options": [
+        "--tp",
+        "2",
+        "--devices",
+        "0,1",
+        "--max-context",
+        "102400",
+        "--kv-capacity",
+        "102400",
+        "--kv-dtype",
+        "int8",
+        "--prefill-chunk",
+        "1024",
+        "--vision",
+        "--image-max-tokens",
+        "2048",
+        "--max-concurrency",
+        "1",
+        "--default-max-tokens",
+        "102400",
+        "--spec",
+        "mtp",
+        "--draft-tokens",
+        "3",
+        "--lm-head-draft"
+      ]
+    }
+  },
+  "scope": "Bounded task scoring and exact observable-response parity; not token-ID or broad quality equivalence.",
+  "complete": true,
+  "all_tasks_passed": true,
+  "all_observables_equal": null,
+  "no_new_task_failures": null,
+  "regression_passed": null,
+  "cases": [
+    {
+      "id": "retrieve-4k",
+      "category": "long-context-retrieval",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 4068,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"key\":\"REC-F6C04ABE6BEE\",\"value\":\"VAL-10116CC48D55\"}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 32
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 1.5608871000004
+    },
+    {
+      "id": "retrieve-32k",
+      "category": "long-context-retrieval",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 32758,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"key\":\"REC-A7DBF901207A\",\"value\":\"VAL-60E7032648E5\"}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 34
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 12.064661699987482
+    },
+    {
+      "id": "retrieve-100k",
+      "category": "long-context-retrieval",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 99985,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"key\":\"REC-34D513C2F88B\",\"value\":\"VAL-373838E09982\"}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 36
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 44.93849820000469
+    },
+    {
+      "id": "absent-100k",
+      "category": "long-context-retrieval",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 99966,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"key\":\"REC-BBDB19B3406B\",\"value\":null}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 21
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 44.91690650000237
+    }
+  ]
+}
