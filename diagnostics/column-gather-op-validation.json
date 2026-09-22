@@ -1,0 +1,161 @@
+{
+  "scope": "Exact column gather operator only; production target-logit route not yet enabled",
+  "inference_math_changed": false,
+  "qualification": {
+    "packed": "passed eager implicit/pinned, reversed GPU roles, asymmetric widths, raw BF16 bits, changed calls, capture/replay and whole-graph updates",
+    "baseline": "passed same exact oracle in ordinary GPU order",
+    "sanitizer": {
+      "tool": "Compute Sanitizer memcheck",
+      "track_stream_ordered_races": "all",
+      "errors": 0
+    },
+    "direct_2d_experiment": {
+      "accepted_for_production": false,
+      "result": "T1 eager/capture/replay/update passes; T4 eager passes, whole-graph executable update fails with cudaErrorGraphExecUpdateFailure, update result5. Not substituted or treated as passed."
+    }
+  },
+  "microbenchmarks": [
+    {
+      "columns": 4,
+      "configuration": {
+        "type": "configuration",
+        "scope": "exact-gather-only",
+        "rows_per_rank": 124160,
+        "cols": 4,
+        "calls_per_sample": 1,
+        "warmup": 10,
+        "samples": 31,
+        "devices": [
+          0,
+          1
+        ],
+        "direct_p2p": false,
+        "eager_transport": "pinned-staging",
+        "pinned_capacity_per_rank": 993536,
+        "packed_scratch_per_rank": 993280,
+        "order": "rotating paired",
+        "input": "resident raw BF16 bits"
+      },
+      "summaries": [
+        {
+          "type": "summary",
+          "mode": "eager",
+          "route": "per-column",
+          "samples": 31,
+          "median_enqueue_us": 213.5,
+          "median_complete_wall_us": 687.2,
+          "median_joined_device_us": 683.008015,
+          "p95_complete_wall_us": 773.5,
+          "p95_joined_device_us": 773.92
+        },
+        {
+          "type": "summary",
+          "mode": "eager",
+          "route": "packed",
+          "samples": 31,
+          "median_enqueue_us": 54.7,
+          "median_complete_wall_us": 255.6,
+          "median_joined_device_us": 256.576002,
+          "p95_complete_wall_us": 280.8,
+          "p95_joined_device_us": 281.951994
+        },
+        {
+          "type": "summary",
+          "mode": "graph",
+          "route": "per-column",
+          "samples": 31,
+          "median_enqueue_us": 231.5,
+          "median_complete_wall_us": 821.6,
+          "median_joined_device_us": 785.503983,
+          "p95_complete_wall_us": 995.1,
+          "p95_joined_device_us": 964.064002
+        },
+        {
+          "type": "summary",
+          "mode": "graph",
+          "route": "packed",
+          "samples": 31,
+          "median_enqueue_us": 64.7,
+          "median_complete_wall_us": 401.5,
+          "median_joined_device_us": 380.127996,
+          "p95_complete_wall_us": 432.8,
+          "p95_joined_device_us": 404.448003
+        }
+      ]
+    },
+    {
+      "columns": 1,
+      "configuration": {
+        "type": "configuration",
+        "scope": "exact-gather-only",
+        "rows_per_rank": 124160,
+        "cols": 1,
+        "calls_per_sample": 1,
+        "warmup": 10,
+        "samples": 31,
+        "devices": [
+          0,
+          1
+        ],
+        "direct_p2p": false,
+        "eager_transport": "pinned-staging",
+        "pinned_capacity_per_rank": 248576,
+        "packed_scratch_per_rank": 0,
+        "order": "rotating paired",
+        "input": "resident raw BF16 bits"
+      },
+      "summaries": [
+        {
+          "type": "summary",
+          "mode": "eager",
+          "route": "per-column",
+          "samples": 31,
+          "median_enqueue_us": 44.6,
+          "median_complete_wall_us": 177.6,
+          "median_joined_device_us": 178.752005,
+          "p95_complete_wall_us": 195.5,
+          "p95_joined_device_us": 195.840001
+        },
+        {
+          "type": "summary",
+          "mode": "eager",
+          "route": "packed",
+          "samples": 31,
+          "median_enqueue_us": 44.7,
+          "median_complete_wall_us": 179.5,
+          "median_joined_device_us": 180.191994,
+          "p95_complete_wall_us": 244.1,
+          "p95_joined_device_us": 244.543999
+        },
+        {
+          "type": "summary",
+          "mode": "graph",
+          "route": "per-column",
+          "samples": 31,
+          "median_enqueue_us": 178.9,
+          "median_complete_wall_us": 264.8,
+          "median_joined_device_us": 266.880006,
+          "p95_complete_wall_us": 325.5,
+          "p95_joined_device_us": 321.471989
+        },
+        {
+          "type": "summary",
+          "mode": "graph",
+          "route": "packed",
+          "samples": 31,
+          "median_enqueue_us": 197.2,
+          "median_complete_wall_us": 277.5,
+          "median_joined_device_us": 269.856006,
+          "p95_complete_wall_us": 360.4,
+          "p95_joined_device_us": 357.120007
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Microbenchmark latency is not an end-to-end speedup.",
+    "T1 delegates to existing gather; small timing differences do not establish a different GPU path.",
+    "T4 packed scratch is993280bytes per rank, explicitly caller-owned.",
+    "Linux execution not tested locally."
+  ]
+}

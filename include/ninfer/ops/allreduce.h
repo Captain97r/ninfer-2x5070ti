@@ -21,6 +21,7 @@
 // Return means enqueued, not completed; CUDA Async APIs may still block in the driver.
 // The caller owns the stream pair and resource, and destroys graph users before the resource.
 
+#include "core/arena.h"
 #include "core/device.h" // DeviceContext, ExecutionContext
 #include "core/tensor.h"
 
@@ -133,7 +134,8 @@ void allreduce_sum(const std::array<Tensor, 2>& buffer, const std::array<Tensor,
  * counts must sum to the destination row count. `destination[r]` and `part[r]` are contiguous,
  * share one dtype, agree on `ne[0]`, live on `ec.dev[r]`, and must not overlap. A caller whose
  * split axis is not `ne[1]` (for example `[V, B]` logits split by vocabulary with B > 1) arranges
- * the layout so that it is; this Op relocates contiguous storage and performs no transpose.
+ * the layout so that it is, or uses allgather_columns for BF16 inputs. This Op relocates
+ * contiguous storage and performs no transpose.
  *
  * `destination[r]` is written only by rank r's stream: rank r copies its own block locally and
  * pulls the peer's block. The transformation is a pure relocation of storage, so it is verified by
@@ -145,4 +147,34 @@ void allreduce_sum(const std::array<Tensor, 2>& buffer, const std::array<Tensor,
 void allgather_rows(const std::array<Tensor, 2>& destination, const std::array<Tensor, 2>& part,
                     const ExecutionContext& ec, const PeerTransfer& transfer);
 
+// Per-rank scratch bound for allgather_columns: pass the OTHER rank's physical row count.
+// A single column is already contiguous and needs no scratch. Alignment is included.
+[[nodiscard]] std::size_t allgather_columns_workspace_capacity_bytes(
+    std::int32_t peer_rows, std::int32_t columns);
+
+/**
+ * Two-device BF16 column gather, exact storage relocation along ne[0]:
+ *
+ *   destination[r][v,t] = part[0][v,t]         for v < V0,
+ *                          part[1][v-V0,t]    otherwise.
+ *
+ * Each part[r] is contiguous BF16 [Vr,T], Vr>0 and T>0, resident on ec.dev[r]. Both outputs
+ * are contiguous BF16 [V0+V1,T] on their respective devices, and V0+V1 fits int32. Every bit is
+ * preserved, including NaN payloads, signed zero and padding rows; there is no valid-row filter.
+ * Inputs are unchanged. Input, output and workspace storage on each rank must be disjoint.
+ *
+ * transfer belongs to these two distinct devices and streams. For T>1, workspace[r] supplies
+ * the bound queried with V(1-r),T; only caller-owned arenas are suballocated, and their scopes
+ * are restored on return. For T==1 the arena pointers may be null. No device allocation,
+ * persistent state or host synchronization is introduced. Peer reads use the transfer's pinned
+ * eager or UVA fallback path; local kernels never dereference the other GPU's allocation.
+ *
+ * All work uses ec's streams. On return both streams are ordered after the peer's source read
+ * and their own output/scratch use, so inputs and arenas may be reused by subsequent calls on
+ * the same stream pair without a host wait. Captured addresses remain caller-owned and stable.
+ */
+void allgather_columns(const std::array<Tensor, 2>& destination,
+                       const std::array<Tensor, 2>& part,
+                       const std::array<WorkspaceArena*, 2>& workspace,
+                       const ExecutionContext& ec, const PeerTransfer& transfer);
 } // namespace ninfer::ops

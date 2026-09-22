@@ -328,6 +328,10 @@ ninfer_add_op_test(ninfer_rope_yarn_test
 ninfer_add_op_test(ninfer_allreduce_test
   SOURCES ops/test_allreduce.cpp
   LIBRARIES ninfer_ops)
+ninfer_add_op_test(ninfer_allgather_columns_test
+  SOURCES ops/test_allgather_columns.cpp
+  LIBRARIES ninfer_ops)
+set_tests_properties(ninfer_allgather_columns_test PROPERTIES TIMEOUT 180)
 ninfer_add_op_test(ninfer_peer_transfer_test
   SOURCES ops/test_peer_transfer.cpp
   LIBRARIES ninfer_ops)

@@ -833,3 +833,57 @@ Run `ninfer_peer_transfer_test` first. It separately checks nonzero changing ope
 the FP64 sum/storage oracle, asymmetric exact row gathers, host-buffer reuse, guards,
 independent owners, reversed ranks, and captured fallback. Accept a transport change
 only after the paired timing and unprofiled model prefill/quality checks pass.
+
+### TP2 target-logit column gather experiment
+
+`ninfer_allgather_columns_bench` compares the current per-column gather with one packed
+peer transfer plus an exact integer interleave. `--with-direct2d` adds an experimental
+pair of pitched CUDA copies per rank. Both ranks retain the full physical vocabulary,
+including padding; the benchmark performs no logit arithmetic, sampling or filtering.
+The production target-logit route remains unchanged pending qualification and timing.
+
+```powershell
+cmake --build build/windows -j --target ninfer_allgather_columns_test ninfer_allgather_columns_bench
+build/windows/tests/ninfer_allgather_columns_test.exe
+build/windows/tests/ninfer_allgather_columns_test.exe --reverse-devices
+build/windows/tests/ninfer_allgather_columns_test.exe --candidate-direct2d
+build/windows/tests/ninfer_allgather_columns_test.exe --candidate-direct2d --reverse-devices
+build/windows/bench/ninfer_allgather_columns_bench.exe --cols 4 --with-direct2d
+build/windows/bench/ninfer_allgather_columns_bench.exe --cols 1 --with-direct2d
+```
+
+Linux uses the corresponding executable paths without `.exe`. The test's default route
+is the public packed Op; `--baseline` checks the existing per-column composition. It
+compares raw BF16 bits against independent host concatenation, including NaN payloads,
+signed zeros, asymmetric shard widths, input/guard preservation, changing consecutive
+calls, both eager transports, captured replay, and whole-graph executable updates between
+distinct live bindings of the same shape. T1 and T4 are separate graph topologies. An
+unsupported direct-2D capture or update reports a failure; it never silently substitutes
+the packed candidate.
+
+The benchmark fixes the actual shard width at 124160 and supports T1 or T4, with resident
+raw BF16 inputs. Default timing is ten warmups and 31 rotating paired samples of one
+gather, in both eager and captured modes. `--mode eager|graph|both`, `--calls N`,
+`--samples N`, `--warmup N`, `--reverse-devices`, and `--implicit-only` bound individual
+comparisons. Portable pinned staging is provisioned by default and remains eager-only;
+captured calls use the existing UVA copy path. No mailbox is installed or reset.
+Every selected route passes its own poisoned-output exact oracle before measurement.
+JSON reports host enqueue, complete wall and joined-device time per gather, including
+median/p95 summaries. These overlapping intervals are not additive. This is gather
+latency, not committed-token throughput; a winner still needs the 100K model benchmark.
+
+The packed Op's explicit per-rank scratch query is
+`allgather_columns_workspace_capacity_bytes(peer_rows, T)`: zero for T1 and 993280 bytes
+for the 124160-row T4 peer shard. Enabling it in `TextContext::logits_tp2` also requires
+planning this live scratch alongside the vocabulary-half allocation in `tp_call_roots`
+and the full-head MTP fallback in `tp_mtp_call_roots`. Do not rely on unrelated arena
+slack. The optimized distributed draft argmax and persistent full-logit outputs are
+unchanged by this experiment.
+
+On this Windows dual 5070 Ti host, the packed candidate passed both rank orders and
+Compute Sanitizer with zero errors. At T4, median captured complete-wall latency
+was 821.6 us for the per-column baseline and 401.5 us for packed (31 rotating paired
+samples). T1 retains the same gather path. The direct 2D experiment passes eager T4
+but fails whole-graph update with cudaErrorGraphExecUpdateFailure (result 5), so it
+is not qualified for production here. These results do not establish model speed.
+[Operator evidence](../diagnostics/column-gather-op-validation.json).

@@ -1,6 +1,7 @@
 // Implements: include/ninfer/ops/allreduce.h
 //
-// Host-side composition only. Large eager no-P2P calls can use caller-owned portable pinned
+// Cross-device composition and exact local column interleave. Large eager no-P2P calls use
+// caller-owned portable pinned
 // buffers; each source D2H precedes inputs_ready and each peer H2D precedes pull_done. Other
 // payloads/captures retain cudaMemcpyAsync with cudaMemcpyDeviceToDevice over
 // UVA pointers (see pull_peer() below -- deliberately NOT cudaMemcpyPeerAsync, which stream
@@ -9,7 +10,7 @@
 // exactly this Op's local step. Sharing that private launch body keeps one implementation of the
 // BF16 sum instead of a second, separately qualified copy of the same arithmetic.
 //
-// Both collectives share one three-phase issue order. The phases exist because a wait must not be
+// The collectives share one three-phase issue order. The phases exist because a wait must not be
 // issued before the record it observes: cudaStreamWaitEvent snapshots the event's current state,
 // so phase B's wait on inputs_ready[1-r] would snapshot a stale (or absent) capture point if the
 // peer's phase-A record had not been issued yet.
@@ -17,7 +18,7 @@
 //   phase A, both ranks:  record(inputs_ready[r])
 //   phase B, both ranks:  wait(inputs_ready[1-r]); pull peer source into own storage;
 //                         record(pull_done[r])
-//   phase C, both ranks:  wait(pull_done[1-r]); local combine (allreduce_sum only)
+//   phase C, both ranks:  wait(pull_done[1-r]); optional local sum or column interleave
 //
 // THE PULL ITSELF is cudaMemcpyAsync with cudaMemcpyDeviceToDevice over UVA pointers, NOT
 // cudaMemcpyPeerAsync -- see pull_peer() below for why. The choreography, the streams each call
@@ -26,6 +27,7 @@
 #include "ninfer/ops/allreduce.h"
 
 #include "ninfer/ops/peer_mailbox.h"
+#include "core/layout.h"
 
 #include "ops/kernel/peer_exchange.cuh" // detail::peer_exchange_sum_kernel
 #include "ops/launcher/residual_add.h" // detail::residual_add_launch
@@ -34,6 +36,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -477,6 +480,159 @@ void allgather_rows(const std::array<Tensor, 2>& destination, const std::array<T
         const DeviceContext& local = *ec.dev[rank];
         CurrentDeviceGuard::set(local.device);
         CUDA_CHECK(cudaStreamWaitEvent(local.stream, transfer.pull_done(1 - rank), 0));
+    }
+}
+
+namespace {
+
+// Each thread copies one scalar or 16-byte vector. All three pointers are resident on this
+// launch's device: one source is local input, the other the completed packed peer pull.
+// No BF16 conversion or arithmetic may enter this exact-storage path.
+template <class Storage>
+__global__ void interleave_columns_kernel(Storage* destination, const Storage* first,
+                                           const Storage* second, int first_width,
+                                           int second_width, int columns) {
+    const int width = first_width + second_width;
+    const std::size_t row = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (row >= static_cast<std::size_t>(width)) { return; }
+    for (std::size_t column = blockIdx.y; column < static_cast<std::size_t>(columns);
+         column += gridDim.y) {
+        destination[column * width + row] = row < static_cast<std::size_t>(first_width)
+            ? first[column * first_width + row]
+            : second[column * second_width + row - first_width];
+    }
+}
+
+void interleave_columns(const Tensor& destination, const Tensor& first, const Tensor& second,
+                          cudaStream_t stream) {
+    const int first_width = first.ne[0];
+    const int second_width = second.ne[0];
+    const auto addresses = reinterpret_cast<std::uintptr_t>(destination.data) |
+                           reinterpret_cast<std::uintptr_t>(first.data) |
+                           reinterpret_cast<std::uintptr_t>(second.data);
+    constexpr int threads = 256;
+    const auto height = static_cast<unsigned>(std::min(destination.ne[1], 65535));
+    if ((first_width % 8) == 0 && (second_width % 8) == 0 && (addresses % 16) == 0) {
+        const int width = (first_width + second_width) / 8;
+        const dim3 grid(1 + (width - 1) / threads, height);
+        interleave_columns_kernel<uint4><<<grid, threads, 0, stream>>>(
+            static_cast<uint4*>(destination.data), static_cast<const uint4*>(first.data),
+            static_cast<const uint4*>(second.data), first_width / 8, second_width / 8,
+            destination.ne[1]);
+    } else {
+        const int width = first_width + second_width;
+        const dim3 grid(1 + (width - 1) / threads, height);
+        interleave_columns_kernel<std::uint16_t><<<grid, threads, 0, stream>>>(
+            static_cast<std::uint16_t*>(destination.data),
+            static_cast<const std::uint16_t*>(first.data),
+            static_cast<const std::uint16_t*>(second.data), first_width, second_width,
+            destination.ne[1]);
+    }
+    CUDA_CHECK(cudaGetLastError());
+}
+
+} // namespace
+
+std::size_t allgather_columns_workspace_capacity_bytes(std::int32_t peer_rows,
+                                                        std::int32_t columns) {
+    require(peer_rows > 0 && columns > 0,
+            "allgather_columns: peer rows and columns must be positive");
+    if (columns == 1) { return 0; }
+    LayoutBuilder layout;
+    (void)layout.add_tensor(DType::BF16, {peer_rows, columns}, 256,
+                            "allgather columns packed peer");
+    return layout.finish(256, "allgather columns workspace");
+}
+
+void allgather_columns(const std::array<Tensor, 2>& destination,
+                       const std::array<Tensor, 2>& part,
+                       const std::array<WorkspaceArena*, 2>& workspace,
+                       const ExecutionContext& ec, const PeerTransfer& transfer) {
+    require_two_devices(ec, "allgather_columns: two distinct devices are required");
+    require(transfer.matches(ec), "allgather_columns: transfer must belong to this stream pair");
+    const int columns = part[0].ne[1];
+    const std::int64_t rows = static_cast<std::int64_t>(part[0].ne[0]) + part[1].ne[0];
+    require(columns > 0 && rows <= std::numeric_limits<std::int32_t>::max(),
+            "allgather_columns: invalid columns or combined row count");
+    for (int rank = 0; rank < 2; ++rank) {
+        require(part[rank].dtype == DType::BF16 && part[rank].ne[0] > 0 &&
+                    part[rank].ne[1] == columns && part[rank].ne[2] == 1 && part[rank].ne[3] == 1,
+                "allgather_columns: parts must be BF16 [Vr,T] with matching T");
+        require(destination[rank].dtype == DType::BF16 && destination[rank].ne[0] == rows &&
+                    destination[rank].ne[1] == columns && destination[rank].ne[2] == 1 &&
+                    destination[rank].ne[3] == 1,
+                "allgather_columns: outputs must be BF16 [V0+V1,T]");
+    }
+    for (int rank = 0; rank < 2; ++rank) {
+        require(part[rank].data && destination[rank].data && part[rank].is_contiguous() &&
+                    destination[rank].is_contiguous(),
+                "allgather_columns: storage must be non-null and contiguous");
+#ifndef NDEBUG
+        require_resident_on(part[rank].data, ec.dev[rank]->device,
+                            "allgather_columns: part is on the wrong device");
+        require_resident_on(destination[rank].data, ec.dev[rank]->device,
+                            "allgather_columns: output is on the wrong device");
+        require_disjoint(destination[rank].data, destination[rank].bytes(), part[rank].data,
+                         part[rank].bytes(), "allgather_columns: input overlaps output");
+#endif
+    }
+    // For one token the two axes can be reinterpreted without any data movement or scratch.
+    if (columns == 1) {
+        const std::array<Tensor, 2> row_part{part[0].view({1, part[0].ne[0]}),
+                                             part[1].view({1, part[1].ne[0]})};
+        const std::array<Tensor, 2> row_destination{
+            destination[0].view({1, static_cast<int>(rows)}),
+            destination[1].view({1, static_cast<int>(rows)})};
+        allgather_rows(row_destination, row_part, ec, transfer);
+        return;
+    }
+    require(workspace[0] && workspace[1], "allgather_columns: rank-local arenas are required");
+    auto scope0 = workspace[0]->scope();
+    auto scope1 = workspace[1]->scope();
+    std::array<Tensor, 2> received;
+    const std::array<std::size_t, 2> bytes{part[0].bytes(), part[1].bytes()};
+    for (int rank = 0; rank < 2; ++rank) {
+        const auto capacity = allgather_columns_workspace_capacity_bytes(part[1 - rank].ne[0], columns);
+        const DeviceSpan backing = workspace[rank]->alloc_bytes(capacity, 256);
+        received[rank] = Tensor(backing.data, DType::BF16, {part[1 - rank].ne[0], columns});
+#ifndef NDEBUG
+        require_resident_on(backing.data, ec.dev[rank]->device,
+                            "allgather_columns: workspace is on the wrong device");
+        require_disjoint(backing.data, backing.bytes, part[rank].data, bytes[rank],
+                         "allgather_columns: workspace overlaps input");
+        require_disjoint(backing.data, backing.bytes, destination[rank].data,
+                         destination[rank].bytes(), "allgather_columns: workspace overlaps output");
+#endif
+    }
+    const CurrentDeviceGuard guard;
+    const bool host_staged = transfer.uses_host_staging(bytes);
+    for (int rank = 0; rank < 2; ++rank) {
+        const DeviceContext& local = *ec.dev[rank];
+        CurrentDeviceGuard::set(local.device);
+        if (host_staged) {
+            CUDA_CHECK(cudaMemcpyAsync(transfer.host_buffer(rank), part[rank].data, bytes[rank],
+                                       cudaMemcpyDeviceToHost, local.stream));
+        }
+        CUDA_CHECK(cudaEventRecord(transfer.inputs_ready(rank), local.stream));
+    }
+    for (int rank = 0; rank < 2; ++rank) {
+        const DeviceContext& local = *ec.dev[rank];
+        CurrentDeviceGuard::set(local.device);
+        CUDA_CHECK(cudaStreamWaitEvent(local.stream, transfer.inputs_ready(1 - rank), 0));
+        if (host_staged) {
+            CUDA_CHECK(cudaMemcpyAsync(received[rank].data, transfer.host_buffer(1 - rank),
+                                       bytes[1 - rank], cudaMemcpyHostToDevice, local.stream));
+        } else {
+            CUDA_CHECK(pull_peer(received[rank].data, part[1 - rank].data, bytes[1 - rank], local.stream));
+        }
+        CUDA_CHECK(cudaEventRecord(transfer.pull_done(rank), local.stream));
+    }
+    for (int rank = 0; rank < 2; ++rank) {
+        const DeviceContext& local = *ec.dev[rank];
+        CurrentDeviceGuard::set(local.device);
+        CUDA_CHECK(cudaStreamWaitEvent(local.stream, transfer.pull_done(1 - rank), 0));
+        interleave_columns(destination[rank], rank == 0 ? part[rank] : received[rank],
+                            rank == 0 ? received[rank] : part[rank], local.stream);
     }
 }
 
