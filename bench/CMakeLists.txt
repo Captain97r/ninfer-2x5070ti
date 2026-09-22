@@ -119,3 +119,9 @@ target_include_directories(ninfer_qwen3_6_35b_a3b_dflash_round_bench PRIVATE
   ${PROJECT_SOURCE_DIR}/src/targets/qwen3_6/export)
 target_link_libraries(ninfer_qwen3_6_35b_a3b_dflash_round_bench PRIVATE
   ninfer_engine ninfer_core)
+
+# Isolated GDN T4 TP2 activation-access experiment; production dispatch stays unchanged.
+ninfer_add_op_bench(ninfer_fp8_gdn_tp2_access_bench
+  SOURCES ops/fp8_gdn_tp2_access_bench.cu)
+target_include_directories(ninfer_fp8_gdn_tp2_access_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_fp8_gdn_tp2_access_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

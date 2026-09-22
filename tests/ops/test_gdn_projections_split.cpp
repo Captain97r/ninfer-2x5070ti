@@ -383,10 +383,10 @@ int run_fused_case(const ExecutionContext& ec, QType qtype,
             upload_weight(shard[static_cast<std::size_t>(rank)].shard);
     }
 
-    // T sweep: T=1 (decode edge), small-T/MMA frontiers, T=128 (W4A4/A8 route under the permissive
-    // policy), T=1024 (a multiple of 256 -- the sole route into the NVFP4 W4A4 TMA kernel, and the
-    // shard's own TMA descriptor per the w4a4.cu/w4a4_tma.cu changes).
-    const std::vector<std::int32_t> tokens_sweep{1, 2, 5, 8, 17, 32, 48, 128, 1024};
+    // T sweep: T=1 (decode edge), T=4 (MTP3 verification), small-T/MMA frontiers, T=128
+    // (W4A4/A8 route under the permissive policy), T=1024 (a multiple of 256 -- the sole route
+    // into the NVFP4 W4A4 TMA kernel, and the shard's own TMA descriptor).
+    const std::vector<std::int32_t> tokens_sweep{1, 2, 4, 5, 8, 17, 32, 48, 128, 1024};
 
     for (const std::int32_t tokens : tokens_sweep) {
         std::vector<float> activation(static_cast<std::size_t>(kInputRows) * tokens);
@@ -1218,7 +1218,12 @@ int verify_split_rejections(const ExecutionContext& ec) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const bool fused_input_only = argc == 2 && std::strcmp(argv[1], "--fused-input-only") == 0;
+    if (argc != 1 && !fused_input_only) {
+        std::cerr << "usage: ninfer_gdn_projections_split_test [--fused-input-only]\n";
+        return 2;
+    }
     int failures = verify_registry();
     if (failures != 0) {
         std::cout << "FAIL gdn_projections split (registry)\n";
@@ -1251,6 +1256,12 @@ int main() {
     failures += run_fused_case(
         ec, QType::FP8_E4M3FN_ROW_BF16S, {ops::LinearPolicy::A16Only, ops::LinearPolicy::AllowA8},
         45u);
+    // Explicitly scoped projection qualification. The default still runs every family,
+    // including the parent BF16 cooperative reference whose grid requires more than 70 SMs.
+    if (fused_input_only) {
+        std::cout << (failures ? "FAIL" : "OK") << " gdn fused-input projections split\n";
+        return failures ? 1 : 0;
+    }
     failures += run_split_storage_case(ec, 43u);
     failures += run_gating_case(ec, 51u);
     failures += run_gating_fused_case(ec, 53u, 48);

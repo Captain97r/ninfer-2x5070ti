@@ -306,7 +306,9 @@ int run_fp8() {
 
     failures += run_fp8_case(parent, 1, ops::LinearPolicy::A16Only, true);
     failures += run_fp8_case(parent, 2, ops::LinearPolicy::A16Only);
-    for (const std::int32_t tokens : {1, 2, 7, 8, 48, 65, 1024}) {
+    // MTP3 verification uses four columns; both policies retain the A16 profile here.
+    failures += run_fp8_case(parent, 4, ops::LinearPolicy::A16Only);
+    for (const std::int32_t tokens : {1, 2, 4, 7, 8, 48, 65, 1024}) {
         failures += run_fp8_case(parent, tokens, ops::LinearPolicy::AllowA8);
     }
     return failures;

@@ -932,3 +932,46 @@ and cache-scrubbed paired kernel times made four warps about 14-17% slower and
 sixteen about 30-37% slower. All four routes passed the FP64 and exact-bit checks.
 No production schedule change or inference gain follows from this experiment.
 [Measurement record](../diagnostics/swiglu-cta-validation.json).
+
+
+### TP2 T4 FP8 GDN activation access
+
+`ninfer_fp8_gdn_tp2_access_bench --device 0` (then `--device 1`) compares
+the actual production shard launcher with private `SharedPhase` and
+`TokenPacked` instantiations for [8192,5120], T4. All routes retain eight warps,
+two rows per warp, sixteen values per lane, one accumulator chain and the same
+Q/K/V/Z output policy. Production kernels and dispatch remain unchanged.
+
+Both fixed seeds use dense represented BF16 values in all four columns.
+Every output passes an independent decoded-weight FP64 linear oracle, checked
+separately for Q, K, V and Z with the existing FP8 A16 criterion, and must match
+production BF16 bits exactly. Guards and immutable inputs are checked in eager
+execution, captured replay and resident final timed outputs before reissue.
+
+Timing uses ten warmup rounds and 31 rotating three-way paired rounds, with both
+warm and 128 MiB cache-scrubbed conditions. External CUDA events bracket only the
+kernel; complete graph wall time includes the scrub and host overhead.
+`--samples N`, `--warmup N` and `--qualify-only` have the same roles as in the
+SwiGLU experiment above. Run each physical GPU separately without other GPU work.
+
+Both GPUs passed all qualifications. TokenPacked's median paired kernel latency
+ratio to production SharedPhase was:
+
+| GPU | Seed | Warm | 128 MiB scrubbed |
+| --- | --- | --- | --- |
+| 0 | 1803 | 0.8898 | 1.0069 |
+| 0 | 1811 | 0.8810 | 1.0327 |
+| 1 | 1803 | 0.9219 | 1.0078 |
+| 1 | 1811 | 0.9150 | 1.0039 |
+
+A ratio below one means lower latency: TokenPacked was 7.8-11.9% faster warm
+and 0.4-3.3% slower after scrubbing. No production winner or inference gain is
+established; an unprofiled model A/B against the preserved baseline must resolve
+this cache-dependent tradeoff. [Measurement record](../diagnostics/fp8-gdn-access-validation.json).
+
+The GDN input-projection numerical test passed on both GPUs, including FP8 T4,
+and `ninfer_gdn_projections_split_test --fused-input-only` passed the affected
+TP2 fused projections. The default full split suite still reproduces an inherited
+TP1 BF16 gating T1024 failure: its 192-CTA cooperative launch exceeds the local
+shared-memory upper bound of 140 simultaneous CTAs. The explicit focused mode does not turn that
+default-suite failure into a pass.

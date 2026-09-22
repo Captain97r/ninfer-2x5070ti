@@ -1,0 +1,237 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows; devices measured separately, CUDA separable compilation enabled",
+  "scope": "FP8 GDN input TP2 [8192,5120], T4 represented BF16 activations; change only the existing activation-access schedule",
+  "decision": "No production winner selected. TokenPacked reduces warm paired kernel latency by 7.8-11.9%, but increases scrubbed latency by 0.4-3.3%. Resolve the cache-dependent tradeoff with an unprofiled model A/B against the preserved baseline binary.",
+  "production_schedule_changed": false,
+  "production_kernel_changed": false,
+  "method": {
+    "seeds": [
+      1803,
+      1811
+    ],
+    "warmup_rounds": 10,
+    "paired_samples": 31,
+    "routes": [
+      "production_shared",
+      "header_shared",
+      "header_token_packed"
+    ],
+    "fixed_schedule": {
+      "warps_per_cta": 8,
+      "rows_per_warp": 2,
+      "values_per_lane": 16,
+      "token_tile": 4,
+      "accumulator_chains": 1,
+      "ctas": 512
+    },
+    "cache_scrub_bytes": 134217728,
+    "timing": "Captured single kernel between external CUDA timing-event nodes; 128 MiB read/write scrub outside the interval. Host enqueue and complete graph wall time recorded separately; complete wall includes scrub.",
+    "order": "Three-way rotating paired rounds, reversed each three-round cycle",
+    "commands": [
+      "build/windows/bench/ninfer_fp8_gdn_tp2_access_bench.exe --device 0",
+      "build/windows/bench/ninfer_fp8_gdn_tp2_access_bench.exe --device 1"
+    ]
+  },
+  "numerical_qualification": {
+    "oracle": "Complete FP64 linear map from every represented BF16 input and independently decoded FP8 code/stored BF16 row scale; checked separately for Q, K, V and Z",
+    "outputs_per_route": 32768,
+    "criterion": {
+      "relative_l2": 0.00390625,
+      "gross_absolute": 0.00390625,
+      "gross_relative_to_max_reference": 0.0078125
+    },
+    "all_outputs_fp64_passed": true,
+    "all_outputs_baseline_bf16_bits_equal": true,
+    "guards_and_inputs_unchanged": true,
+    "modes": [
+      "eager",
+      "captured before timing",
+      "resident final timed outputs",
+      "captured after timing"
+    ],
+    "qualified_device_seed_cache_combinations": 8
+  },
+  "measurements": [
+    {
+      "gpu": 0,
+      "seed": 1803,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production_shared": 31.9360010326,
+        "header_shared": 32.0000015199,
+        "header_token_packed": 28.0959997326
+      },
+      "p95_kernel_us": {
+        "production_shared": 32.3840007186,
+        "header_shared": 33.6639992893,
+        "header_token_packed": 30.1760006696
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 1.00705650544,
+        "header_token_packed": 0.889804325746
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1803,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production_shared": 56.2559999526,
+        "header_shared": 56.2239997089,
+        "header_token_packed": 56.7680001259
+      },
+      "p95_kernel_us": {
+        "production_shared": 57.8560009599,
+        "header_shared": 56.7359998822,
+        "header_token_packed": 58.3360008895
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 1.00056850916,
+        "header_token_packed": 1.00687677642
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1811,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production_shared": 30.9120006859,
+        "header_shared": 30.9120006859,
+        "header_token_packed": 28.0000008643
+      },
+      "p95_kernel_us": {
+        "production_shared": 32.8000001609,
+        "header_shared": 49.5040006936,
+        "header_token_packed": 29.0879998356
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 0.996894386359,
+        "header_token_packed": 0.880975612637
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1811,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production_shared": 56.1279989779,
+        "header_shared": 56.1919994652,
+        "header_token_packed": 57.7600002289
+      },
+      "p95_kernel_us": {
+        "production_shared": 56.5119981766,
+        "header_shared": 57.8240007162,
+        "header_token_packed": 58.6239993572
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 1,
+        "header_token_packed": 1.03270221936
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1803,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production_shared": 32.1919992566,
+        "header_shared": 32.2559997439,
+        "header_token_packed": 29.9200005829
+      },
+      "p95_kernel_us": {
+        "production_shared": 34.5279984176,
+        "header_shared": 34.3040004373,
+        "header_token_packed": 30.4320007563
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 0.996999977299,
+        "header_token_packed": 0.921921913173
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1803,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production_shared": 57.7279999852,
+        "header_shared": 57.7279999852,
+        "header_token_packed": 58.2079999149
+      },
+      "p95_kernel_us": {
+        "production_shared": 58.3040006459,
+        "header_shared": 58.3040006459,
+        "header_token_packed": 59.8080009222
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 1,
+        "header_token_packed": 1.00776483098
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1811,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production_shared": 32.1599990129,
+        "header_shared": 32.1279987693,
+        "header_token_packed": 29.6000000089
+      },
+      "p95_kernel_us": {
+        "production_shared": 34.0799987316,
+        "header_shared": 33.9200012386,
+        "header_token_packed": 31.7119993269
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 1.00200402321,
+        "header_token_packed": 0.915019750342
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1811,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production_shared": 57.7600002289,
+        "header_shared": 57.7920004725,
+        "header_token_packed": 57.8240007162
+      },
+      "p95_kernel_us": {
+        "production_shared": 58.2720004022,
+        "header_shared": 58.6559996009,
+        "header_token_packed": 59.8400011659
+      },
+      "median_paired_ratio_to_production_shared": {
+        "production_shared": 1,
+        "header_shared": 0.999450847003,
+        "header_token_packed": 1.00389324443
+      }
+    }
+  ],
+  "affected_regressions": {
+    "ninfer_gdn_input_proj_test": "Passed separately on both physical GPUs, including added FP8 A16Only and AllowA8 T4 cases under the existing FP64 criterion.",
+    "ninfer_gdn_projections_split_test --fused-input-only": "Passed the fused NVFP4/FP8 TP2 projection suite, including T4, per-section parent/shard parity, guards and rank/section distinctness.",
+    "ninfer_gdn_projections_split_test (default)": {
+      "status": "failed_existing_hardware_limitation",
+      "reason": "The inherited TP1 BF16 GDN gating parent at T1024 requests 192 cooperative CTAs; 40 KiB shared memory per CTA limits local simultaneous capacity to at most 140 (70 SM x at most 2 resident CTAs). CUDA reports cooperative launch too large.",
+      "original_test_reproduced_failure": true,
+      "default_suite_behavior_changed": false,
+      "focused_selector": "The explicit --fused-input-only mode isolates the affected fused input projections; it is not a passing result for the default full suite."
+    }
+  },
+  "limits": [
+    "Operator cache conditions do not establish model cache residency, physical memory bandwidth or committed-token throughput.",
+    "Timing statistics are kernel intervals, not a sum with host enqueue or complete graph wall time.",
+    "Model performance and response-parity A/B remains pending; no end-to-end gain claimed.",
+    "Linux execution not tested locally."
+  ],
+  "local_measurement_sources": [
+    "build/optimization-research/stage8-access-gpu0.json",
+    "build/optimization-research/stage8-access-gpu1.json"
+  ]
+}
