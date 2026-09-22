@@ -8,3 +8,4 @@ tests/fixtures/frontend/*.jinja text eol=lf
 # Quality references bind these exact bytes, including line endings.
 tests/data/quality-panel.json text eol=lf
 tests/data/retrieval-panel.json text eol=lf
+tests/data/stochastic-panel.json text eol=lf

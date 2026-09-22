@@ -1,0 +1,208 @@
+{
+  "schema_version": 2,
+  "mode": "capture",
+  "label": "stage9-stochastic-reference",
+  "date_utc": "2026-09-22T18:45:16.529024+00:00",
+  "contract": {
+    "fixture_sha256": "fa4c112ad4ecda0864e86b1908ff36443f255796a9164189d3189583b2688b04",
+    "case_ids": [
+      "stochastic-typed-json-extraction",
+      "stochastic-tool-typed-unicode-arguments",
+      "stochastic-history-initial",
+      "stochastic-history-append",
+      "stochastic-history-rewind-branch",
+      "stochastic-bounded-thinking-arithmetic",
+      "stochastic-repeated-json"
+    ],
+    "image_fixture_sha256": {},
+    "model": "qwen3.8-27b",
+    "context": 102400,
+    "vision": true,
+    "runtime_config": {
+      "artifact_sha256": "bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32",
+      "artifact_bytes": 21492695040,
+      "options": [
+        "--tp",
+        "2",
+        "--devices",
+        "0,1",
+        "--max-context",
+        "102400",
+        "--kv-capacity",
+        "102400",
+        "--kv-dtype",
+        "int8",
+        "--prefill-chunk",
+        "1024",
+        "--vision",
+        "--image-max-tokens",
+        "2048",
+        "--max-concurrency",
+        "1",
+        "--default-max-tokens",
+        "102400",
+        "--spec",
+        "mtp",
+        "--draft-tokens",
+        "3",
+        "--lm-head-draft"
+      ]
+    }
+  },
+  "scope": "Bounded task scoring and exact observable-response parity; not token-ID or broad quality equivalence.",
+  "complete": true,
+  "all_tasks_passed": false,
+  "all_observables_equal": null,
+  "no_new_task_failures": null,
+  "regression_passed": null,
+  "cases": [
+    {
+      "id": "stochastic-typed-json-extraction",
+      "category": "json",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 66,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\n  \"id\": \"0042\",\n  \"quantity\": 6,\n  \"fragile\": true\n}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 30
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 0.263903900020523
+    },
+    {
+      "id": "stochastic-tool-typed-unicode-arguments",
+      "category": "tools",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 359,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": null,
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "arguments": "{\"fragile\":false,\"label\":\"Склад \\\"Б\\\"\",\"quantity\":3}",
+              "name": "validate_parcel"
+            }
+          }
+        ],
+        "finish_reason": "tool_calls",
+        "completion_tokens": 56
+      },
+      "rule_detail": "tool argument comparison",
+      "wall_seconds": 0.4516661999805365
+    },
+    {
+      "id": "stochastic-history-initial",
+      "category": "history",
+      "rule_passed": false,
+      "task_status": "failed",
+      "baseline_equal": null,
+      "prompt_tokens": 64,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "```json\n{\"code\": \"amber\", \"count\": 4}\n```",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 18
+      },
+      "rule_detail": "visible answer is not a complete JSON value",
+      "wall_seconds": 0.19622710000840016
+    },
+    {
+      "id": "stochastic-history-append",
+      "category": "history",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 93,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"code\":\"amber\",\"count\":7}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 10
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 0.14511579999816604
+    },
+    {
+      "id": "stochastic-history-rewind-branch",
+      "category": "history",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 95,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"code\":\"violet\",\"count\":3}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 11
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 0.16031510001630522
+    },
+    {
+      "id": "stochastic-bounded-thinking-arithmetic",
+      "category": "thinking",
+      "rule_passed": true,
+      "task_status": "passed",
+      "baseline_equal": null,
+      "prompt_tokens": 104,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "{\"total\":22}",
+        "reasoning_content": "We need answer user's request. Need compute: red crates 4 *3 =12, blue 2*5=10 total 22. User says work briefly, then final answer as only JSON object with integer key total. No markdown. Need likely include brief work? \"Work this out briefly, then give the final answer as only a JSON object...\" Could mean output brief explanation then JSON? But \"final answer as only a JSON object\" maybe final output only JSON? They explicitly say no markdown. Need satisfy: perhaps provide brief calculation then JSON? But \"then give the final answer as only a JSON object\" could require final line only JSON, but overall response may include brief work. However they say final answer as only a JSON object. To be safe, output just JSON object because they want only JSON object. But \"Work this out briefly\" maybe wants show work. Yet \"final answer as only a JSON object\" conflicts. In many evals, they want final only JSON. Need no markdown. Output {\"total\":22}. Ensure integer key? \"integer key total\" means key total with integer value? Yes.\n",
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 244
+      },
+      "rule_detail": "JSON value comparison",
+      "wall_seconds": 1.8120220999990124
+    },
+    {
+      "id": "stochastic-repeated-json",
+      "category": "json",
+      "rule_passed": false,
+      "task_status": "failed",
+      "baseline_equal": null,
+      "prompt_tokens": 47,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "observable": {
+        "content": "```json\n[\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\",\n  \"amber\"\n]\n```",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 69
+      },
+      "rule_detail": "visible answer is not a complete JSON value",
+      "wall_seconds": 0.42609730002004653
+    }
+  ]
+}

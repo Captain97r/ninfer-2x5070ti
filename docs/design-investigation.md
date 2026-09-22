@@ -261,6 +261,21 @@ returns success only for complete exact parity without new task failures, while
 retaining `all_tasks_passed: false`. The server used for ordinary OMP requests
 continues to use port 8000.
 
+The frozen [stochastic panel](../tests/data/stochastic-panel.json) adds seven
+positive-temperature cases with top-p 0.9, seed 42, presence penalty 0.6 and
+frequency penalty 0.1. It covers typed JSON, a Unicode tool call, prefix append
+and branching, reasoning, and twelve repeated output tokens. All cases and
+parameters were fixed before inspecting the preserved engine's responses.
+The [reference](../diagnostics/stochastic-reference.json) scores **5/7**: the
+initial-history and repeated-token cases add prohibited Markdown fences around
+otherwise correct JSON. Both failures remain visible. A fresh-process repeat
+matches all seven observables exactly; this establishes a usable seeded regression
+reference, not broad stochastic-quality equivalence.
+
+```powershell
+python tools/run_quality_windows.py --label stochastic-candidate --fixtures tests/data/stochastic-panel.json --baseline diagnostics/stochastic-reference.json
+```
+
 The documented sampler keeps at most 20 candidates. Normal Qwen3.8 presets use
 20, and uncustomized OMP omits sampling overrides. Explicit top_k=0 or values
 above 20 nevertheless get accepted by the HTTP layer and capped internally;

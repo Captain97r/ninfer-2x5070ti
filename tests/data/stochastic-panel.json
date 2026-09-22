@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "description": "Fixed positive-temperature response regression for captured TP2 MTP decision replication. Cases and sampling parameters frozen before baseline generation. Reuses existing independent task expectations; exact observable parity remains separate from task accuracy. Run in order for prefix append/branch cases.",
+  "scoring": {
+    "exact_text": "Trim leading and trailing whitespace only, then compare with value exactly.",
+    "json": "Parse the entire visible content as one JSON value and compare with value structurally; reject markdown fences, extra text, duplicate object keys, and nonstandard numeric constants. Object key order is irrelevant; array order and JSON value types are significant.",
+    "tool_call": "Require exactly one tool call, the expected function name, arguments parsed as a complete JSON object equal to arguments, and no visible answer content other than whitespace. Do not score generated call IDs as task answers; retain them in the raw response."
+  },
+  "cases": [
+    {
+      "id": "stochastic-typed-json-extraction",
+      "category": "json",
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Extract exactly id as a string, quantity as an integer, and fragile as a boolean. Preserve leading zeros in id. Return only the JSON object."
+          },
+          {
+            "role": "user",
+            "content": "Package id: 0042. Quantity: 6. Fragile: yes."
+          }
+        ],
+        "temperature": 0.7,
+        "max_completion_tokens": 128,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "json",
+        "value": {
+          "id": "0042",
+          "quantity": 6,
+          "fragile": true
+        }
+      }
+    },
+    {
+      "id": "stochastic-tool-typed-unicode-arguments",
+      "category": "tools",
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Respond only with one tool call and no explanation. Copy the label exactly, including its double quotation marks. This tool only validates synthetic data."
+          },
+          {
+            "role": "user",
+            "content": "Validate a parcel with label Склад \"Б\", quantity 3, and fragile set to false."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "validate_parcel",
+              "description": "Validate a fictional parcel without performing an external action.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer"
+                  },
+                  "fragile": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "label",
+                  "quantity",
+                  "fragile"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "tool_choice": {
+          "type": "function",
+          "function": {
+            "name": "validate_parcel"
+          }
+        },
+        "parallel_tool_calls": false,
+        "temperature": 0.7,
+        "max_completion_tokens": 256,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "tool_call",
+        "name": "validate_parcel",
+        "arguments": {
+          "label": "Склад \"Б\"",
+          "quantity": 3,
+          "fragile": false
+        }
+      }
+    },
+    {
+      "id": "stochastic-history-initial",
+      "category": "history",
+      "sequence": {
+        "id": "toy-board",
+        "step": 1,
+        "operation": "initial"
+      },
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Track only the toy board described in this conversation. After each user message, return only a JSON object containing code as a string and count as an integer, reflecting the current board."
+          },
+          {
+            "role": "user",
+            "content": "Initialize the board with code amber and count 4."
+          }
+        ],
+        "temperature": 0.7,
+        "max_completion_tokens": 128,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "json",
+        "value": {
+          "code": "amber",
+          "count": 4
+        }
+      }
+    },
+    {
+      "id": "stochastic-history-append",
+      "category": "history",
+      "sequence": {
+        "id": "toy-board",
+        "step": 2,
+        "operation": "append"
+      },
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Track only the toy board described in this conversation. After each user message, return only a JSON object containing code as a string and count as an integer, reflecting the current board."
+          },
+          {
+            "role": "user",
+            "content": "Initialize the board with code amber and count 4."
+          },
+          {
+            "role": "assistant",
+            "content": "{\"code\":\"amber\",\"count\":4}"
+          },
+          {
+            "role": "user",
+            "content": "Increase count by 3. Keep code unchanged."
+          }
+        ],
+        "temperature": 0.7,
+        "max_completion_tokens": 128,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "json",
+        "value": {
+          "code": "amber",
+          "count": 7
+        }
+      }
+    },
+    {
+      "id": "stochastic-history-rewind-branch",
+      "category": "history",
+      "sequence": {
+        "id": "toy-board",
+        "step": 3,
+        "operation": "rewind"
+      },
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Track only the toy board described in this conversation. After each user message, return only a JSON object containing code as a string and count as an integer, reflecting the current board."
+          },
+          {
+            "role": "user",
+            "content": "Initialize the board with code amber and count 4."
+          },
+          {
+            "role": "assistant",
+            "content": "{\"code\":\"amber\",\"count\":4}"
+          },
+          {
+            "role": "user",
+            "content": "Decrease count by 1 and change code to violet."
+          }
+        ],
+        "temperature": 0.7,
+        "max_completion_tokens": 128,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "json",
+        "value": {
+          "code": "violet",
+          "count": 3
+        }
+      }
+    },
+    {
+      "id": "stochastic-bounded-thinking-arithmetic",
+      "category": "thinking",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Each red crate contains 3 bolts and each blue crate contains 5 bolts. There are 4 red crates and 2 blue crates. Work this out briefly, then give the final answer as only a JSON object with the integer key total. No markdown."
+          }
+        ],
+        "temperature": 0.7,
+        "max_completion_tokens": 512,
+        "chat_template_kwargs": {
+          "enable_thinking": true
+        },
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1
+      },
+      "expected": {
+        "kind": "json",
+        "value": {
+          "total": 22
+        }
+      }
+    },
+    {
+      "id": "stochastic-repeated-json",
+      "category": "json",
+      "request": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Follow the requested JSON schema exactly. Output only the JSON value, with no other text."
+          },
+          {
+            "role": "user",
+            "content": "Return a JSON array containing the string amber exactly twelve times."
+          }
+        ],
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "seed": 42,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.1,
+        "max_completion_tokens": 256,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      },
+      "expected": {
+        "kind": "json",
+        "value": [
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber",
+          "amber"
+        ]
+      }
+    }
+  ]
+}
