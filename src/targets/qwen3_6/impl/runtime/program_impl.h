@@ -1952,9 +1952,9 @@ void ProgramImplCore::publish_peer_token_counts(const SequenceState& sequence) {
     const Tensor target = token_counts_lane(peer->token_counts, sequence.lane);
     // The one increment rank 0 performs and rank 1 does not: prefill's bonus token is sampled on
     // rank 0 alone (the output head is vocabulary-split and sampling belongs to rank 0).
-    // Every later increment is performed by `speculative_accept_greedy_drafts`, which the MTP
-    // round runs on BOTH devices over bit-identical inputs, so one copy here is what makes the
-    // two counter lanes agree at every point either is read.
+    // Later MTP increments occur on both devices: eager acceptance performs them independently,
+    // while captured execution applies rank zero's licensed-token decision to rank one's local
+    // counters. One copy here establishes the equal starting counts for either schedule.
     //
     // Same cross-device form the collectives use, and for the same reason (src/ops/common/
     // allreduce.cu's `pull_peer`): under unified virtual addressing a device pointer already names

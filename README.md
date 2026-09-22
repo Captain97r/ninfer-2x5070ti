@@ -140,6 +140,8 @@ the [base fork records the same failure](https://github.com/ivanov84/ninfer-wind
   BF16 arithmetic and the captured transport path.
 - Exact packed target-logit gathering with explicitly planned peer scratch;
   one-token gathering and optimized draft selection retain their existing paths.
+- Captured TP2 MTP acceptance on rank zero, with exact compact decision transfer
+  and peer-local penalty-counter updates; eager acceptance remains replicated.
 - Fixed HTTP quality and long-context retrieval fixtures, with prompt-count checks
   and exact response comparison separate from task scoring.
 - Actual TP2 options and both device identities in the end-to-end benchmark.
@@ -169,6 +171,14 @@ Against the bulk-transfer build, synthetic-corpus generation increased from
 was effectively unchanged. These are workload-specific results, not ordinary
 coding-session throughput. [Runtime evidence](diagnostics/column-gather-runtime-validation.json)
 and [measurement details](docs/performance.md#local-dual-5070-ti-packed-target-logit-gather).
+
+Captured rank-zero acceptance adds **0.73% / 0.59% TG** in a fresh matched comparison,
+reaching **206.61 / 177.92 tokens/s** at 8K / 100K on that synthetic corpus.
+The current focused runner with `-Model` passes **18/18** checks, and all **29**
+short, stochastic and retrieval response observables match their saved references.
+Baseline task scores remain 16/18, 5/7 and 4/4; these checks do not claim perfect
+model accuracy. [Runtime evidence](diagnostics/rank0-acceptance-runtime-validation.json)
+and [measurement details](docs/performance.md#local-dual-5070-ti-captured-rank-zero-acceptance).
 
 The [localhost server smoke test](diagnostics/server-smoke.json) returned a valid
 chat response with 102,400-token capacity; the test process was stopped afterward.

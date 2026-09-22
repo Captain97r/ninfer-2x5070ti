@@ -73,9 +73,9 @@ struct TpPeerCore {
     const GdnReplayRecords* replay_records  = nullptr;
     // Rank 1's own pinned MTP ingress record (see PeerRuntime::token_counts). It differs from
     // rank 0's only in the per-row `sampling[row].token_counts` pointer, which must name rank 1's
-    // counter lane: `speculative_accept_greedy_drafts` READS and atomically WRITES that pointer
-    // in sampling mode, and a pointer into the other device's arena is an illegal access without
-    // peer mapping and a silent double-increment with it.
+    // counter lane: eager acceptance and captured decision application increment these local
+    // counters in sampling mode. A pointer into the other device's arena is an illegal access
+    // without peer mapping and a silent double-increment with it.
     const qwen3_6::MtpDecodeIngress* mtp_host_ingress = nullptr;
     // Enrolls rank 1's stream in rank 0's capture. Null when graphs are disabled; the eager path
     // never reads it.
@@ -219,11 +219,10 @@ void configure_text_card(TextContext& card, const ExecutionCore& execution,
 void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
                           TextContext& card, TargetVerifyFrameView frame,
                           ops::GqaExecutionEnvelope envelope);
-// tp == 2 form. `peer` is rank 1's identically-shaped view of ITS OWN frame; the acceptance
-// arithmetic is replicated there rather than transferred, because every one of its inputs is
-// either the ingress record (copied to both frames) or the gathered logits (bit-identical on both
-// ranks). What is NOT replicated is rank 0's bookkeeping: the continuation-hidden scatter and the
-// egress transfer stay on rank 0 alone.
+// tp == 2 form. Eager execution gathers full logits and accepts on both ranks. Captured MTP
+// gathers only to rank zero, runs the same acceptance there, then applies its complete decision
+// and stochastic counter increments to rank one's frame before hidden selection/alignment.
+// Both paths preserve rank-local state; continuation-hidden scatter and egress stay on rank zero.
 void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
                           TextContext& card, TargetVerifyFrameView frame,
                           TargetVerifyFrameView peer, ops::GqaExecutionEnvelope envelope);

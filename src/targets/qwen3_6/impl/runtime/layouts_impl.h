@@ -402,9 +402,9 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     //   * `allreduce staging`  - the peer's contribution to every row-parallel reduce ([hidden, T]
     //                            BF16, one per device, allocated once per call and reused by all
     //                            128 reduces).
-    //   * `vocabulary half`    - this device's own half of the logits, before the gather. The
-    //                            GATHERED full logits go straight into each rank's persistent
-    //                            RoundState logits, so they cost no workspace. Only the columns
+    //   * `vocabulary half`    - this device's own half of the logits, before the gather. Full
+    //                            logits go into persistent RoundState storage: both ranks for
+    //                            replicated calls, rank zero for captured MTP. Only the columns
     //                            that actually get a logit are planned: one in prefill (the bonus
     //                            token), `batch` in ordinary decode, and `batch * verify_width`
     //                            in target verification, including padded columns.
@@ -416,12 +416,18 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     // device's real per-stage need is at most that, so planning it whole is a safe over-estimate.
     // Sizing the sharded stages exactly is a follow-up (it only buys workspace bytes back).
     const auto tp_call_roots = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
-                                   std::int32_t logit_columns) {
+                                   std::int32_t logit_columns, bool captured_target = false) {
         if (plan.tp <= 1) { return; }
         matrix(layout, DType::BF16, TextConfig::hidden, tokens);
         matrix(layout, DType::BF16, TextConfig::output_rows / plan.tp, logit_columns);
         scratch(layout, ops::allgather_columns_workspace_capacity_bytes(
                             TextConfig::output_rows / plan.tp, logit_columns));
+        if (captured_target) {
+            // Same arena cursor after the live shard; these are alternative scoped peaks. The
+            // common per-rank bound covers rank zero's incoming shard and the eager fallback.
+            scratch(layout, ops::gather_columns_to_rank0_workspace_capacity_bytes(
+                                TextConfig::output_rows / plan.tp, logit_columns));
+        }
     };
 
     // The MTP round's own tp2 additions. Its three all-reduces share ONE [hidden, T] staging
@@ -507,7 +513,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
             const std::int32_t aggregate = batch * verify;
             WorkspaceLayoutBuilder target;
             matrix(target, DType::BF16, TextConfig::hidden, aggregate);
-            tp_call_roots(target, aggregate, aggregate);
+            tp_call_roots(target, aggregate, aggregate, plan.use_cuda_graph);
             target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
                         GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
 
@@ -538,8 +544,14 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
             const std::size_t batch_accept =
                 ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
                     TextConfig::token_domain, drafts, drafts, batch, batch);
+            // Verification and acceptance retire their arena scopes before decision replication.
+            // Its queried per-rank bound is therefore a separate peak (256 bytes for B1/K3),
+            // including when capture uses a mailbox and keeps the fallback scratch reserved.
+            const std::size_t decision = plan.tp == 2 && plan.use_cuda_graph
+                ? ops::speculative_replicate_decision_workspace_capacity_bytes(drafts, batch)
+                : 0;
             out.mtp_round = std::max({out.mtp_round, finish(target), finish(alignment), finish(ar),
-                                      finish(proposal), batch_accept});
+                                      finish(proposal), batch_accept, decision});
         }
     }
 

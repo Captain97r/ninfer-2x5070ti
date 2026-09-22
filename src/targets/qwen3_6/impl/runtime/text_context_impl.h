@@ -1908,7 +1908,7 @@ void TextContext::run_layers_tp2(std::array<Tensor, 2>& x, Phase ph,
 }
 
 void TextContext::logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits,
-                             Tensor& peer_logits) {
+                             Tensor& peer_logits, TpTargetHead head) {
     const ExecutionContext& execution       = ec();
     const std::array<WorkspaceArena*, 2> ws = workspaces();
     const std::int32_t columns              = hidden[0].ne[1];
@@ -1936,8 +1936,12 @@ void TextContext::logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits
     ops::linear_column_parallel(hidden, {*lm_head_, *lm_head_peer_}, part, execution);
 
     // Gather the complete rectangular logit view, including padded verification columns.
-    // The peer shard lives alongside `part` in each rank's arena until its local interleave.
-    ops::allgather_columns({logits, peer_logits}, part, ws, execution, *tp_->transfer);
+    // The received shard lives alongside `part` until the destination's local interleave.
+    if (head == TpTargetHead::RankZero) {
+        ops::gather_columns_to_rank0(logits, part, ws[0], execution, *tp_->transfer);
+    } else {
+        ops::allgather_columns({logits, peer_logits}, part, ws, execution, *tp_->transfer);
+    }
 }
 
 PrefillChunkResult TextContext::prefill_impl_tp2(std::span<const int> ids,
@@ -2642,7 +2646,7 @@ void TextContext::target_verify_batch(const std::array<Tensor, 2>& ids,
                                       ops::GqaExecutionEnvelope envelope,
                                       const std::array<Tensor, 2>& hidden,
                                       const std::array<Tensor, 2>& logits,
-                                      const std::array<Tensor, 2>& target_tokens) {
+                                      const std::array<Tensor, 2>& target_tokens, TpTargetHead head) {
     if (!tp2()) { throw std::logic_error("tensor-parallel target verify requires a peer"); }
     const ExecutionContext& execution       = ec();
     const std::array<WorkspaceArena*, 2> ws = workspaces();
@@ -2723,12 +2727,11 @@ void TextContext::target_verify_batch(const std::array<Tensor, 2>& ids,
             ops::rmsnorm(x[r], rank == 0 ? *final_norm_ : *final_norm_peer_, kCfg.rms_eps, true,
                          flat_hidden[r], stream_for(rank));
         });
-        logits_tp2(flat_hidden, flat_logits[0], flat_logits[1]);
-        // The argmax is REPLICATED, not rank 0's alone: both ranks hold the identical gathered
-        // logits (the gather is an exact relocation and IEEE addition is commutative, so the two
-        // buffers are bit-identical), and rank 1 needs its own target tokens to run the same
-        // acceptance arithmetic without a control-tensor transfer.
+        logits_tp2(flat_hidden, flat_logits[0], flat_logits[1], head);
+        // The caller's single decision selects gathering, argmax, and acceptance together.
+        // Rank-zero mode leaves the peer's persistent logit/argmax scratch unused this round.
         for_each_rank(execution, [&](int rank) {
+            if (head == TpTargetHead::RankZero && rank != 0) { return; }
             const auto r       = static_cast<std::size_t>(rank);
             Tensor flat_tokens = target_tokens[r].view({columns});
             ops::argmax(flat_logits[r], flat_tokens, kCfg.token_domain, stream_for(rank));

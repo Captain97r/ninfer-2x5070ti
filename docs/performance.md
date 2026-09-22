@@ -138,6 +138,38 @@ stage still determines the overall workspace: reported capacity and allocator pe
 remain 202304000 and 117743616 bytes. [Runtime evidence](../diagnostics/column-gather-runtime-validation.json),
 [operator evidence](../diagnostics/column-gather-op-validation.json).
 
+## Local dual-5070-Ti captured rank-zero acceptance
+
+Captured TP2 MTP now gathers the complete target vocabulary onto rank zero, runs
+its unchanged argmax and acceptance, and transfers the licensed tokens, accepted
+count and next frontier/anchor to rank one. Rank one applies every licensed-token
+penalty-counter increment before hidden selection and alignment. Target
+probabilities, RNG, precision, and model arithmetic are unchanged. Eager execution
+retains replicated acceptance because the isolated eager candidate was slower.
+
+The same configuration and corpus as the packed-gather comparison above were run
+again on the preserved engine and candidate: one warmup, three measured repetitions,
+sequential blocks, means +/- sample standard deviation.
+
+| Prompt / generated tokens | Before TG, tok/s | After TG, tok/s | TG gain | Before / after PP, tok/s |
+|---|---:|---:|---:|---:|
+| 8192 / 256 | 205.12 +/- 0.08 | 206.61 +/- 0.01 | 0.73% | 3142.35 +/- 0.91 / 3138.43 +/- 1.33 |
+| 100000 / 512 | 176.88 +/- 0.08 | 177.92 +/- 0.03 | 0.59% | 2287.93 +/- 0.41 / 2287.29 +/- 0.19 |
+
+Speculative counts are identical; acceptance remains 97.95% / 93.55%. PP is not
+changed by this optimization; these measurements do not establish a PP gain.
+This synthetic workload does not establish ordinary coding/chat throughput.
+All 29 frozen response observables match: 18 short, seven stochastic with penalties,
+and four retrieval cases through 100K. Task scores remain 16/18, 5/7 and 4/4.
+The focused runner with the real-model option passed 18/18 checks, including
+matched-schedule prefix equality and 150 rounds without peer-egress disagreement.
+
+The B1/K3 decision is 32 bytes with 256 bytes of scratch per rank. The captured
+head needs incoming-shard scratch on rank zero only; persistent peer frames stay
+allocated. Overall workspace capacity/observed peak remain 202304000/117743616
+bytes. [Runtime evidence](../diagnostics/rank0-acceptance-runtime-validation.json),
+[operator qualification and eager comparison](../diagnostics/rank0-acceptance-op-validation.json).
+
 ## TP2 prefix-state correctness
 
 `ninfer_qwen3_8_27b_prefix_tp2_real_test` compares restored text suffixes with cold prefill using

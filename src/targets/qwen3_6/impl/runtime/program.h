@@ -236,12 +236,11 @@ struct PeerRuntime {
     std::optional<GdnReplayRecords> replay_records;
     qwen3_6::RoundState io;
     Tensor prefill_hidden;
-    // Rank 1's OWN penalty counters. `ops::SamplingConfig::token_counts` is a raw device pointer,
-    // and the MTP round's acceptance runs on both devices (see the replicated-accept note in
-    // mtp_impl.h), so rank 1 must never be handed rank 0's. It is not a cache: rank 0 remains the
-    // source of truth (ProgramImplCore::install_sampling zeroes both, and the one increment that
-    // happens on rank 0 alone -- prefill's bonus token -- is copied across before the first decode
-    // round), and thereafter both are advanced by the same Op over bit-identical inputs.
+    // Rank 1's own penalty counters. SamplingConfig::token_counts is a raw device pointer;
+    // eager acceptance and captured decision application must update this local allocation.
+    // install_sampling zeroes both ranks, and prefill's rank-zero bonus increment is copied
+    // before the first decode round. Each later MTP round applies the same licensed occurrences
+    // to both ranks, through replicated acceptance or exact decision transfer.
     Tensor token_counts;
 };
 
@@ -425,9 +424,9 @@ public:
     void enable_logits_capture(bool enabled);
 
     // Debug-only, OFF by default: after each MTP decode round at tp == 2, read rank 1's MTP egress
-    // back and compare it field for field with rank 0's. The two ranks run the acceptance Op over
-    // bit-identical inputs, so their egress records are argued to agree; enabling this turns that
-    // induction into a measurement. Costs one ~1 KiB device-to-host copy plus a host compare per
+    // back and compare its defined fields with rank 0's. Eager execution accepts on both ranks;
+    // captured MTP transfers the decision before each rank derives its next-round controls.
+    // This checks both schedules. Costs one ~1 KiB device-to-host copy plus a host compare per
     // round while enabled, and nothing at all while off. Counters are cumulative over the
     // Program's lifetime; a mismatch is counted (per row, per field) rather than thrown, so a test
     // can read the totals after a clean run.

@@ -246,20 +246,18 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                                    state.execution.device.stream));
         std::optional<TpExecution> tp = tp_execution(state.execution);
         if (tp) {
-            // Rank 1 runs the round from ITS OWN copy of the same ingress record. Everything the
-            // peer needs that is not in the ingress -- verify ids, target positions, the accepted
-            // count, the next round's AR positions -- is DERIVED from it by the same deterministic
-            // Ops, run again on device 1, rather than transferred: the only other inputs are the
-            // gathered logits, which are bit-identical on both ranks.
+            // Rank 1 runs from its own ingress and derives local verify ids, target positions and
+            // next-round controls. Eager execution accepts the replicated full logits locally;
+            // captured MTP applies rank zero's complete decision before deriving those controls.
             if (!tp->io->mtp_decode.has_value()) {
                 throw std::logic_error("tensor-parallel MTP decode requires a peer frame");
             }
             // Rank 1 uploads ITS OWN ingress record, not rank 0's. The two differ in exactly one
             // field per row -- `sampling[row].token_counts`, which must name rank 1's penalty
-            // counter lane. `speculative_accept_greedy_drafts` reads and atomically writes that
-            // pointer in sampling mode, so handing rank 1 a pointer into rank 0's arena is an
-            // illegal access without peer mapping and a silent double-increment with it. Every
-            // other byte is identical, which is what keeps the two replicated accepts in step.
+            // counter lane. Eager acceptance or captured decision application increments that
+            // local counter in sampling mode, so handing rank 1 a pointer into rank 0's arena is
+            // an illegal access without peer mapping and a silent double-increment with it.
+            // Every other byte is identical on the two ranks.
             const qwen3_6::MtpDecodeIngress* peer_ingress =
                 state.execution.peer->mtp_host_ingress;
             if (peer_ingress == nullptr) {

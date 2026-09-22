@@ -346,13 +346,20 @@ workspace and observed allocator peak are unchanged. See the
 [runtime evidence](../diagnostics/column-gather-runtime-validation.json) and
 [measurement limits](performance.md#local-dual-5070-ti-packed-target-logit-gather).
 
-Further changes to target verification remain unqualified. Greedy verification
-could use an exact distributed argmax. Stochastic verification
-requires target probabilities: a coherent first alternative gathers onto rank 0,
-performs acceptance there, then distributes licensed tokens and acceptance/state-selection
-metadata. Stop/cancel retirement determines the committed prefix afterward. Penalty histories, RNG domains, accepted counts and both ranks' GDN/MTP
-frontiers must stay consistent. Replacing target verification with a draft shortlist
-would change semantics and is not part of this proposal.
+Captured TP2 MTP now gathers target logits only onto rank zero and runs the
+unchanged argmax/acceptance there. Its compact exact decision supplies rank one's
+licensed tokens, frontier/anchor and accepted count; local penalty counters are
+updated before hidden selection and alignment. A single capture-time selector
+controls the head and acceptance together. Eager execution retains replicated
+acceptance because the measured eager alternative was slower.
+
+The real-model integration passed 18 focused checks, all 29 frozen response
+comparisons and matching speculative counts. Fresh 8K/100K engine comparisons
+measured 0.73%/0.59% generation gains, with no PP improvement or overall workspace
+increase. See [runtime evidence](../diagnostics/rank0-acceptance-runtime-validation.json)
+and [measurement limits](performance.md#local-dual-5070-ti-captured-rank-zero-acceptance).
+This keeps the complete target distribution; a draft shortlist would change semantics.
+Greedy-only distributed target argmax remains a separate unqualified alternative.
 
 The pre-optimization steady MTP3 schedule issued 137 hidden allreduces
 (131 at 40 KiB and six at 10 KiB), four target-logit gathers and three draft-logit

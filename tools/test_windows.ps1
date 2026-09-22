@@ -6,7 +6,7 @@ $build = Join-Path $workspace 'build\windows'
 $testNames = @('tensor_slice', 'kv_capacity_tp2', 'peer_mailbox', 'allreduce',
     'argmax_row_parallel', 'peer_transfer', 'allgather_columns',
     'linear_nvfp4_a16', 'linear_nvfp4_a4', 'nvfp4_tma_descriptors',
-    'mtp_split', 'speculative_round', 'sampling', 'gdn_headsplit',
+    'mtp_split', 'speculative_round', 'speculative_rank0', 'sampling', 'gdn_headsplit',
     'gqa_tp2_sm70', 'bench_support')
 $targets = @($testNames | ForEach-Object { "ninfer_${_}_test" })
 if ($Model) {

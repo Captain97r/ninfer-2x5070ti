@@ -1,0 +1,166 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows WDDM, no CUDA P2P",
+  "artifact": "Pinned Qwen3.8-27B mixed NVFP4 NInfer v2 from config/model.json",
+  "change": "Captured TP2 MTP gathers full target logits only to rank zero, runs the unchanged argmax/acceptance there, and applies the exact compact decision and licensed-token counter increments on rank one. Eager execution retains replicated acceptance.",
+  "inference_math_changed": false,
+  "configuration": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "prefill_chunk": 1024,
+    "kv_cache": "int8-group64",
+    "mtp_draft_tokens": 3,
+    "proposal_head": "optimized",
+    "use_cuda_graph": true,
+    "decode_path": "mtp_cuda_graph",
+    "decode_graph_prime": {
+      "primed": true,
+      "output_tokens": 9
+    },
+    "repetitions": 3,
+    "warmup": 1,
+    "corpus_path": "build/bench_corpus_100000.ids",
+    "corpus_tokens": 100000
+  },
+  "comparison": "Fresh preserved validated engine (optimization-stage8-before) versus captured rank-zero runtime, sequential blocks",
+  "end_to_end": [
+    {
+      "workload": "pp8192+tg256",
+      "prompt_tokens": 8192,
+      "decode_tokens": 256,
+      "before": {
+        "prefill_tok_s_mean": 3142.353862,
+        "prefill_tok_s_stddev": 0.9122924093,
+        "decode_output_tok_s_mean": 205.1247952,
+        "decode_output_tok_s_stddev": 0.07796523597
+      },
+      "after": {
+        "prefill_tok_s_mean": 3138.429143,
+        "prefill_tok_s_stddev": 1.328312984,
+        "decode_output_tok_s_mean": 206.6123432,
+        "decode_output_tok_s_stddev": 0.0104924124
+      },
+      "decode_gain_percent": 0.7251917051517953,
+      "prefill_change_percent": -0.124897423153425,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 195,
+        "drafted_tokens": 585,
+        "accepted_tokens": 573,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.9794871795,
+        "acceptance_length": 3.938461538,
+        "accepted_per_position": [
+          195,
+          192,
+          186
+        ]
+      }
+    },
+    {
+      "workload": "pp100000+tg512",
+      "prompt_tokens": 100000,
+      "decode_tokens": 512,
+      "before": {
+        "prefill_tok_s_mean": 2287.926006,
+        "prefill_tok_s_stddev": 0.414966168,
+        "decode_output_tok_s_mean": 176.8849758,
+        "decode_output_tok_s_stddev": 0.08108589164
+      },
+      "after": {
+        "prefill_tok_s_mean": 2287.287844,
+        "prefill_tok_s_stddev": 0.1896053462,
+        "decode_output_tok_s_mean": 177.9242234,
+        "decode_output_tok_s_stddev": 0.03308233861
+      },
+      "decode_gain_percent": 0.587527343857075,
+      "prefill_change_percent": -0.02789259785179743,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 405,
+        "drafted_tokens": 1209,
+        "accepted_tokens": 1131,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.935483871,
+        "acceptance_length": 3.792592593,
+        "accepted_per_position": [
+          387,
+          375,
+          369
+        ]
+      }
+    }
+  ],
+  "workspace": {
+    "rank0_incoming_shard_bytes_T4": 993280,
+    "rank1_incoming_shard_bytes_captured_T4": 0,
+    "decision_scratch_bytes_per_rank_B1_K3": 256,
+    "decision_payload_bytes_B1_K3": 32,
+    "reported_capacity_bytes_before_and_after": 202304000,
+    "reported_allocator_peak_bytes_before_and_after": 117743616,
+    "planning": "Root gather scratch is planned at the live shard cursor. Decision scratch is a separate scoped peak. Existing persistent peer frames remain allocated."
+  },
+  "validation": {
+    "operator_reference": "diagnostics/rank0-acceptance-op-validation.json",
+    "focused_windows_runner": {
+      "command": "tools/test_windows.ps1 -Model",
+      "passed": 18,
+      "failed": 0,
+      "seconds": 98.66
+    },
+    "real_model_prefix": {
+      "modes": [
+        "eager",
+        "cuda_graph"
+      ],
+      "matched_schedule": "Exact first-token logits, 16/16 continuation tokens and MTP counts for append/checkpoint restore; repeated decode schedule exact",
+      "peer_egress_rounds": 150,
+      "peer_egress_disagreements": 0,
+      "different_schedule_diagnostic": "11/16 initial greedy tokens agree across different prefill histories; diagnostic only because precision/chunk schedules differ"
+    },
+    "response_panels": {
+      "short": {
+        "reference": "diagnostics/quality-reference.json",
+        "cases": 18,
+        "exact_observable_matches": 18,
+        "task_passes": 16,
+        "new_task_failures": 0
+      },
+      "stochastic": {
+        "reference": "diagnostics/stochastic-reference.json",
+        "cases": 7,
+        "exact_observable_matches": 7,
+        "task_passes": 5,
+        "new_task_failures": 0
+      },
+      "retrieval": {
+        "reference": "diagnostics/retrieval-reference.json",
+        "cases": 4,
+        "exact_observable_matches": 4,
+        "task_passes": 4,
+        "new_task_failures": 0,
+        "prompt_tokens": [
+          4068,
+          32758,
+          99985,
+          99966
+        ]
+      }
+    }
+  },
+  "limits": [
+    "Three measured repetitions after one warmup; spreads are sample standard deviations, not confidence intervals.",
+    "Synthetic cycling corpus has 97.95% / 93.55% MTP acceptance; these rates do not establish coding/chat throughput.",
+    "Prompt processing is not changed by this optimization; observed PP differences are -0.125% / -0.028%, not a PP improvement.",
+    "Exact response observables are not token-ID comparisons or proof of broad model-quality equivalence. Baseline task failures remain visible: short 16/18, stochastic 5/7, retrieval 4/4.",
+    "Captured-only adoption is intentional: isolated eager rank-zero acceptance was slower.",
+    "Linux execution not tested locally."
+  ]
+}

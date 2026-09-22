@@ -72,6 +72,10 @@ struct ModelConfig {
 
 inline constexpr ModelConfig kCfg{};
 
+// The target-acceptance schedule selects this once. It controls both where the full target
+// vocabulary is gathered and which rank computes its argmax; acceptance uses the same choice.
+enum class TpTargetHead { Replicated, RankZero };
+
 // Per-device extents at tp == 2: each one is a model extent divided along an axis the ShardPlan
 // splits, so it names what THIS device actually holds. The query/KV head counts give the
 // head-local attention geometry (12 Q : 2 KV, the same 6:1 group ratio as 24:4); the GDN head
@@ -307,6 +311,8 @@ public:
     // `ids` and the draft-token outputs stay single tensors: they belong to rank 0 alone, because
     // rank 1's MTP stem contracts the normalized-hidden half of the fc input and never embeds a
     // token, and the proposal leaves through rank 0's egress.
+    // Target verification always writes both hidden views. RankZero head mode leaves rank 1's
+    // logit/argmax scratch unused; the schedule then transfers the complete acceptance decision.
     void target_verify_batch(const std::array<Tensor, 2>& ids,
                              const std::array<Tensor, 2>& cache_positions,
                              const std::array<Tensor, 2>& rope_positions,
@@ -316,7 +322,7 @@ public:
                              ops::GqaExecutionEnvelope envelope,
                              const std::array<Tensor, 2>& hidden,
                              const std::array<Tensor, 2>& logits,
-                             const std::array<Tensor, 2>& target_tokens);
+                             const std::array<Tensor, 2>& target_tokens, TpTargetHead head);
     void mtp_forward_decode_batch(const Tensor& ids, const std::array<Tensor, 2>& hidden,
                                   const std::array<Tensor, 2>& cache_positions,
                                   const std::array<Tensor, 2>& rope_positions,
@@ -388,10 +394,10 @@ private:
                       const std::array<Tensor, 2>& staging);
     void run_layers_tp2(std::array<Tensor, 2>& x, Phase phase,
                         const std::array<Tensor, 2>& staging);
-    // Vocabulary-split head: each rank computes its own half of the logits, then one allgather
-    // per column leaves the FULL logits on both ranks. Sampling then runs on rank 0 alone.
+    // Vocabulary-split head with one shared GEMM path. Ordinary/prefill/full-draft callers gather
+    // both destinations. Captured target acceptance explicitly requests only rank zero's output.
     void logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits,
-                    Tensor& peer_logits);
+                    Tensor& peer_logits, TpTargetHead head = TpTargetHead::Replicated);
     void ordinary_decode_batch_tp2(const Tensor& ids, const Tensor& cache_positions,
                                    const Tensor& rope_positions, const Tensor& kv_table_rows,
                                    const Tensor& linear_state_slots,
