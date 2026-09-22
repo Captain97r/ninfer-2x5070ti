@@ -35,6 +35,58 @@ Run it again with `--reverse-devices` to exchange primary/peer roles.
 
 ## Product benchmark
 
+### Short-prompt Windows serving comparison
+
+`tools/bench/compare_serve_windows.py` compares a preserved server binary with a
+candidate using the unchanged `scenario_code_python`, `scenario_story_en_mystery`,
+and `scenario_structured_jsonl` message fixtures. It uses the first three corpus
+seeds (7632647173703958409, 7968175640111700217, 912910298659544128), in fixture-major
+order, with thinking disabled and the registered stochastic defaults unchanged.
+Every request has a fixed 1024-completion-token cap. Each fixture first runs once
+with the first seed and the same cap as an unmeasured graph warmup; all three
+warmups precede the nine measured requests. Early EOS is retained.
+
+```powershell
+python3 tools/bench/compare_serve_windows.py --binary build/reference/ninfer-serve.exe --label reference
+python3 tools/bench/compare_serve_windows.py --binary build/windows/apps/ninfer-serve.exe --label candidate --baseline build/serving-comparison/reference/report.json
+python3 -m unittest tests.test_serve_comparison
+```
+
+Use Python 3.11 on Windows and an otherwise idle pair of GPUs. The helper starts
+one hidden server on port 19080 with TP2 devices 0,1, MTP3 and the optimized draft
+head, INT8 KV, 102400 context/capacity, chunk 1024, CUDA Graphs, vision enabled,
+and concurrency one. It refuses an occupied port or an existing label directory
+and stops only its own process on completion, failure, or interruption. The
+default artifact comes from `config/model.json`; `--weights` selects an explicit
+local path. No generated code is executed.
+
+Reports live under `build/serving-comparison/<label>/`. `workload.json` freezes the
+messages, order, caps, runtime options, and artifact/binary fingerprints before
+launch. `records.jsonl` retains each warmup and measured response plus its matched
+server event; `report.json` adds per-fixture means and sample standard deviations
+and an optional baseline comparison. Console and structured server logs remain
+alongside them; failed runs retain partial records and `failed.json`.
+
+These are **short prompts with capped continuations**. The original prompts ask
+for more work than fits in 1024 tokens: a `length` finish is retained, not treated
+as task success or discarded. The helper applies no task-quality score. Exact
+observable parity separately compares raw content, reasoning, tool functions and
+arguments, finish reason, and completion count, excluding random response/tool
+IDs. It also reports prompt-count, speculative-count, and prefix-count agreement.
+Exit 1 means observable or prompt-count drift; exit 2 means an invalid run.
+
+Shipping prefix reuse stays enabled, including history left by warmups. Reports
+retain reused/computed prompt counts and reuse paths. PP tok/s uses only computed
+tokens (no PP rate for a full cache hit); TG tok/s uses completion tokens minus
+the first token divided by server decode time, following the existing corpus
+convention. Server timings, MTP counters, and HTTP wall time are all retained.
+Timing ratios remain separate from parity; changed output lengths, token
+sequences, or prefix work change the workload and limit causal interpretation.
+Three seeds in separate process runs supplement synthetic speed evidence; they
+do not establish general throughput, 100K-context performance, or answer quality.
+
+### Synthetic token workload
+
 The benchmark slices exact token counts from `bench/fixtures/bench_corpus.ids`, calls
 `Engine::prepare_tokens()`, then calls `Engine::generate()` once for each repetition. It does not
 have a private prefill/decode loop and does not call target implementation interfaces.

@@ -170,6 +170,39 @@ allocated. Overall workspace capacity/observed peak remain 202304000/117743616
 bytes. [Runtime evidence](../diagnostics/rank0-acceptance-runtime-validation.json),
 [operator qualification and eager comparison](../diagnostics/rank0-acceptance-op-validation.json).
 
+## Local dual-5070-Ti short-prompt serving comparison
+
+The original local engine (`f07b80b2`) and the current runtime (`ca2b5991`)
+served the same three existing scenario fixtures with three fixed seeds each.
+Both used the pinned Qwen3.8-27B v2 artifact, TP2/MTP3, optimized draft head,
+INT8-G64 KV, chunk 1024, CUDA Graphs, vision enabled and 102,400-token capacity.
+Thinking was disabled; registered stochastic defaults were retained (temperature
+0.7, top-p 0.8, top-k 20, presence penalty 1.5). Three same-cap warmups preceded
+nine measured requests per process. Prefix reuse stayed enabled.
+
+| Scenario | Original TG, tok/s | Current TG, tok/s | Mean TG gain |
+|---|---:|---:|---:|
+| Python package | 139.89 +/- 9.32 | 149.11 +/- 9.68 | 6.59% |
+| Mystery prose | 110.28 +/- 1.66 | 117.29 +/- 1.78 | 6.36% |
+| Structured JSONL | 193.00 +/- 0.76 | 205.31 +/- 0.73 | 6.38% |
+
+Values are arithmetic means +/- sample standard deviations across three different
+seeded continuations, each measured once per binary in sequential process blocks;
+these are not repeated-timing confidence intervals. TG uses completion tokens
+minus one divided by server decode time. All nine response observables, prompt and
+prefix counts, and every speculative counter match exactly. MTP acceptance spans
+roughly 39-96%, explaining why throughput differs substantially by workload.
+
+Prompts contain only 122-131 tokens. The second and third seeds per fixture reuse
+all but four prompt tokens; PP divides by computed tokens, and TTFT uses the
+server's explicit first-token timing. These requests do not establish long-context
+serving throughput or a PP gain. Eight outputs stop at the 1,024-token cap; the
+third Python seed stops after 40 tokens with raw `list_files` tool-like text and
+no registered tool call, unchanged from the original. No generated code was run.
+This is a speed and response-parity comparison, not nine successfully completed
+tasks or a quality score. [Compact evidence](../diagnostics/serving-comparison-validation.json)
+and [reproduction commands](../bench/README.md#short-prompt-windows-serving-comparison).
+
 ## TP2 prefix-state correctness
 
 `ninfer_qwen3_8_27b_prefix_tp2_real_test` compares restored text suffixes with cold prefill using

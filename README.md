@@ -180,6 +180,13 @@ Baseline task scores remain 16/18, 5/7 and 4/4; these checks do not claim perfec
 model accuracy. [Runtime evidence](diagnostics/rank0-acceptance-runtime-validation.json)
 and [measurement details](docs/performance.md#local-dual-5070-ti-captured-rank-zero-acceptance).
 
+A separate short-prompt serving comparison against the original local engine
+measured **149.1 tok/s for Python, 117.3 for prose and 205.3 for structured output**,
+about **6.4-6.6% faster**, with all nine response observables and MTP counters
+unchanged. Eight responses hit the output cap; one Python response ends early
+with tool-like text. These are throughput/parity samples, not completed-task
+scores. [Method and limitations](docs/performance.md#local-dual-5070-ti-short-prompt-serving-comparison).
+
 The [localhost server smoke test](diagnostics/server-smoke.json) returned a valid
 chat response with 102,400-token capacity; the test process was stopped afterward.
 

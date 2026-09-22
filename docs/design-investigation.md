@@ -561,6 +561,13 @@ checks without fitting the entire BF16 model on one GPU. The current Python
 reference binder accepts Qwen3.6 groupwise-int, not this Qwen3.8 NVFP4 artifact,
 and would need explicit codec/binding adaptation before serving as its reference.
 
+The completed [short-prompt serving comparison](performance.md#local-dual-5070-ti-short-prompt-serving-comparison)
+adds nine matched stochastic continuations across Python, prose and JSONL, with
+unchanged speculative counts and 6.4-6.6% higher mean TG than the original local
+engine. It retains eight capped outputs and one early Python response containing
+raw tool-like text. This extends response-parity evidence; it does not add nine
+successful tasks or establish 100K coding throughput.
+
 ## Implementation order
 
 1. Resolve the descriptor lifetime and strengthen same-state TP2/MTP and sampling
