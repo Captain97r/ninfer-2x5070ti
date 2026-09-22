@@ -635,7 +635,7 @@ NormSet make_norms(const ExecutionContext& ec, std::uint32_t seed) {
 
 // One MTP verify round. The tp1 leg runs the same op sequence on device 0 over whole weights; the
 // tp2 leg runs it across both devices over shard weights, and every stage is compared.
-int run_mtp_round(const ExecutionContext& ec, const ops::PeerEvents& events,
+int run_mtp_round(const ExecutionContext& ec, const ops::PeerTransfer& transfer,
                   const MtpDeviceModel& weights, const NormSet& norms, std::int32_t tokens,
                   std::int32_t base_keys, std::uint32_t seed) {
     const std::string head = "mtp round T=" + std::to_string(tokens) +
@@ -855,7 +855,7 @@ int run_mtp_round(const ExecutionContext& ec, const ops::PeerEvents& events,
     {
         const std::array<Tensor, 2> fc_input{t_e[0], t_h[1]};
         const std::array<Weight, 2> fc_w{weights.fc.shard[0].weight, weights.fc.shard[1].weight};
-        ops::linear_row_parallel(fc_input, fc_w, t_x, t_staging, ec, events);
+        ops::linear_row_parallel(fc_input, fc_w, t_x, t_staging, ec, transfer);
     }
     synchronize_both(ec);
     {
@@ -989,7 +989,7 @@ int run_mtp_round(const ExecutionContext& ec, const ops::PeerEvents& events,
             Tensor(attn_d[1]->p, DType::BF16, {kOProjShardK, tokens})};
         const std::array<Weight, 2> w{weights.o_proj.shard[0].weight,
                                       weights.o_proj.shard[1].weight};
-        ops::linear_row_parallel(attn_flat, w, t_o, t_staging, ec, events);
+        ops::linear_row_parallel(attn_flat, w, t_o, t_staging, ec, transfer);
     }
     synchronize_both(ec);
     for (int rank = 0; rank < 2; ++rank) {
@@ -1084,7 +1084,7 @@ int run_mtp_round(const ExecutionContext& ec, const ops::PeerEvents& events,
     // -- stage 8: ROW-PARALLEL down + residual, then the final norm.
     {
         const std::array<Weight, 2> w{weights.down.shard[0].weight, weights.down.shard[1].weight};
-        ops::linear_row_parallel(t_act, w, t_delta, t_staging, ec, events);
+        ops::linear_row_parallel(t_act, w, t_delta, t_staging, ec, transfer);
     }
     synchronize_both(ec);
     for (int rank = 0; rank < 2; ++rank) {
@@ -1114,7 +1114,7 @@ int run_mtp_round(const ExecutionContext& ec, const ops::PeerEvents& events,
     return failures;
 }
 
-int run_leg_a(const ExecutionContext& ec, const ops::PeerEvents& events) {
+int run_leg_a(const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     std::cout << "\n--- Leg A: MTP verify round (W8G32, op-level composition) ---\n";
     constexpr QType kW8 = QType::W8G32_F16S;
     int failures        = 0;
@@ -1147,8 +1147,8 @@ int run_leg_a(const ExecutionContext& ec, const ops::PeerEvents& events) {
 
     // T = 1 is the AR proposal step; T = 6 is a K = 5 verify window (K + 1 columns), the widths
     // mtp_forward_batch actually drives.
-    failures += run_mtp_round(ec, events, device_model, norms, 1, 64, 4300u);
-    failures += run_mtp_round(ec, events, device_model, norms, 6, 129, 4400u);
+    failures += run_mtp_round(ec, transfer, device_model, norms, 1, 64, 4300u);
+    failures += run_mtp_round(ec, transfer, device_model, norms, 6, 129, 4400u);
     return failures;
 }
 
@@ -2143,7 +2143,7 @@ int run_leg_c(const ExecutionContext& ec) {
 // =================================================================================================
 namespace {
 
-int run_leg_d(const ExecutionContext& ec, const ops::PeerEvents& events) {
+int run_leg_d(const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     std::cout << "\n--- Leg D: draft head (Q4G64 vocab split + allgather + argmax + remap) ---\n";
     int failures = 0;
 
@@ -2252,7 +2252,7 @@ int run_leg_d(const ExecutionContext& ec, const ops::PeerEvents& events) {
                 Tensor(byte_offset(full[1]->data(), static_cast<std::size_t>(token) * kDraftRows,
                                    sizeof(std::uint16_t)),
                        DType::BF16, {1, kDraftRows})};
-            ops::allgather_rows(destination, part, ec, events);
+            ops::allgather_rows(destination, part, ec, transfer);
         }
         synchronize_both(ec);
 
@@ -2495,14 +2495,14 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
     failures += verify_rejections(ec);
     failures += verify_conv_channel_map();
-    failures += run_leg_a(ec, events);
+    failures += run_leg_a(ec, transfer);
     failures += run_leg_b(ec);
     failures += run_leg_c(ec);
-    failures += run_leg_d(ec, events);
+    failures += run_leg_d(ec, transfer);
 
     std::cout << (failures ? "FAIL" : "OK") << " mtp split (" << failures << " failure(s))\n";
     return failures ? 1 : 0;

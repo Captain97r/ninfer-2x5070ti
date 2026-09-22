@@ -253,7 +253,7 @@ struct HeadCase {
 // equality against the tp1 reference across the whole token sweep.
 // ---------------------------------------------------------------------------------------------
 int run_head_case(const HeadCase& test_case, const ExecutionContext& ec,
-                  const ops::PeerEvents& events) {
+                  const ops::PeerTransfer& transfer) {
     std::cout << test_case.label << " [" << kVocab << ',' << kHidden << "] -> [" << kHalf << ','
               << kHidden << "] (column-parallel / vocab-row split)\n";
     int failures = 0;
@@ -400,7 +400,7 @@ int run_head_case(const HeadCase& test_case, const ExecutionContext& ec,
                                        static_cast<std::size_t>(token) * kVocab,
                                        sizeof(std::uint16_t)),
                            DType::BF16, {1, kVocab})};
-                ops::allgather_rows(destination, part, ec, events);
+                ops::allgather_rows(destination, part, ec, transfer);
             }
             synchronize_both(ec);
 
@@ -631,7 +631,7 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
     failures += run_embedding_replication_case(ec);
 
@@ -658,7 +658,7 @@ int main() {
         {"q6 output_head", QType::Q6G64_F16S, 303u, {1, 4, 16, 24, 32, 48}, {kA16}},
     };
 
-    for (const HeadCase& test_case : cases) { failures += run_head_case(test_case, ec, events); }
+    for (const HeadCase& test_case : cases) { failures += run_head_case(test_case, ec, transfer); }
 
     std::cout << (failures ? "FAIL" : "OK") << " output head split\n";
     return failures ? 1 : 0;

@@ -264,11 +264,11 @@ void linear_column_parallel(const std::array<Tensor, 2>& x, const std::array<Wei
 void linear_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                          const std::array<Tensor, 2>& out, const std::array<Tensor, 2>& staging,
                          LinearPolicy policy, const std::array<WorkspaceArena*, 2>& workspace,
-                         const ExecutionContext& ec, const PeerEvents& events) {
+                         const ExecutionContext& ec, const PeerTransfer& transfer) {
     validate_split_pair(x, w, ec, /*column_parallel=*/false);
     std::array<Tensor, 2> destination = validated_outputs(x, w, out, policy);
     validate_split_residency(x, w, out, ec);
-    if (!events.live()) { throw std::invalid_argument("linear row-parallel: events must be live"); }
+    if (!transfer.live()) { throw std::invalid_argument("linear row-parallel: transfer must be live"); }
 
     // Each rank's partial lands directly in out[rank]; allreduce_sum combines in place, so no
     // separate accumulation workspace exists to get out of step with the output. The collective
@@ -279,13 +279,13 @@ void linear_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight
     // staging[r] must be resident on ec.dev[r], match out[r]'s dtype and shape, and not overlap
     // it; allreduce_sum checks all three (residency and overlap in debug builds) rather than this
     // Op restating them.
-    allreduce_sum(out, staging, ec, events);
+    allreduce_sum(out, staging, ec, transfer);
 }
 
 void linear_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                          const std::array<Tensor, 2>& out, const std::array<Tensor, 2>& staging,
-                         const ExecutionContext& ec, const PeerEvents& events) {
-    linear_row_parallel(x, w, out, staging, LinearPolicy::A16Only, {nullptr, nullptr}, ec, events);
+                         const ExecutionContext& ec, const PeerTransfer& transfer) {
+    linear_row_parallel(x, w, out, staging, LinearPolicy::A16Only, {nullptr, nullptr}, ec, transfer);
 }
 
 } // namespace ninfer::ops

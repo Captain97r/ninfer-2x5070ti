@@ -59,7 +59,7 @@ public:
     };
 
     ExecutionContext execution;
-    ops::PeerEvents events;
+    ops::PeerTransfer transfer;
     const std::array<int, 2> rows;
     const int total_rows;
     const int valid_rows;
@@ -73,7 +73,7 @@ public:
 
     ArgmaxRowParallelFixture(std::vector<int> devices, int rows0, int rows1, int valid,
                               int count, int invocation_count)
-        : execution(devices), events(execution), rows{rows0, rows1}, total_rows(rows0 + rows1),
+        : execution(devices), transfer(execution), rows{rows0, rows1}, total_rows(rows0 + rows1),
           valid_rows(valid), columns(count), calls(invocation_count),
           host_map(static_cast<std::size_t>(total_rows)), logical(calls) {
         for (int rank = 0; rank < 2; ++rank) {
@@ -204,13 +204,13 @@ public:
                     piece[rank] = shards[rank].slice(1, column, 1).view({1, rows[rank]});
                     full[rank] = storage[rank]->gathered.slice(1, column, 1).view({1, total_rows});
                 }
-                ops::allgather_rows(full, piece, execution, events);
+                ops::allgather_rows(full, piece, execution, transfer);
             }
             select(0);
             ops::argmax(storage[0]->gathered, out, valid_rows, execution.dev[0]->stream);
         } else {
             ops::argmax_row_parallel(shards, out, valid_rows,
-                                     {&storage[0]->arena, &storage[1]->arena}, execution, events);
+                                     {&storage[0]->arena, &storage[1]->arena}, execution, transfer);
         }
         select(0);
         if (remap) {

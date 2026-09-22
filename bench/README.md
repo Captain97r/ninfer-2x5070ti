@@ -814,3 +814,22 @@ interpret a local measurement.
 
 Raw reports and profiler captures remain local under `profiles/bench`, `profiles/ncu`, and
 `profiles/nsys`.
+
+### Eager TP2 transfer comparison
+
+`ninfer_peer_transfer_bench [collectives-per-batch pairs]` compares CUDA-managed
+cross-device copies with explicit portable pinned staging on a pair without P2P.
+Defaults are 128 consecutive reductions per batch and five alternating-order pairs,
+after eight warmup reductions per route. Payloads are 64 KiB, 1 MiB, and the real
+10 MiB `[5120,1024]` BF16 prefill shape; allocation and input reset are outside timing.
+
+Each JSON sample records host enqueue time, complete wall time, per-rank CUDA event
+time, and a device-0 event interval joined after device 1 completes. Cross-device
+events establish the dependency; elapsed-time queries always use events on one GPU.
+These quantities overlap and must not be summed. This is an eager collective benchmark,
+not model throughput or a promise that an Async API returns immediately.
+
+Run `ninfer_peer_transfer_test` first. It separately checks nonzero changing operands,
+the FP64 sum/storage oracle, asymmetric exact row gathers, host-buffer reuse, guards,
+independent owners, reversed ranks, and captured fallback. Accept a transport change
+only after the paired timing and unprofiled model prefill/quality checks pass.

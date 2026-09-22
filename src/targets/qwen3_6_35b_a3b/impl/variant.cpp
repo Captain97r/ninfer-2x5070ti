@@ -346,7 +346,7 @@ void Variant::attention_output_projection(const std::array<Tensor, 2>&,
                                           const std::array<Tensor, 2>&,
                                           const std::array<Tensor, 2>&, qwen3_6::TextPhase,
                                           const std::array<WorkspaceArena*, 2>&,
-                                          const ExecutionContext&, const ops::PeerEvents&) {
+                                          const ExecutionContext&, const ops::PeerTransfer&) {
     reject_tensor_parallel("attention_output_projection");
 }
 
@@ -370,7 +370,7 @@ void Variant::gdn_input_projection_snapshot(
 void Variant::gdn_output_projection(const std::array<Tensor, 2>&, const std::array<Weight, 2>&,
                                     const std::array<Tensor, 2>&, const std::array<Tensor, 2>&,
                                     qwen3_6::TextPhase, const std::array<WorkspaceArena*, 2>&,
-                                    const ExecutionContext&, const ops::PeerEvents&) {
+                                    const ExecutionContext&, const ops::PeerTransfer&) {
     reject_tensor_parallel("gdn_output_projection");
 }
 
@@ -386,7 +386,7 @@ void Variant::post_mixer(const std::array<Tensor, 2>&,
                          const std::array<const PostMixerWeights*, 2>&,
                          const std::array<Tensor, 2>&, const std::array<Tensor, 2>&,
                          qwen3_6::TextPhase, const std::array<WorkspaceArena*, 2>&,
-                         const ExecutionContext&, const ops::PeerEvents&) {
+                         const ExecutionContext&, const ops::PeerTransfer&) {
     reject_tensor_parallel("post_mixer");
 }
 
@@ -427,7 +427,7 @@ void Variant::mtp_post_mixer(const std::array<Tensor, 2>&,
                              const std::array<const MtpPostMixerWeights*, 2>&,
                              const std::array<Tensor, 2>&, const std::array<Tensor, 2>&,
                              const std::array<WorkspaceArena*, 2>&, const ExecutionContext&,
-                             const ops::PeerEvents&) {
+                             const ops::PeerTransfer&) {
     reject_tensor_parallel("mtp_post_mixer");
 }
 

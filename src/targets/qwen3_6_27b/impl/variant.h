@@ -2,7 +2,7 @@
 
 #include "targets/qwen3_6_27b/impl/config.h"
 #include "targets/qwen3_6_27b/impl/load/bindings.h"
-#include "ninfer/ops/allreduce.h" // ExecutionContext, ops::PeerEvents (tp2 split forms)
+#include "ninfer/ops/allreduce.h" // ExecutionContext, ops::PeerTransfer (tp2 split forms)
 #include <ninfer/targets/qwen3_6/runtime.h>
 
 #include <array>
@@ -150,7 +150,7 @@ struct Variant {
                                             const std::array<Tensor, 2>& staging,
                                             qwen3_6::TextPhase phase,
                                             const std::array<WorkspaceArena*, 2>& workspace,
-                                            const ExecutionContext& ec, const ops::PeerEvents& ev);
+                                            const ExecutionContext& ec, const ops::PeerTransfer& ev);
     static void gdn_input_projection(const std::array<Tensor, 2>& hidden,
                                      const std::array<const GdnProjectionWeights*, 2>& w,
                                      const std::array<Tensor, 2>& qkv,
@@ -181,7 +181,7 @@ struct Variant {
                                       const std::array<Tensor, 2>& staging,
                                       qwen3_6::TextPhase phase,
                                       const std::array<WorkspaceArena*, 2>& workspace,
-                                      const ExecutionContext& ec, const ops::PeerEvents& ev);
+                                      const ExecutionContext& ec, const ops::PeerTransfer& ev);
     // MTP split leaves. `mtp_attention_projection` is column-parallel over the packed
     // [14336, 5120] parent (shard [7168, 5120], whose row order is q | k | gate | v at the
     // per-rank section widths) and then splits each rank's own packed block in place;
@@ -214,7 +214,7 @@ struct Variant {
                                const std::array<Tensor, 2>& residual,
                                const std::array<Tensor, 2>& staging,
                                const std::array<WorkspaceArena*, 2>& workspace,
-                               const ExecutionContext& ec, const ops::PeerEvents& ev);
+                               const ExecutionContext& ec, const ops::PeerTransfer& ev);
     static void gdn_control_projection(const std::array<Tensor, 2>& hidden,
                                        const std::array<const GdnProjectionWeights*, 2>& w,
                                        const std::array<Tensor, 2>& g,
@@ -226,7 +226,7 @@ struct Variant {
                            const std::array<Tensor, 2>& residual,
                            const std::array<Tensor, 2>& staging, qwen3_6::TextPhase phase,
                            const std::array<WorkspaceArena*, 2>& workspace,
-                           const ExecutionContext& ec, const ops::PeerEvents& ev);
+                           const ExecutionContext& ec, const ops::PeerTransfer& ev);
 
     [[nodiscard]] static std::vector<GraphExecutionProfile>
     ordinary_graph_profiles(std::uint32_t capacity);

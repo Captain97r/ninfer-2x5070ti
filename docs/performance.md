@@ -960,3 +960,20 @@ Each category contains three fixtures and five seeds per fixture, for 15 samples
 | Story | 15 | 126.1 ± 10.9 | 37.4% ± 5.8% | 2.12 ± 0.17 |
 | Translation | 15 | 192.3 ± 11.9 | 75.0% ± 6.5% | 3.25 ± 0.19 |
 | Structured | 15 | 219.8 ± 8.6 | 90.8% ± 5.1% | 3.72 ± 0.15 |
+
+### Dual RTX 5070 Ti explicit bulk transfer
+
+Same pinned Qwen3.8-27B v2 artifact, TP2/MTP3/INT8-G64, 102,400 context, chunk 1024,
+CUDA graphs, one warmup and three measured repetitions. This compares the validated
+TMA-correctness build with explicit pinned staging for eager prompt collectives.
+
+| Workload | Before PP tok/s | After PP tok/s | PP gain | Before TG tok/s | After TG tok/s |
+|---|---:|---:|---:|---:|---:|
+| 8K prompt / 256 generated | 3046.38 +/- 1.53 | 3137.61 +/- 2.55 | 2.99% | 199.41 +/- 0.11 | 199.52 +/- 0.13 |
+| 100K prompt / 512 generated | 2237.49 +/- 0.55 | 2287.90 +/- 0.40 | 2.25% | 172.26 +/- 0.19 | 172.45 +/- 0.02 |
+
+Spreads are sample standard deviations. TG is effectively unchanged. MTP counts
+match, as do all 18 regular and all 4 long-context observable responses. Regular task
+accuracy remains 16/18; retrieval is 4/4. The synthetic cycling corpus and its high
+acceptance do not establish ordinary coding/chat throughput. The host staging adds
+20 MiB of pinned RAM and no device allocation. [Detailed evidence](../diagnostics/bulk-transfer-validation.json).

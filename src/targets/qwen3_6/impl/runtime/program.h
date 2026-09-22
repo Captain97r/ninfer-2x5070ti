@@ -340,7 +340,8 @@ public:
     const std::uint32_t effective_max_context;
     const double yarn_mscale;
     std::optional<PeerRuntime> peer;
-    std::optional<ops::PeerEvents> peer_events;
+    // Stream-bound events and optional portable pinned buffers for large eager prefill.
+    std::optional<ops::PeerTransfer> peer_transfer;
     // Created once at tp2 when graphs are on: the pinned host slab the captured collectives
     // exchange through (see ops::PeerMailbox). The staged, event-ordered path in
     // ops::allreduce_sum stays the only path for eager execution and oversized payloads.

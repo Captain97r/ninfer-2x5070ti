@@ -60,7 +60,7 @@ void for_each_rank(const ExecutionContext& ec, Body&& body) {
 // entry point below behaves exactly as it always has.
 struct TpPeerCore {
     const ExecutionContext* execution          = nullptr;
-    const ops::PeerEvents* events              = nullptr;
+    const ops::PeerTransfer* transfer              = nullptr;
     DeviceContext* device                      = nullptr;
     const LoadedModelData* model               = nullptr;
     WorkspaceArena* work                       = nullptr;
@@ -106,7 +106,7 @@ struct ExecutionCore {
     const TpPeerCore& peer = *execution.peer;
     TpExecution out;
     out.execution      = peer.execution;
-    out.events         = peer.events;
+    out.transfer         = peer.transfer;
     out.device         = peer.device;
     out.weights        = peer.model;
     out.work           = peer.work;

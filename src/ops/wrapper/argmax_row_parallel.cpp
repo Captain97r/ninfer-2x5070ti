@@ -38,11 +38,11 @@ std::size_t argmax_row_parallel_workspace_capacity_bytes(std::int32_t local_phys
 void argmax_row_parallel(const std::array<Tensor, 2>& logits, Tensor& out,
                          std::int32_t valid_rows,
                          const std::array<WorkspaceArena*, 2>& workspace,
-                         const ExecutionContext& execution, const PeerEvents& events) {
+                         const ExecutionContext& execution, const PeerTransfer& transfer) {
     require(execution.tp == 2 && execution.dev[0] && execution.dev[1] &&
                 execution.dev[0]->device != execution.dev[1]->device,
             "argmax_row_parallel: two distinct devices are required");
-    require(events.live(), "argmax_row_parallel: peer events must be live");
+    require(transfer.matches(execution), "argmax_row_parallel: transfer must belong to this stream pair");
     const std::int32_t columns = logits[0].ne[1];
     for (const Tensor& shard : logits) {
         require(shard.dtype == DType::BF16 && shard.ne[0] > 0 && shard.ne[1] == columns &&
@@ -80,7 +80,7 @@ void argmax_row_parallel(const std::array<Tensor, 2>& logits, Tensor& out,
 #endif
         scratch[rank] = layout.bind(backing);
     }
-    detail::argmax_row_parallel_launch(logits, out, valid_rows, scratch, execution, events);
+    detail::argmax_row_parallel_launch(logits, out, valid_rows, scratch, execution, transfer);
 }
 
 } // namespace ninfer::ops

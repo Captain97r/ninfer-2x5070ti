@@ -258,6 +258,26 @@ comparing those settings with another engine. See
 [Qwen presets](../src/targets/qwen3_6_27b/impl/package.cpp) and
 [OMP's parameter omission behavior](https://github.com/can1357/oh-my-pi/blob/v18.2.8/docs/settings.md#sampling).
 
+## Implemented bulk prompt transfers
+
+Large eager TP2 collectives now use an explicitly owned `PeerTransfer` with two
+portable pinned host buffers. Both source copies are published before either peer
+pull, and completion events protect buffer reuse. The no-P2P Program provisions
+10 MiB per rank for the current 1,024-token chunk. Transfers below 64 KiB, captures,
+and oversized requests retain their previous transport; no allocation occurs in
+an operator. Direct-P2P Programs do not allocate these host buffers.
+
+Matched unprofiled measurements improved PP from 3,046.38 to 3,137.61 tokens/s at
+8K (+2.99%), and from 2,237.49 to 2,287.90 at 100K (+2.25%). TG remained essentially
+unchanged at 199.52 and 172.45 tokens/s, with identical speculative counts. The
+10 MiB allreduce microbenchmark reduced host enqueue time much more than completed
+transfer latency; only the end-to-end measurements establish the engine gain.
+
+Exact transfer/sum tests, affected TP2 integration tests and zero-error sanitizer
+checks passed. All 18 regular observable responses and all four long-context
+responses match their frozen references. The two original regular-panel task
+failures remain failures. [Validation and measurement record](../diagnostics/bulk-transfer-validation.json).
+
 ## Generation opportunities
 
 ### 1. Exact distributed draft argmax: implemented

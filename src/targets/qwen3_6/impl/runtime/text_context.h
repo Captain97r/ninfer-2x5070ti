@@ -178,7 +178,7 @@ class VisionPrefillSession;
 // block tables match rank 0's by construction.
 struct TpExecution {
     const ExecutionContext* execution = nullptr;
-    const ops::PeerEvents* events     = nullptr;
+    const ops::PeerTransfer* transfer     = nullptr;
     DeviceContext* device             = nullptr;
     const LoadedModelData* weights    = nullptr;
     WorkspaceArena* work              = nullptr;
@@ -195,7 +195,7 @@ struct TpExecution {
     const GdnReplayRecords* replay_records    = nullptr;
 
     [[nodiscard]] bool complete() const noexcept {
-        return execution != nullptr && events != nullptr && device != nullptr &&
+        return execution != nullptr && transfer != nullptr && device != nullptr &&
                weights != nullptr && work != nullptr && state != nullptr && io != nullptr;
     }
 };

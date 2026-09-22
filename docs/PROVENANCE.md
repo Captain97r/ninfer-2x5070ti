@@ -36,7 +36,7 @@ natpate/ninfer-windows        (Windows port; its README credits a "ninfer-3090 f
 ### 2. TP2 + YaRN base — `wamansou/ninfer-tp2-1m` @ `6a355d5` — **derived code (fork parent)**
 
 - The `--tp 2` execution, the staged event-ordered allreduce (the code this fork optimizes),
-  `PeerEvents`, the cross-device CUDA graph bridge, and the YaRN 1M-context scaling are the work
+  `PeerTransfer`, the cross-device CUDA graph bridge, and the YaRN 1M-context scaling are the work
   of **Wael Mansour** (wamansou), on top of upstream `feaf4dd`.
 - The staged fallback path itself (`allreduce.cu` before this branch) is *also* wamansou's; this
   fork modifies it (adds mailbox selection) but did not write it.

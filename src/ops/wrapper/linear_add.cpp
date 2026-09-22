@@ -380,7 +380,7 @@ void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<We
                              const std::array<Tensor, 2>& residual,
                              const std::array<Tensor, 2>& staging, LinearPolicy policy,
                              const std::array<WorkspaceArena*, 2>& workspace,
-                             const ExecutionContext& ec, const PeerEvents& events) {
+                             const ExecutionContext& ec, const PeerTransfer& transfer) {
     validate_policy(policy);
     validate_add_split_pair(x, w, ec);
     validate_add_split_residency(x, w, residual, ec);
@@ -401,15 +401,15 @@ void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<We
     // restated here. Its local combine is the same `x += y` computation issue_fused_rank's BF16
     // branch already used, so the two extra roundings a split evaluation always carries (linear.h's
     // row-parallel numerical note) are the only source of divergence from the tp1 fused kernel.
-    allreduce_sum(target, staging, ec, events);
+    allreduce_sum(target, staging, ec, transfer);
 }
 
 void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                              const std::array<Tensor, 2>& residual,
                              const std::array<Tensor, 2>& staging, const ExecutionContext& ec,
-                             const PeerEvents& events) {
+                             const PeerTransfer& transfer) {
     linear_add_row_parallel(x, w, residual, staging, LinearPolicy::A16Only, {nullptr, nullptr}, ec,
-                            events);
+                            transfer);
 }
 
 } // namespace ninfer::ops

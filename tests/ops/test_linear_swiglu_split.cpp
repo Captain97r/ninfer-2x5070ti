@@ -490,7 +490,7 @@ struct PipelineCase {
 };
 
 int run_pipeline_case(const PipelineCase& test_case, const ExecutionContext& ec,
-                      const ops::PeerEvents& events) {
+                      const ops::PeerTransfer& transfer) {
     constexpr std::int32_t kDownRows = 5120; // o_proj/gdn/output width; mlp/down [5120,17408]
     const std::int32_t tokens        = test_case.tokens;
     const std::string head           = test_case.label;
@@ -663,7 +663,7 @@ int run_pipeline_case(const PipelineCase& test_case, const ExecutionContext& ec,
         const std::array<ninfer::WorkspaceArena*, 2> workspace{&*add_arena[0], &*add_arena[1]};
         retire_staging(ec);
         ops::linear_add_row_parallel(x, w, residual, staging_view, test_case.policy, workspace, ec,
-                                    events);
+                                    transfer);
         synchronize_both(ec);
     }
 
@@ -889,7 +889,7 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
     failures += verify_split_rejections(ec);
 
@@ -933,7 +933,7 @@ int main() {
          kA16},
     };
     for (const PipelineCase& test_case : pipeline_cases) {
-        failures += run_pipeline_case(test_case, ec, events);
+        failures += run_pipeline_case(test_case, ec, transfer);
     }
 
     std::cout << (failures ? "FAIL" : "OK") << " linear_swiglu split\n";

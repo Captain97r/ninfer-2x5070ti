@@ -12,7 +12,7 @@
 
 namespace ninfer::ops {
 
-class PeerEvents;
+class PeerTransfer;
 
 /**
  * Computes one vocabulary argmax per column:
@@ -44,7 +44,7 @@ void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, cudaStre
  * rank one's valid range may be empty. out is contiguous I32 [T] on execution rank zero.
  * Inputs, output and each rank's workspace are disjoint. Inputs are unchanged.
  *
- * execution contains two distinct devices; events belongs to their stream pair. The Op uses
+ * execution contains two distinct devices; transfer belongs to their stream pair. The Op uses
  * those compute streams and suballocates only from the supplied rank-local arenas. No device
  * allocation or host synchronization occurs. On return each stream is ordered after every use
  * of its scratch, including the peer's staged read, so successive calls can reuse the arenas.
@@ -55,6 +55,6 @@ void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, cudaStre
 void argmax_row_parallel(const std::array<Tensor, 2>& logits, Tensor& out,
                          std::int32_t valid_rows,
                          const std::array<WorkspaceArena*, 2>& workspace,
-                         const ExecutionContext& execution, const PeerEvents& events);
+                         const ExecutionContext& execution, const PeerTransfer& transfer);
 
 } // namespace ninfer::ops

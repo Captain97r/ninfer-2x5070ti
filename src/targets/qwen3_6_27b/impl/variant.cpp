@@ -593,7 +593,7 @@ void Variant::attention_output_projection(const std::array<Tensor, 2>& attention
                                           const std::array<Tensor, 2>& residual,
                                           const std::array<Tensor, 2>& staging, qwen3_6::TextPhase,
                                           const std::array<WorkspaceArena*, 2>& workspace,
-                                          const ExecutionContext& ec, const ops::PeerEvents& ev) {
+                                          const ExecutionContext& ec, const ops::PeerTransfer& ev) {
     ops::linear_add_row_parallel(attention, weight, residual, staging, text_policy(weight[0]),
                                  workspace, ec, ev);
 }
@@ -660,7 +660,7 @@ void Variant::gdn_output_projection(const std::array<Tensor, 2>& hidden,
                                     const std::array<Tensor, 2>& residual,
                                     const std::array<Tensor, 2>& staging, qwen3_6::TextPhase,
                                     const std::array<WorkspaceArena*, 2>& workspace,
-                                    const ExecutionContext& ec, const ops::PeerEvents& ev) {
+                                    const ExecutionContext& ec, const ops::PeerTransfer& ev) {
     ops::linear_add_row_parallel(hidden, weight, residual, staging, text_policy(weight[0]),
                                  workspace, ec, ev);
 }
@@ -700,7 +700,7 @@ void Variant::post_mixer(const std::array<Tensor, 2>& hidden,
                          const std::array<Tensor, 2>& residual,
                          const std::array<Tensor, 2>& staging, qwen3_6::TextPhase,
                          const std::array<WorkspaceArena*, 2>& workspace,
-                         const ExecutionContext& ec, const ops::PeerEvents& ev) {
+                         const ExecutionContext& ec, const ops::PeerTransfer& ev) {
     // The activation width is this rank's own gate/up shard, read off the weight rather than
     // assumed: `gate_up` is [2 * intermediate_shard, hidden], so half its rows is the shard.
     const std::int32_t shard_intermediate = w[0]->gate_up.n / 2;
@@ -816,7 +816,7 @@ void Variant::mtp_post_mixer(const std::array<Tensor, 2>& hidden,
                              const std::array<Tensor, 2>& residual,
                              const std::array<Tensor, 2>& staging,
                              const std::array<WorkspaceArena*, 2>& workspace,
-                             const ExecutionContext& ec, const ops::PeerEvents& ev) {
+                             const ExecutionContext& ec, const ops::PeerTransfer& ev) {
     // The MTP post-mixer is composed exactly the way the tp1 leaf above composes it -- separate
     // `linear` / `silu_mul` / `linear` / `residual_add`, NOT the fused linear_swiglu + linear_add
     // pair the text post-mixer uses. That is not a stylistic choice: neither

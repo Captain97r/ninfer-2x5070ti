@@ -115,7 +115,7 @@ collective only when
   flags never dirty a capture),
 - the payload is a whole number of 16-byte vectors and fits one slot.
 
-Every failed predicate falls back to the staged path unchanged.
+A failed predicate uses the event-ordered path described in section 7.
 
 ### Optimized draft selection on this branch
 
@@ -149,13 +149,37 @@ slot's host addresses into the recorded launches. Between replays the engine doe
 Slot exhaustion (a future topology capturing more call sites than 2048) is reported loudly and
 degrades those collectives to the staged path.
 
-## 7. Fallback path
+## 7. Eager prefill and fallback transport
 
-The staged event-ordered path in `allreduce.cu` is **not removed**: it is the transport for
-eager execution (prefill chunks, warmup, `--no-cuda-graph` runs) and for any payload larger than
-a slot (multi-request batches). The mailbox is deliberately an accelerator for exactly one
-shape — small reductions replayed in a captured graph — and the engine degrades to the exact
-pre-existing behavior the moment any predicate fails.
+This branch owns one `PeerTransfer` per Program and stream pair. It contains the ordering
+events and, when setup cannot enable P2P in both directions, two `cudaHostAllocPortable`
+buffers. Their per-rank capacity is the checked `[hidden, min(prefill_chunk, capacity)]`
+BF16 layout: 10 MiB per rank for the 5120-wide, 1024-token prefill configuration.
+
+Eager sum and row-gather calls use these buffers when the largest source is at least 64 KiB
+and both sources fit. Both streams must be outside capture. Each source stream copies its
+own input to host and records readiness; each destination waits for the peer, copies the
+peer's host buffer to local storage, and records read completion. Both streams finally
+wait for the peer's read completion before reusing source or host storage. The BF16 sum
+uses the existing FP32 add and one BF16 store. There is no compression or model-math change.
+
+The resource is passed explicitly through the projection and collective APIs; the Ops
+allocate nothing. Programs retire both streams and destroy graph users before the transfer
+resource releases its memory. Distinct Programs have distinct host buffers and events.
+
+Small or over-capacity eager calls retain CUDA-managed cross-device copies. Captured calls
+retain the mailbox selection and its existing implicit-copy fallback; the explicit pinned
+buffers are never captured. P2P-enabled Programs allocate no host staging. CUDA APIs with
+`Async` in their names can still block the host, so performance qualification records both
+host enqueue and complete wall time.
+
+`ninfer_peer_transfer_test` checks exact stored sums against a represented-input FP64
+oracle, exact asymmetric gathers, changing consecutive inputs without host synchronization,
+reversed ranks, two independent owners, device/host guards, and captured fallback. It also
+checks pinned buffer contents to establish that the explicit route executed.
+`ninfer_peer_transfer_bench` compares implicit and explicit staging with alternating paired
+batches; see [the benchmark instructions](../bench/README.md). The historical 5060 Ti
+numbers elsewhere in this document do not measure this eager-prefill implementation.
 
 ## 8. Correctness validation
 

@@ -230,7 +230,7 @@ TextContext::TextContext(
       rope_frequency_(rope_frequency), batch_text_kv_(batch_text_kv), batch_mtp_kv_(batch_mtp_kv),
       tp_(tp) {
     if (tp_ != nullptr) {
-        if (!tp_->complete() || tp_->execution->tp != 2 || !tp_->events->live()) {
+        if (!tp_->complete() || tp_->execution->tp != 2 || !tp_->transfer->live()) {
             throw std::invalid_argument("tensor-parallel TextContext binding is incomplete");
         }
         if (mtp_enabled() != (tp_->mtp_kv.valid() || tp_->batch_mtp_kv != nullptr)) {
@@ -1471,7 +1471,7 @@ PrefillChunkResult TextContext::prefill_chunk(const qwen3_6::PreparedPromptData&
 // STREAMS AND EVENTS. There is no host synchronization anywhere inside the layer loop. Rank r's
 // work is enqueued on `ec.dev[r]->stream`; the collectives' own four-event choreography
 // (`inputs_ready` / `pull_done`, include/ninfer/ops/allreduce.h) is what orders the two streams
-// against each other, both within a call and across calls. The single `PeerEvents` instance lives
+// against each other, both within a call and across calls. The single `PeerTransfer` instance lives
 // in the Program, is created once, and is reused by every collective of every layer. Kernel
 // launches go to the CURRENT device, so every per-rank issue runs inside `for_each_rank`, which
 // sets and restores it.
@@ -1658,7 +1658,7 @@ void TextContext::attn_mix_tp2(const FullLayerW& w0, const FullLayerW& w1, std::
 
     Variant::attention_output_projection({a[0].view({kShardQSize, T}), a[1].view({kShardQSize, T})},
                                          {*w0.o_proj, *w1.o_proj}, x, staging, ph, ws, execution,
-                                         *tp_->events);
+                                         *tp_->transfer);
 }
 
 void TextContext::gdn_mix_tp2(const GdnLayerW& w0, const GdnLayerW& w1, std::array<Tensor, 2>& x,
@@ -1832,7 +1832,7 @@ void TextContext::gdn_mix_tp2(const GdnLayerW& w0, const GdnLayerW& w1, std::arr
 
     Variant::gdn_output_projection(
         {on[0].view({kShardValueDim, T}), on[1].view({kShardValueDim, T})},
-        {*w0.out_proj, *w1.out_proj}, x, staging, ph, ws, execution, *tp_->events);
+        {*w0.out_proj, *w1.out_proj}, x, staging, ph, ws, execution, *tp_->transfer);
 }
 
 void TextContext::mlp_tail_tp2(const Tensor* post_norm_0, const Tensor* post_norm_1, const MlpW& m0,
@@ -1850,7 +1850,7 @@ void TextContext::mlp_tail_tp2(const Tensor* post_norm_0, const Tensor* post_nor
         const auto r = static_cast<std::size_t>(rank);
         ops::rmsnorm(x[r], *norm[r], kCfg.rms_eps, true, h[r], stream_for(rank));
     });
-    Variant::post_mixer(h, {m0.payload, m1.payload}, x, staging, ph, ws, execution, *tp_->events);
+    Variant::post_mixer(h, {m0.payload, m1.payload}, x, staging, ph, ws, execution, *tp_->transfer);
 }
 
 void TextContext::run_layers_tp2(std::array<Tensor, 2>& x, Phase ph,
@@ -1944,7 +1944,7 @@ void TextContext::logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits
                                              part[1].slice(1, column, 1).view({1, kShardVocab})};
         const std::array<Tensor, 2> whole = {logits.slice(1, column, 1).view({1, kCfg.vocab}),
                                              peer_logits.slice(1, column, 1).view({1, kCfg.vocab})};
-        ops::allgather_rows(whole, piece, execution, *tp_->events);
+        ops::allgather_rows(whole, piece, execution, *tp_->transfer);
     }
 }
 
@@ -2445,7 +2445,7 @@ void TextContext::mtp_forward_stem_tp2(const Tensor& ids, const std::array<Tenso
         }
     });
     ops::linear_row_parallel(fc_input, {*mtp_weights_for(0).fc, *mtp_weights_for(1).fc}, x,
-                             staging, execution, *tp_->events);
+                             staging, execution, *tp_->transfer);
     for_each_rank(execution, [&](int rank) {
         const auto r = static_cast<std::size_t>(rank);
         ops::rmsnorm(x[r], *mtp_weights_for(rank).input_norm, kCfg.rms_eps, true, ah[r],
@@ -2548,7 +2548,7 @@ void TextContext::mtp_forward_tail_tp2(std::array<Tensor, 2>& x, const std::arra
     }
     ops::linear_row_parallel({a[0].view({kShardQSize, T}), a[1].view({kShardQSize, T})},
                              {*mtp_weights_for(0).o_proj, *mtp_weights_for(1).o_proj}, o, staging,
-                             execution, *tp_->events);
+                             execution, *tp_->transfer);
     for_each_rank(execution, [&](int rank) {
         const auto r   = static_cast<std::size_t>(rank);
         cudaStream_t s = stream_for(rank);
@@ -2561,7 +2561,7 @@ void TextContext::mtp_forward_tail_tp2(std::array<Tensor, 2>& x, const std::arra
         auto scope_1 = tp_->work->scope();
         Variant::mtp_post_mixer(
             mh, {&mtp_weights_for(0).payload->post_mixer, &mtp_weights_for(1).payload->post_mixer},
-            x, staging, ws, execution, *tp_->events);
+            x, staging, ws, execution, *tp_->transfer);
     }
 
     for_each_rank(execution, [&](int rank) {
@@ -2635,7 +2635,7 @@ void TextContext::proposal_argmax_tp2(const std::array<Tensor, 2>& hidden,
         part[r] = ws[r]->alloc(DType::BF16, {shard_rows, T});
     }
     ops::linear_column_parallel(hidden, {*proposal_head_, *proposal_head_peer_}, part, execution);
-    ops::argmax_row_parallel(part, proposal_tokens, total_rows, ws, execution, *tp_->events);
+    ops::argmax_row_parallel(part, proposal_tokens, total_rows, ws, execution, *tp_->transfer);
     const CurrentDevice restore;
     CUDA_CHECK(cudaSetDevice(ctx_.device));
     ops::proposal_remap_token_ids(proposal_tokens, proposal_head_ids_, total_rows, ctx_.stream);
@@ -3001,7 +3001,7 @@ void TextContext::mtp_prefill_chunk_tp2(const Tensor& ids, const std::array<Tens
     });
     ops::linear_row_parallel({a[0].view({kShardQSize, 1}), a[1].view({kShardQSize, 1})},
                              {*mtp_weights_for(0).o_proj, *mtp_weights_for(1).o_proj}, o,
-                             last_staging, execution, *tp_->events);
+                             last_staging, execution, *tp_->transfer);
     for_each_rank(execution, [&](int rank) {
         const auto r   = static_cast<std::size_t>(rank);
         cudaStream_t s = stream_for(rank);
@@ -3014,7 +3014,7 @@ void TextContext::mtp_prefill_chunk_tp2(const Tensor& ids, const std::array<Tens
         auto post_scope_1 = tp_->work->scope();
         Variant::mtp_post_mixer(
             mh, {&mtp_weights_for(0).payload->post_mixer, &mtp_weights_for(1).payload->post_mixer},
-            x_last, last_staging, ws, execution, *tp_->events);
+            x_last, last_staging, ws, execution, *tp_->transfer);
     }
     for_each_rank(execution, [&](int rank) {
         const auto r = static_cast<std::size_t>(rank);

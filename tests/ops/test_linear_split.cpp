@@ -365,7 +365,7 @@ ReductionCriterion criterion_for(const Case& test_case, ops::LinearPolicy policy
 // One case: build the whole weight and the two shards, run tp1 on device 0 and the split form on
 // both, compare.
 // ---------------------------------------------------------------------------------------------
-int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerEvents& events) {
+int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     const bool column      = test_case.axis == SplitAxis::Column;
     const bool dense       = test_case.qtype == QType::BF16_CTRL;
     const std::int32_t n   = test_case.n;
@@ -501,7 +501,7 @@ int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerE
                 const std::array<Tensor, 2> staging_view{
                     Tensor(staging[0]->p, DType::BF16, {sn, tokens}),
                     Tensor(staging[1]->p, DType::BF16, {sn, tokens})};
-                ops::linear_row_parallel(x, w, out, staging_view, policy, workspace, ec, events);
+                ops::linear_row_parallel(x, w, out, staging_view, policy, workspace, ec, transfer);
             }
             synchronize_both(ec);
 
@@ -659,7 +659,7 @@ int verify_registry() {
 }
 
 // Rejection cases the split forms own: only the pair can see them.
-int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& events) {
+int verify_split_rejections(const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     int failures            = 0;
     const auto expect_throw = [&](const char* what, auto&& body) {
         try {
@@ -724,7 +724,7 @@ int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& e
         // violation and would leave it ambiguous which one the Op actually rejected.
         const std::array<Tensor, 2> staging{Tensor(stage0.p, DType::BF16, {kN, 1}),
                                             Tensor(stage1.p, DType::BF16, {kN / 2, 1})};
-        ops::linear_row_parallel(x, {fake, other}, out, staging, ec, events);
+        ops::linear_row_parallel(x, {fake, other}, out, staging, ec, transfer);
     });
 
     // A single-device context is not a split context.
@@ -773,9 +773,9 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
-    failures += verify_split_rejections(ec, events);
+    failures += verify_split_rejections(ec, transfer);
 
     constexpr auto kA16 = ops::LinearPolicy::A16Only;
     constexpr auto kA4  = ops::LinearPolicy::AllowA4;
@@ -833,7 +833,7 @@ int main() {
          {1, 8, 24, 25, 48, 128, 1024}, {kA16, kA8}},
     };
 
-    for (const Case& test_case : cases) { failures += run_case(test_case, ec, events); }
+    for (const Case& test_case : cases) { failures += run_case(test_case, ec, transfer); }
 
     std::cout << (failures ? "FAIL" : "OK") << " linear split\n";
     return failures ? 1 : 0;

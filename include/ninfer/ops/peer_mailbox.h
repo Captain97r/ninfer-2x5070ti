@@ -16,7 +16,7 @@
 // communication-bound decode and a compute-bound one.
 //
 // LIFECYCLE.
-//   PeerMailbox mailbox(ec);                  once, at Program setup, next to PeerEvents
+//   PeerMailbox mailbox(ec);                  once, at Program setup, next to PeerTransfer
 //                                             (cudaHostAlloc is not stream-ordered and must
 //                                             never appear in a hot path or a capture)
 //   ... capture the decode program ...
@@ -25,7 +25,7 @@
 //
 // WHY A PROCESS-WIDE INSTALL RATHER THAN A PARAMETER. The collective is issued deep inside the
 // linear ops (linear_row_parallel, linear_add), whose public signatures carry only the
-// PeerEvents pair; plumbing a second object through every layer would touch a dozen signatures
+// PeerTransfer pair; plumbing a second object through every layer would touch a dozen signatures
 // to serve one machine-specific transport. The install is exclusive: a second PeerMailbox
 // constructor on a different device pair uninstalls the first and takes over, which keeps a
 // two-Program process sound (the later Program wins; the earlier one falls back to the staged

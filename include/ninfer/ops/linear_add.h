@@ -4,7 +4,7 @@
 
 #include "core/arena.h"
 #include "core/tensor.h"
-#include "ninfer/ops/allreduce.h" // ExecutionContext, PeerEvents (tp2 split form)
+#include "ninfer/ops/allreduce.h" // ExecutionContext, PeerTransfer (tp2 split form)
 #include "ninfer/ops/linear.h"
 
 #include <cuda_runtime.h>
@@ -122,12 +122,12 @@ void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<We
                              const std::array<Tensor, 2>& residual,
                              const std::array<Tensor, 2>& staging, LinearPolicy policy,
                              const std::array<WorkspaceArena*, 2>& workspace,
-                             const ExecutionContext& ec, const PeerEvents& events);
+                             const ExecutionContext& ec, const PeerTransfer& transfer);
 
 /// A16-only row-parallel form; requires no transient workspace.
 void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                              const std::array<Tensor, 2>& residual,
                              const std::array<Tensor, 2>& staging, const ExecutionContext& ec,
-                             const PeerEvents& events);
+                             const PeerTransfer& transfer);
 
 } // namespace ninfer::ops

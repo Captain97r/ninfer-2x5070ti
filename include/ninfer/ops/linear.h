@@ -2,7 +2,7 @@
 
 #include "core/arena.h"
 #include "core/tensor.h"
-#include "ninfer/ops/allreduce.h" // ExecutionContext, PeerEvents (tp2 split forms)
+#include "ninfer/ops/allreduce.h" // ExecutionContext, PeerTransfer (tp2 split forms)
 
 #include <cuda_runtime.h>
 
@@ -185,8 +185,8 @@ void linear_column_parallel(const std::array<Tensor, 2>& x, const std::array<Wei
  * `w[0].n` must equal `w[1].n` (both ranks produce every output row) and both ranks must agree on
  * the token count. `w[r].k` need not be equal across ranks. `staging[r]` is scratch of the output's
  * dtype and shape resident on `ec.dev[r]`, must not overlap `out[r]`, and its contents after the
- * call are unspecified; `events` must be live. Consecutive calls sharing the same buffers, staging,
- * and events need no host synchronization between them.
+ * call are unspecified; `transfer` must be live. Consecutive calls sharing the same buffers, staging,
+ * and transfer need no host synchronization between them.
  *
  * @par Numerical note
  * The split reduction is NOT bit-identical to the single-device result and cannot be: each rank
@@ -204,16 +204,16 @@ void linear_column_parallel(const std::array<Tensor, 2>& x, const std::array<Wei
  * @param[in,out] workspace Per-rank caller-owned transient arena, or null when the resolved route
  * needs none. Sized at the SHARD shape.
  * @param[in] ec Execution context holding exactly two distinct devices.
- * @param[in] events Live cross-device ordering events, as for allreduce_sum().
+ * @param[in] transfer Live stream-pair transfer resource, as for allreduce_sum().
  */
 void linear_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                          const std::array<Tensor, 2>& out, const std::array<Tensor, 2>& staging,
                          LinearPolicy policy, const std::array<WorkspaceArena*, 2>& workspace,
-                         const ExecutionContext& ec, const PeerEvents& events);
+                         const ExecutionContext& ec, const PeerTransfer& transfer);
 
 /// A16-only row-parallel form; requires no transient workspace.
 void linear_row_parallel(const std::array<Tensor, 2>& x, const std::array<Weight, 2>& w,
                          const std::array<Tensor, 2>& out, const std::array<Tensor, 2>& staging,
-                         const ExecutionContext& ec, const PeerEvents& events);
+                         const ExecutionContext& ec, const PeerTransfer& transfer);
 
 } // namespace ninfer::ops

@@ -83,7 +83,7 @@ void retire_staging(const ExecutionContext& ec) {
 // `ne0` is the contiguous dimension and `ne1` the outer one, so a 1-D buffer passes ne1 == 1 and
 // the real row-parallel residual passes {5120, 48}.
 int run_allreduce_case(const char* label, std::int32_t ne0, std::int32_t ne1, std::uint32_t seed,
-                       const ExecutionContext& ec, const ops::PeerEvents& events) {
+                       const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     const std::size_t count = static_cast<std::size_t>(ne0) * static_cast<std::size_t>(ne1);
     std::vector<float> a(count), b(count);
     fill_uniform(a, seed, -8.0f, 8.0f);
@@ -112,7 +112,7 @@ int run_allreduce_case(const char* label, std::int32_t ne0, std::int32_t ne1, st
                                         Tensor(staging_1.data(), DType::BF16, {ne0, ne1})};
 
     retire_staging(ec);
-    ops::allreduce_sum(buffer, staging, ec, events);
+    ops::allreduce_sum(buffer, staging, ec, transfer);
     synchronize_both(ec);
 
     int failures = 0;
@@ -135,7 +135,7 @@ int run_allreduce_case(const char* label, std::int32_t ne0, std::int32_t ne1, st
 // leading `rows_0` rows and device 1 the trailing `rows_1`.
 int run_allgather_case(const char* label, std::int32_t rows_0, std::int32_t rows_1,
                        std::int32_t row_length, std::uint32_t seed, const ExecutionContext& ec,
-                       const ops::PeerEvents& events) {
+                       const ops::PeerTransfer& transfer) {
     const std::int32_t rows  = rows_0 + rows_1;
     const std::size_t part_0 = static_cast<std::size_t>(rows_0) * row_length;
     const std::size_t part_1 = static_cast<std::size_t>(rows_1) * row_length;
@@ -174,7 +174,7 @@ int run_allgather_case(const char* label, std::int32_t rows_0, std::int32_t rows
         Tensor(source_device_1.data(), DType::BF16, {row_length, rows_1})};
 
     retire_staging(ec);
-    ops::allgather_rows(destination, part, ec, events);
+    ops::allgather_rows(destination, part, ec, transfer);
     synchronize_both(ec);
 
     int failures = 0;
@@ -219,7 +219,7 @@ int run_allgather_case(const char* label, std::int32_t rows_0, std::int32_t rows
 //
 // Deliberate skew: a large memset is queued on rank 0's stream first, with no host sync, so the
 // two streams run genuinely out of step for the first rounds instead of in lockstep.
-int run_chained_case(const ExecutionContext& ec, const ops::PeerEvents& events) {
+int run_chained_case(const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     constexpr std::int32_t n     = 5120;
     constexpr int kRounds        = 64;
     constexpr int kStartExponent = -40;
@@ -268,8 +268,8 @@ int run_chained_case(const ExecutionContext& ec, const ops::PeerEvents& events) 
     }
 
     for (int round = 0; round < kRounds; ++round) {
-        ops::allreduce_sum(buffer, staging, ec, events);
-        ops::allgather_rows(gathered, part, ec, events);
+        ops::allreduce_sum(buffer, staging, ec, transfer);
+        ops::allgather_rows(gathered, part, ec, transfer);
     }
     synchronize_both(ec);
 
@@ -308,7 +308,7 @@ int run_chained_case(const ExecutionContext& ec, const ops::PeerEvents& events) 
 // all-reduce". There is no portable latency limit: WDDM, PCIe topology, driver scheduling and
 // direct/staged transport change this host-observed cost. A benchmark owner may explicitly set
 // NINFER_ALLREDUCE_MAX_MEAN_US for a qualified machine; correctness checks always run.
-int run_microbenchmark(const ExecutionContext& ec, const ops::PeerEvents& events,
+int run_microbenchmark(const ExecutionContext& ec, const ops::PeerTransfer& transfer,
                        std::optional<double> max_mean_micros) {
     constexpr std::int32_t n        = 5120;
     constexpr int kWarmupIterations = 50;
@@ -331,7 +331,7 @@ int run_microbenchmark(const ExecutionContext& ec, const ops::PeerEvents& events
 
     retire_staging(ec);
     for (int i = 0; i < kWarmupIterations; ++i) {
-        ops::allreduce_sum(buffer, staging, ec, events);
+        ops::allreduce_sum(buffer, staging, ec, transfer);
         synchronize_both(ec);
     }
 
@@ -340,7 +340,7 @@ int run_microbenchmark(const ExecutionContext& ec, const ops::PeerEvents& events
     const auto started = std::chrono::steady_clock::now();
     for (int i = 0; i < kTimedIterations; ++i) {
         const auto call_started = std::chrono::steady_clock::now();
-        ops::allreduce_sum(buffer, staging, ec, events);
+        ops::allreduce_sum(buffer, staging, ec, transfer);
         synchronize_both(ec);
         const std::chrono::duration<double, std::micro> call_elapsed =
             std::chrono::steady_clock::now() - call_started;
@@ -427,26 +427,26 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
     int failures = 0;
     // Real decode shape first: 5120 is the hidden dimension all-reduced 128 times per token.
-    failures += run_allreduce_case("allreduce_sum [5120]", 5120, 1, 101u, ec, events);
+    failures += run_allreduce_case("allreduce_sum [5120]", 5120, 1, 101u, ec, transfer);
     // The real row-parallel residual: a full 48-token prefill chunk, 2-D.
-    failures += run_allreduce_case("allreduce_sum [5120,48]", 5120, 48, 102u, ec, events);
-    failures += run_allreduce_case("allreduce_sum [4097]", 4097, 1, 103u, ec, events);
-    failures += run_allreduce_case("allreduce_sum [1]", 1, 1, 104u, ec, events);
-    failures += run_allreduce_case("allreduce_sum [3]", 3, 1, 105u, ec, events);
-    failures += run_allreduce_case("allreduce_sum [17,3]", 17, 3, 106u, ec, events);
+    failures += run_allreduce_case("allreduce_sum [5120,48]", 5120, 48, 102u, ec, transfer);
+    failures += run_allreduce_case("allreduce_sum [4097]", 4097, 1, 103u, ec, transfer);
+    failures += run_allreduce_case("allreduce_sum [1]", 1, 1, 104u, ec, transfer);
+    failures += run_allreduce_case("allreduce_sum [3]", 3, 1, 105u, ec, transfer);
+    failures += run_allreduce_case("allreduce_sum [17,3]", 17, 3, 106u, ec, transfer);
 
-    failures += run_allgather_case("allgather_rows [5120,1024]", 512, 512, 5120, 201u, ec, events);
+    failures += run_allgather_case("allgather_rows [5120,1024]", 512, 512, 5120, 201u, ec, transfer);
     // Gathered logits: 248320 vocabulary rows for one token, split by vocabulary half.
-    failures += run_allgather_case("allgather_rows [1,248320]", 124160, 124160, 1, 202u, ec, events);
-    failures += run_allgather_case("allgather_rows [5120,3] uneven", 2, 1, 5120, 203u, ec, events);
-    failures += run_allgather_case("allgather_rows [7,2] minimal", 1, 1, 7, 204u, ec, events);
+    failures += run_allgather_case("allgather_rows [1,248320]", 124160, 124160, 1, 202u, ec, transfer);
+    failures += run_allgather_case("allgather_rows [5120,3] uneven", 2, 1, 5120, 203u, ec, transfer);
+    failures += run_allgather_case("allgather_rows [7,2] minimal", 1, 1, 7, 204u, ec, transfer);
 
-    failures += run_chained_case(ec, events);
-    failures += run_microbenchmark(ec, events, max_mean_micros);
+    failures += run_chained_case(ec, transfer);
+    failures += run_microbenchmark(ec, transfer, max_mean_micros);
 
     std::cout << (failures ? "FAIL" : "OK") << " allreduce\n";
     return failures ? 1 : 0;

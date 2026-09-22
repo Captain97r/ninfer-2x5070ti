@@ -283,7 +283,7 @@ ReductionCriterion criterion_for(const Case& test_case, ops::LinearPolicy policy
 }
 
 // ---------------------------------------------------------------------------------------------
-int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerEvents& events) {
+int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     const bool dense      = test_case.qtype == QType::BF16_CTRL;
     const std::int32_t n  = test_case.n;
     const std::int32_t k  = test_case.k;
@@ -412,7 +412,7 @@ int run_case(const Case& test_case, const ExecutionContext& ec, const ops::PeerE
 
             retire_staging(ec);
             ops::linear_add_row_parallel(x, w, residual, staging_view, policy, workspace, ec,
-                                         events);
+                                         transfer);
             synchronize_both(ec);
 
             // --- comparison ----------------------------------------------------------------------
@@ -504,7 +504,7 @@ int verify_registry() {
 }
 
 // Rejection cases only the pair can see, mirroring test_linear_split.cpp's verify_split_rejections.
-int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& events) {
+int verify_split_rejections(const ExecutionContext& ec, const ops::PeerTransfer& transfer) {
     int failures            = 0;
     const auto expect_throw = [&](const char* what, auto&& body) {
         try {
@@ -544,7 +544,7 @@ int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& e
                                       Tensor(r1.p, DType::BF16, {kN, 1})};
         const std::array<Tensor, 2> staging{Tensor(stage0.p, DType::BF16, {kN, 2}),
                                             Tensor(stage1.p, DType::BF16, {kN, 1})};
-        ops::linear_add_row_parallel(x, {fake, fake}, r, staging, ec, events);
+        ops::linear_add_row_parallel(x, {fake, fake}, r, staging, ec, transfer);
     });
 
     expect_throw("row N", [&] {
@@ -556,7 +556,7 @@ int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& e
                                       Tensor(r1.p, DType::BF16, {kN / 2, 1})};
         const std::array<Tensor, 2> staging{Tensor(stage0.p, DType::BF16, {kN, 1}),
                                             Tensor(stage1.p, DType::BF16, {kN / 2, 1})};
-        ops::linear_add_row_parallel(x, {fake, other}, r, staging, ec, events);
+        ops::linear_add_row_parallel(x, {fake, other}, r, staging, ec, transfer);
     });
 
     expect_throw("tp1 context", [&] {
@@ -569,7 +569,7 @@ int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& e
                                             Tensor(stage1.p, DType::BF16, {kN, 1})};
         // require_split_context rejects `single` before events is ever touched, so the outer
         // (valid) events object is fine to reuse here.
-        ops::linear_add_row_parallel(x, {fake, fake}, r, staging, single, events);
+        ops::linear_add_row_parallel(x, {fake, fake}, r, staging, single, transfer);
     });
 
     expect_throw("unsupported format", [&] {
@@ -583,7 +583,7 @@ int verify_split_rejections(const ExecutionContext& ec, const ops::PeerEvents& e
                                       Tensor(r1.p, DType::BF16, {kN, 1})};
         const std::array<Tensor, 2> staging{Tensor(stage0.p, DType::BF16, {kN, 1}),
                                             Tensor(stage1.p, DType::BF16, {kN, 1})};
-        ops::linear_add_row_parallel(x, {w8, w8}, r, staging, ec, events);
+        ops::linear_add_row_parallel(x, {w8, w8}, r, staging, ec, transfer);
     });
 
     std::cout << (failures ? "FAIL" : "OK") << " split rejections\n";
@@ -618,9 +618,9 @@ int main() {
                               : "unavailable (CUDA stages the device-to-device copies through "
                                 "host memory)")
               << '\n';
-    const ops::PeerEvents events(ec);
+    const ops::PeerTransfer transfer(ec);
 
-    failures += verify_split_rejections(ec, events);
+    failures += verify_split_rejections(ec, transfer);
 
     constexpr auto kA16 = ops::LinearPolicy::A16Only;
     constexpr auto kA4  = ops::LinearPolicy::AllowA4;
@@ -648,7 +648,7 @@ int main() {
          {1, 8, 24, 25, 48, 128, 1024}, {kA16, kA8}},
     };
 
-    for (const Case& test_case : cases) { failures += run_case(test_case, ec, events); }
+    for (const Case& test_case : cases) { failures += run_case(test_case, ec, transfer); }
 
     std::cout << (failures ? "FAIL" : "OK") << " linear_add split\n";
     return failures ? 1 : 0;

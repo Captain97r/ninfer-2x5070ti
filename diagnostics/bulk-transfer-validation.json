@@ -1,0 +1,195 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB, Windows WDDM, no CUDA P2P",
+  "change": "Explicit portable pinned staging for large eager TP2 collectives; existing BF16 arithmetic and captured transport unchanged",
+  "inference_math_changed": false,
+  "host_memory": {
+    "per_rank_bytes": 10485760,
+    "total_bytes": 20971520,
+    "threshold_bytes": 65536
+  },
+  "configuration": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "prefill_chunk": 1024,
+    "kv_cache": "int8-group64",
+    "mtp_draft_tokens": 3,
+    "proposal_head": "optimized",
+    "use_cuda_graph": true,
+    "decode_path": "mtp_cuda_graph",
+    "decode_graph_prime": {
+      "primed": true,
+      "output_tokens": 9
+    },
+    "repetitions": 3,
+    "warmup": 1,
+    "corpus_path": "build/bench_corpus_100000.ids",
+    "corpus_tokens": 100000
+  },
+  "microbenchmark": {
+    "hardware": "2 x RTX 5070 Ti 16 GB, Windows WDDM, no direct CUDA P2P",
+    "scope": "Eager allreduce only; no gather or end-to-end speedup inferred",
+    "calls_per_batch": 128,
+    "alternating_pairs": 5,
+    "warmup_collectives_per_route": 8,
+    "measurements": [
+      {
+        "bytes_per_rank": 65536,
+        "routes": {
+          "implicit": {
+            "host_enqueue_us_median_per_collective": 120.171875,
+            "complete_wall_us_median_per_collective": 120.9875,
+            "joined_device_us_median_per_collective": 121.03500234375001
+          },
+          "explicit-pinned": {
+            "host_enqueue_us_median_per_collective": 82.3515625,
+            "complete_wall_us_median_per_collective": 83.23671875,
+            "joined_device_us_median_per_collective": 83.271503125
+          }
+        }
+      },
+      {
+        "bytes_per_rank": 1048576,
+        "routes": {
+          "implicit": {
+            "host_enqueue_us_median_per_collective": 105.546875,
+            "complete_wall_us_median_per_collective": 299.125,
+            "joined_device_us_median_per_collective": 299.0637421875
+          },
+          "explicit-pinned": {
+            "host_enqueue_us_median_per_collective": 64.92812500000001,
+            "complete_wall_us_median_per_collective": 245.8484375,
+            "joined_device_us_median_per_collective": 245.79724687499998
+          }
+        }
+      },
+      {
+        "bytes_per_rank": 10485760,
+        "routes": {
+          "implicit": {
+            "host_enqueue_us_median_per_collective": 1445.4625,
+            "complete_wall_us_median_per_collective": 1641.36015625,
+            "joined_device_us_median_per_collective": 1641.2659921875
+          },
+          "explicit-pinned": {
+            "host_enqueue_us_median_per_collective": 63.91953124999999,
+            "complete_wall_us_median_per_collective": 1574.7421875,
+            "joined_device_us_median_per_collective": 1574.623703125
+          }
+        }
+      }
+    ]
+  },
+  "end_to_end": [
+    {
+      "workload": "pp8192+tg256",
+      "before": {
+        "prefill_tok_s_mean": 3046.377661,
+        "prefill_tok_s_stddev": 1.527022864,
+        "decode_output_tok_s_mean": 199.4101882,
+        "decode_output_tok_s_stddev": 0.1054479202
+      },
+      "after": {
+        "prefill_tok_s_mean": 3137.610678,
+        "prefill_tok_s_stddev": 2.552879793,
+        "decode_output_tok_s_mean": 199.5175598,
+        "decode_output_tok_s_stddev": 0.1276463501
+      },
+      "prefill_gain_percent": 2.9948032434708782,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 195,
+        "drafted_tokens": 585,
+        "accepted_tokens": 573,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.9794871795,
+        "acceptance_length": 3.938461538,
+        "accepted_per_position": [
+          195,
+          192,
+          186
+        ]
+      }
+    },
+    {
+      "workload": "pp100000+tg512",
+      "before": {
+        "prefill_tok_s_mean": 2237.491658,
+        "prefill_tok_s_stddev": 0.5458312378,
+        "decode_output_tok_s_mean": 172.2572415,
+        "decode_output_tok_s_stddev": 0.1904613089
+      },
+      "after": {
+        "prefill_tok_s_mean": 2287.89632,
+        "prefill_tok_s_stddev": 0.4024561627,
+        "decode_output_tok_s_mean": 172.4546394,
+        "decode_output_tok_s_stddev": 0.01910287608
+      },
+      "prefill_gain_percent": 2.252730722806562,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 405,
+        "drafted_tokens": 1209,
+        "accepted_tokens": 1131,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.935483871,
+        "acceptance_length": 3.792592593,
+        "accepted_per_position": [
+          387,
+          375,
+          369
+        ]
+      }
+    }
+  ],
+  "validation": {
+    "exact_transfer_and_fp64_sum_test": "passed; threshold, odd tails, asymmetric gather, 10 MiB, reversed ranks, independent owners, changed consecutive calls, captured fallback",
+    "affected_existing_tests": [
+      "ninfer_allreduce_test",
+      "ninfer_argmax_row_parallel_test",
+      "ninfer_linear_split_test",
+      "ninfer_linear_add_split_test",
+      "ninfer_linear_swiglu_split_test",
+      "ninfer_mtp_split_test",
+      "ninfer_output_head_split_test"
+    ],
+    "all_passed": true,
+    "sanitizer": {
+      "tool": "Compute Sanitizer memcheck",
+      "track_stream_ordered_races": "all",
+      "errors": 0
+    },
+    "response_panel": {
+      "reference": "diagnostics/quality-reference.json",
+      "cases": 18,
+      "exact_observable_matches": 18,
+      "task_passes": 16,
+      "new_failures": 0
+    },
+    "retrieval_panel": {
+      "reference": "diagnostics/retrieval-reference.json",
+      "prompt_tokens": [
+        4068,
+        32758,
+        99985,
+        99966
+      ],
+      "cases": 4,
+      "exact_observable_matches": 4,
+      "task_passes": 4
+    }
+  },
+  "limits": [
+    "Three measured repetitions after one warmup; sample standard deviations, not confidence intervals.",
+    "Synthetic cycling token corpus has high speculative acceptance; not ordinary chat/coding speed.",
+    "Four synthetic retrieval cases are a bounded regression screen, not broad long-context quality equivalence.",
+    "Linux portability retained; no local Linux execution."
+  ]
+}

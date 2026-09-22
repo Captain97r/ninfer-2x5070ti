@@ -305,10 +305,14 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in,
             throw;
         }
         CUDA_CHECK(cudaSetDevice(previous));
-        (void)ops::enable_peer_access(execution);
-        peer_events.emplace(execution);
+        const bool direct_peer_access = ops::enable_peer_access(execution);
+        // The checked persistent layout is exactly [hidden, min(prefill_chunk, capacity)] BF16.
+        // It bounds every full-width text reduction and the equally wide MTP prefill stem.
+        const std::size_t peer_host_capacity =
+            direct_peer_access ? 0 : plan.persistent.prefill_hidden.region.bytes;
+        peer_transfer.emplace(execution, peer_host_capacity);
         if (plan.use_cuda_graph) {
-            // Created once, here, for the same reason PeerEvents is: cudaEventCreate is not
+            // Created once, here, for the same reason PeerTransfer is: cudaEventCreate is not
             // capturable, and the fork/join pair must outlive every capture.
             graph_bridge.emplace(execution.dev[0]->device, execution.dev[1]->device);
             // Mailbox transport for the CAPTURED collectives: one pinned host slot per captured
@@ -465,7 +469,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in,
         set_peer_i32(peer->io.backend_kv_table_row, 0);
         CUDA_CHECK(cudaSetDevice(previous));
         peer_core.emplace(schedule::TpPeerCore{.execution        = &execution,
-                                               .events           = &*peer_events,
+                                               .transfer         = &*peer_transfer,
                                                .device           = &peer->device,
                                                .model            = &peer->model,
                                                .work             = &peer->work,

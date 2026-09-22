@@ -27,7 +27,7 @@ private:
 void argmax_row_parallel_launch(const std::array<Tensor, 2>& logits, Tensor& out,
                                 std::int32_t valid_rows,
                                 const std::array<ArgmaxRowParallelWorkspace, 2>& workspace,
-                                const ExecutionContext& execution, const PeerEvents& events) {
+                                const ExecutionContext& execution, const PeerTransfer& transfer) {
     const DeviceRestore restore;
     const int columns = logits[0].ne[1];
     const std::size_t bytes = sizeof(ArgmaxCandidate) * static_cast<std::size_t>(columns);
@@ -77,17 +77,17 @@ void argmax_row_parallel_launch(const std::array<Tensor, 2>& logits, Tensor& out
     // One-way, event-ordered pull. The peer's wait protects its source before the next
     // caller reuses that arena; rank zero consumes only its own copy after this point.
     CUDA_CHECK(cudaSetDevice(execution.dev[1]->device));
-    CUDA_CHECK(cudaEventRecord(events.inputs_ready(1), execution.dev[1]->stream));
+    CUDA_CHECK(cudaEventRecord(transfer.inputs_ready(1), execution.dev[1]->stream));
     CUDA_CHECK(cudaSetDevice(execution.dev[0]->device));
-    CUDA_CHECK(cudaStreamWaitEvent(execution.dev[0]->stream, events.inputs_ready(1), 0));
+    CUDA_CHECK(cudaStreamWaitEvent(execution.dev[0]->stream, transfer.inputs_ready(1), 0));
     CUDA_CHECK(cudaMemcpyAsync(workspace[0].peer, workspace[1].local, bytes,
                                cudaMemcpyDeviceToDevice, execution.dev[0]->stream));
-    CUDA_CHECK(cudaEventRecord(events.pull_done(0), execution.dev[0]->stream));
+    CUDA_CHECK(cudaEventRecord(transfer.pull_done(0), execution.dev[0]->stream));
     argmax_shard_merge_kernel<<<1, 256, 0, execution.dev[0]->stream>>>(
         workspace[0].local, workspace[0].peer, static_cast<std::int32_t*>(out.data), columns);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaSetDevice(execution.dev[1]->device));
-    CUDA_CHECK(cudaStreamWaitEvent(execution.dev[1]->stream, events.pull_done(0), 0));
+    CUDA_CHECK(cudaStreamWaitEvent(execution.dev[1]->stream, transfer.pull_done(0), 0));
 }
 
 } // namespace ninfer::ops::detail
