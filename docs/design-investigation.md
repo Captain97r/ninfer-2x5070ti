@@ -371,6 +371,13 @@ All outputs passed the independent FP64 oracle and exact BF16 comparison. This
 rejects a simple CTA-size substitution, without claiming that all kernel tuning
 is exhausted. [Experiment evidence](../diagnostics/swiglu-cta-validation.json).
 
+The FP8 GDN T4 shard was also compared with direct token-packed activation loads
+in place of shared staging, keeping the same arithmetic. Warm kernel latency
+fell 7.8-11.9%, while scrubbed latency increased 0.4-3.3%. Complete 8K inference
+changed by only 0.08% TG, comparable to run-to-run variation, with unchanged
+response observables and acceptance counts. The existing shared-staging route
+is retained. [Experiment and runtime evidence](../diagnostics/fp8-gdn-access-validation.json).
+
 ### 4. MTP windows require quality qualification
 
 The hidden-reduction count grows as `128 + 3K` in a normal K-draft round, and each

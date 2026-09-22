@@ -965,9 +965,12 @@ ratio to production SharedPhase was:
 | 1 | 1811 | 0.9150 | 1.0039 |
 
 A ratio below one means lower latency: TokenPacked was 7.8-11.9% faster warm
-and 0.4-3.3% slower after scrubbing. No production winner or inference gain is
-established; an unprofiled model A/B against the preserved baseline must resolve
-this cache-dependent tradeoff. [Measurement record](../diagnostics/fp8-gdn-access-validation.json).
+and 0.4-3.3% slower after scrubbing. The complete-engine A/B at 8192 prompt /
+256 generated tokens measured 205.23 +/- 0.14 versus 205.39 +/- 0.13 tok/s
+(mean +/- sample standard deviation, three repetitions after one warmup). The
+0.08% difference does not establish a gain. All 18 response observables and MTP
+counts matched. The temporary runtime candidate was removed; SharedPhase remains
+the production schedule. [Measurement record](../diagnostics/fp8-gdn-access-validation.json).
 
 The GDN input-projection numerical test passed on both GPUs, including FP8 T4,
 and `ninfer_gdn_projections_split_test --fused-input-only` passed the affected

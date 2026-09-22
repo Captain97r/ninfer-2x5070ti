@@ -1,7 +1,7 @@
 {
   "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows; devices measured separately, CUDA separable compilation enabled",
   "scope": "FP8 GDN input TP2 [8192,5120], T4 represented BF16 activations; change only the existing activation-access schedule",
-  "decision": "No production winner selected. TokenPacked reduces warm paired kernel latency by 7.8-11.9%, but increases scrubbed latency by 0.4-3.3%. Resolve the cache-dependent tradeoff with an unprofiled model A/B against the preserved baseline binary.",
+  "decision": "Retain existing SharedPhase production schedule. Warm microbenchmark gain did not produce a material full-engine gain at 8K; the temporary T4 TP2 GDN-only TokenPacked specialization was removed.",
   "production_schedule_changed": false,
   "production_kernel_changed": false,
   "method": {
@@ -227,11 +227,39 @@
   "limits": [
     "Operator cache conditions do not establish model cache residency, physical memory bandwidth or committed-token throughput.",
     "Timing statistics are kernel intervals, not a sum with host enqueue or complete graph wall time.",
-    "Model performance and response-parity A/B remains pending; no end-to-end gain claimed.",
-    "Linux execution not tested locally."
+    "Linux execution not tested locally.",
+    "Three sequential measured model repetitions after one warmup; synthetic-corpus performance does not establish coding/chat throughput."
   ],
   "local_measurement_sources": [
     "build/optimization-research/stage8-access-gpu0.json",
     "build/optimization-research/stage8-access-gpu1.json"
-  ]
+  ],
+  "model_comparison": {
+    "workload": "8192 prompt + 256 generated tokens, synthetic cycling corpus",
+    "configuration": "TP2, INT8-G64 KV, MTP3 optimized draft head, context102400, chunk1024, CUDA Graphs",
+    "warmup": 1,
+    "repetitions": 3,
+    "before": {
+      "prefill_tok_s_mean": 3141.426431,
+      "prefill_tok_s_stddev": 1.573495602,
+      "decode_output_tok_s_mean": 205.2273712,
+      "decode_output_tok_s_stddev": 0.1425844253
+    },
+    "candidate": {
+      "prefill_tok_s_mean": 3141.739687,
+      "prefill_tok_s_stddev": 1.406072269,
+      "decode_output_tok_s_mean": 205.391253,
+      "decode_output_tok_s_stddev": 0.1301544954
+    },
+    "decode_change_percent": 0.07985377342298872,
+    "speculative_counts_unchanged": true,
+    "response_panel": {
+      "cases": 18,
+      "exact_observable_matches": 18,
+      "task_passes": 16,
+      "new_failures": 0
+    },
+    "scoped_candidate_projection_regression_passed": true,
+    "interpretation": "0.08% TG difference is comparable to run-to-run variation; no gain claimed. No 100K candidate campaign was run after the 8K result failed to establish benefit."
+  }
 }
