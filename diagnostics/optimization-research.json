@@ -1,0 +1,475 @@
+{
+  "date": "2026-09-22",
+  "source_commit": "f07b80b25fffdf703010d657177ef335ddadc96d",
+  "scope": "Research baseline only; no inference implementation or launch-default changes.",
+  "method": {
+    "warmup_repetitions": 1,
+    "measured_repetitions": 3,
+    "graph_primed": true,
+    "vision": false,
+    "timing_excludes_model_load": true,
+    "generated_tokens_are_committed_output": true,
+    "corpus": "Existing synthetic token-ID corpus; 100K cycles the 65536-token fixture. Not a quality evaluation."
+  },
+  "runs": [
+    {
+      "schema_version": 12,
+      "artifact_type": "ninfer_bench_report",
+      "tool": "ninfer_bench",
+      "command": ".\\build\\windows\\bench\\ninfer_bench.exe --weights C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2\\qwen3_8_27b_nvfp4.ninfer --tp 2 --devices 0,1 --corpus .\\build\\bench_corpus_100000.ids -pg 8192,256 --max-ctx 102400 --prefill-chunk 1024 --kv-dtype int8 --mtp-draft-tokens 3 --lm-head-draft --warmup 1 -r 3 -o json --output-file .\\build\\optimization-research\\baseline-8k-mtp3.json",
+      "environment": {
+        "gpu_name": "NVIDIA GeForce RTX 5070 Ti",
+        "cuda_runtime_version": "13.4",
+        "cuda_driver_version": "13.4",
+        "device_id": 0,
+        "devices": [
+          {
+            "device_id": 0,
+            "gpu_name": "NVIDIA GeForce RTX 5070 Ti"
+          },
+          {
+            "device_id": 1,
+            "gpu_name": "NVIDIA GeForce RTX 5070 Ti"
+          }
+        ]
+      },
+      "artifact": {
+        "path": "C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2\\qwen3_8_27b_nvfp4.ninfer",
+        "file_size_bytes": 21492695040
+      },
+      "load": {
+        "target": "qwen3_8_27b",
+        "weights_id": "nvfp4",
+        "load_seconds": 17.5042842,
+        "upload_seconds": 15.7194419,
+        "artifact_bytes_read": 21196796217,
+        "host_to_device_bytes": 22458453888,
+        "peak_staging_bytes": 268435456,
+        "tensor_count": 673,
+        "resource_count": 6
+      },
+      "memory": {
+        "device": 0,
+        "max_context": 102400,
+        "kv_capacity_mode": "explicit",
+        "kv_capacity": 102400,
+        "kv_capacity_page_groups": 1600,
+        "kv_capacity_max_page_groups": 1600,
+        "kv_cache": "int8-group64",
+        "weights": {
+          "capacity_bytes": 11229270528,
+          "used_bytes": 11229270528,
+          "peak_used_bytes": 11229270528
+        },
+        "sequence": {
+          "capacity_bytes": 2010492672,
+          "used_bytes": 2010492672,
+          "peak_used_bytes": 2010492672
+        },
+        "workspace": {
+          "capacity_bytes": 202304000,
+          "used_bytes": 0,
+          "peak_used_bytes": 0
+        },
+        "request_transient": {
+          "capacity_bytes": 0,
+          "used_bytes": 0,
+          "peak_used_bytes": 0
+        },
+        "minimum_runtime_reservation_bytes": 2298779904,
+        "kv_capacity_increment_bytes": 0,
+        "runtime_reservation_bytes": 2298779904,
+        "available_after_weights_bytes": 3993935872,
+        "available_after_startup_bytes": 1773187072,
+        "kv_capacity_headroom_bytes": 0,
+        "planned_slack_bytes": 1695155968,
+        "cuda_graph_allowance_bytes": 85983232,
+        "cuda_graph_observed_bytes": 4194304,
+        "kv_payload_bytes": 1838352384
+      },
+      "config": {
+        "tp": 2,
+        "devices": [
+          0,
+          1
+        ],
+        "max_context": 102400,
+        "prefill_chunk": 1024,
+        "kv_cache": "int8-group64",
+        "mtp_draft_tokens": 3,
+        "proposal_head": "optimized",
+        "use_cuda_graph": true,
+        "decode_path": "mtp_cuda_graph",
+        "decode_graph_prime": {
+          "primed": true,
+          "output_tokens": 9
+        },
+        "repetitions": 3,
+        "warmup": 1,
+        "corpus_path": "build/bench_corpus_100000.ids",
+        "corpus_tokens": 100000
+      },
+      "tests": [
+        {
+          "label": "pp8192+tg256",
+          "kind": "pp+tg",
+          "n_prompt": 8192,
+          "n_gen": 256,
+          "requested_output_tokens": 257,
+          "prefill_tok_s_mean": 3053.94984,
+          "prefill_tok_s_stddev": 1.064461184,
+          "decode_output_tok_s_mean": 194.7212837,
+          "decode_output_tok_s_stddev": 0.2081678198,
+          "decode_engine_tok_s_mean": 194.7212837,
+          "decode_engine_tok_s_stddev": 0.2081678198,
+          "prepare_seconds_mean": 2.623333333e-05,
+          "prepare_seconds_stddev": 5.686240703e-07,
+          "prefill_seconds_mean": 2.682428033,
+          "prefill_seconds_stddev": 0.0009350247929,
+          "decode_seconds_mean": 1.314700633,
+          "decode_seconds_stddev": 0.001404805988,
+          "total_seconds_mean": 3.998106433,
+          "total_seconds_stddev": 0.0008692900341,
+          "workspace_peak_bytes": 202304000,
+          "workspace_allocator_peak_bytes": 117743616,
+          "speculative": {
+            "enabled": true,
+            "draft_window": 3,
+            "rounds": 195,
+            "drafted_tokens": 585,
+            "accepted_tokens": 573,
+            "fallback_steps": 0,
+            "acceptance_rate": 0.9794871795,
+            "acceptance_length": 3.938461538,
+            "accepted_per_position": [
+              195,
+              192,
+              186
+            ]
+          },
+          "reps": [
+            {
+              "generated_output_tokens": 257,
+              "decode_output_tokens": 256,
+              "decode_engine_tokens": 256,
+              "timings": {
+                "prepare_seconds": 2.64e-05,
+                "vision_seconds": 0,
+                "prefill_seconds": 2.6834146,
+                "decode_seconds": 1.3131184,
+                "total_seconds": 3.9975318
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 65,
+                "drafted_tokens": 195,
+                "accepted_tokens": 191,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.9794871795,
+                "acceptance_length": 3.938461538,
+                "accepted_per_position": [
+                  65,
+                  64,
+                  62
+                ]
+              }
+            },
+            {
+              "generated_output_tokens": 257,
+              "decode_output_tokens": 256,
+              "decode_engine_tokens": 256,
+              "timings": {
+                "prepare_seconds": 2.67e-05,
+                "vision_seconds": 0,
+                "prefill_seconds": 2.6815549,
+                "decode_seconds": 1.3151821,
+                "total_seconds": 3.997681
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 65,
+                "drafted_tokens": 195,
+                "accepted_tokens": 191,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.9794871795,
+                "acceptance_length": 3.938461538,
+                "accepted_per_position": [
+                  65,
+                  64,
+                  62
+                ]
+              }
+            },
+            {
+              "generated_output_tokens": 257,
+              "decode_output_tokens": 256,
+              "decode_engine_tokens": 256,
+              "timings": {
+                "prepare_seconds": 2.56e-05,
+                "vision_seconds": 0,
+                "prefill_seconds": 2.6823146,
+                "decode_seconds": 1.3158014,
+                "total_seconds": 3.9991065
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 65,
+                "drafted_tokens": 195,
+                "accepted_tokens": 191,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.9794871795,
+                "acceptance_length": 3.938461538,
+                "accepted_per_position": [
+                  65,
+                  64,
+                  62
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schema_version": 12,
+      "artifact_type": "ninfer_bench_report",
+      "tool": "ninfer_bench",
+      "command": ".\\build\\windows\\bench\\ninfer_bench.exe --weights C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2\\qwen3_8_27b_nvfp4.ninfer --tp 2 --devices 0,1 --corpus .\\build\\bench_corpus_100000.ids -pg 100000,512 --max-ctx 102400 --prefill-chunk 1024 --kv-dtype int8 --mtp-draft-tokens 3 --lm-head-draft --warmup 1 -r 3 -o json --output-file .\\build\\optimization-research\\baseline-100k-mtp3.json",
+      "environment": {
+        "gpu_name": "NVIDIA GeForce RTX 5070 Ti",
+        "cuda_runtime_version": "13.4",
+        "cuda_driver_version": "13.4",
+        "device_id": 0,
+        "devices": [
+          {
+            "device_id": 0,
+            "gpu_name": "NVIDIA GeForce RTX 5070 Ti"
+          },
+          {
+            "device_id": 1,
+            "gpu_name": "NVIDIA GeForce RTX 5070 Ti"
+          }
+        ]
+      },
+      "artifact": {
+        "path": "C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2\\qwen3_8_27b_nvfp4.ninfer",
+        "file_size_bytes": 21492695040
+      },
+      "load": {
+        "target": "qwen3_8_27b",
+        "weights_id": "nvfp4",
+        "load_seconds": 17.0005247,
+        "upload_seconds": 15.1817827,
+        "artifact_bytes_read": 21196796217,
+        "host_to_device_bytes": 22458453888,
+        "peak_staging_bytes": 268435456,
+        "tensor_count": 673,
+        "resource_count": 6
+      },
+      "memory": {
+        "device": 0,
+        "max_context": 102400,
+        "kv_capacity_mode": "explicit",
+        "kv_capacity": 102400,
+        "kv_capacity_page_groups": 1600,
+        "kv_capacity_max_page_groups": 1600,
+        "kv_cache": "int8-group64",
+        "weights": {
+          "capacity_bytes": 11229270528,
+          "used_bytes": 11229270528,
+          "peak_used_bytes": 11229270528
+        },
+        "sequence": {
+          "capacity_bytes": 2010492672,
+          "used_bytes": 2010492672,
+          "peak_used_bytes": 2010492672
+        },
+        "workspace": {
+          "capacity_bytes": 202304000,
+          "used_bytes": 0,
+          "peak_used_bytes": 0
+        },
+        "request_transient": {
+          "capacity_bytes": 0,
+          "used_bytes": 0,
+          "peak_used_bytes": 0
+        },
+        "minimum_runtime_reservation_bytes": 2298779904,
+        "kv_capacity_increment_bytes": 0,
+        "runtime_reservation_bytes": 2298779904,
+        "available_after_weights_bytes": 3855749120,
+        "available_after_startup_bytes": 1866211328,
+        "kv_capacity_headroom_bytes": 0,
+        "planned_slack_bytes": 1556969216,
+        "cuda_graph_allowance_bytes": 85983232,
+        "cuda_graph_observed_bytes": 4194304,
+        "kv_payload_bytes": 1838352384
+      },
+      "config": {
+        "tp": 2,
+        "devices": [
+          0,
+          1
+        ],
+        "max_context": 102400,
+        "prefill_chunk": 1024,
+        "kv_cache": "int8-group64",
+        "mtp_draft_tokens": 3,
+        "proposal_head": "optimized",
+        "use_cuda_graph": true,
+        "decode_path": "mtp_cuda_graph",
+        "decode_graph_prime": {
+          "primed": true,
+          "output_tokens": 9
+        },
+        "repetitions": 3,
+        "warmup": 1,
+        "corpus_path": "build/bench_corpus_100000.ids",
+        "corpus_tokens": 100000
+      },
+      "tests": [
+        {
+          "label": "pp100000+tg512",
+          "kind": "pp+tg",
+          "n_prompt": 100000,
+          "n_gen": 512,
+          "requested_output_tokens": 513,
+          "prefill_tok_s_mean": 2244.006165,
+          "prefill_tok_s_stddev": 0.1974574751,
+          "decode_output_tok_s_mean": 168.421638,
+          "decode_output_tok_s_stddev": 0.2592897923,
+          "decode_engine_tok_s_mean": 168.421638,
+          "decode_engine_tok_s_stddev": 0.2592897923,
+          "prepare_seconds_mean": 0.0003886666667,
+          "prepare_seconds_stddev": 1.012784939e-05,
+          "prefill_seconds_mean": 44.56315767,
+          "prefill_seconds_stddev": 0.003921328436,
+          "decode_seconds_mean": 3.039994233,
+          "decode_seconds_stddev": 0.004676343296,
+          "total_seconds_mean": 47.605572,
+          "total_seconds_stddev": 0.006900478232,
+          "workspace_peak_bytes": 202304000,
+          "workspace_allocator_peak_bytes": 117743616,
+          "speculative": {
+            "enabled": true,
+            "draft_window": 3,
+            "rounds": 405,
+            "drafted_tokens": 1209,
+            "accepted_tokens": 1131,
+            "fallback_steps": 0,
+            "acceptance_rate": 0.935483871,
+            "acceptance_length": 3.792592593,
+            "accepted_per_position": [
+              387,
+              375,
+              369
+            ]
+          },
+          "reps": [
+            {
+              "generated_output_tokens": 513,
+              "decode_output_tokens": 512,
+              "decode_engine_tokens": 512,
+              "timings": {
+                "prepare_seconds": 0.0003998,
+                "vision_seconds": 0,
+                "prefill_seconds": 44.5626187,
+                "decode_seconds": 3.0346449,
+                "total_seconds": 47.5996407
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 135,
+                "drafted_tokens": 403,
+                "accepted_tokens": 377,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.935483871,
+                "acceptance_length": 3.792592593,
+                "accepted_per_position": [
+                  129,
+                  125,
+                  123
+                ]
+              }
+            },
+            {
+              "generated_output_tokens": 513,
+              "decode_output_tokens": 512,
+              "decode_engine_tokens": 512,
+              "timings": {
+                "prepare_seconds": 0.00038,
+                "vision_seconds": 0,
+                "prefill_seconds": 44.5595337,
+                "decode_seconds": 3.0420312,
+                "total_seconds": 47.6039299
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 135,
+                "drafted_tokens": 403,
+                "accepted_tokens": 377,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.935483871,
+                "acceptance_length": 3.792592593,
+                "accepted_per_position": [
+                  129,
+                  125,
+                  123
+                ]
+              }
+            },
+            {
+              "generated_output_tokens": 513,
+              "decode_output_tokens": 512,
+              "decode_engine_tokens": 512,
+              "timings": {
+                "prepare_seconds": 0.0003862,
+                "vision_seconds": 0,
+                "prefill_seconds": 44.5673206,
+                "decode_seconds": 3.0433066,
+                "total_seconds": 47.6131454
+              },
+              "speculative": {
+                "enabled": true,
+                "draft_window": 3,
+                "rounds": 135,
+                "drafted_tokens": 403,
+                "accepted_tokens": 377,
+                "fallback_steps": 0,
+                "acceptance_rate": 0.935483871,
+                "acceptance_length": 3.792592593,
+                "accepted_per_position": [
+                  129,
+                  125,
+                  123
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "profiling": {
+    "tool": "Nsight Systems 2026.1.3",
+    "driver_cuda_api_version": "13.4",
+    "tool_fallback_library_version": "13.3",
+    "diagnostic": "Installed CUDA driver version (13.4) is not supported by this build of Nsight Systems. CUDA trace will be collected using libraries for driver version 13.3",
+    "hardware_node_exit": "0xC0000409",
+    "software_graph_exit": "0xC0000005",
+    "software_trace": "Partial NVTX events; no CUDA kernel/runtime/memcpy tables. Unusable for GPU timing attribution.",
+    "crash_cause": "Not established; unsupported version combination observed.",
+    "unprofiled_result": "Both repeated baseline runs passed."
+  },
+  "interpretation": [
+    "These measurements do not demonstrate an optimization speedup.",
+    "MTP acceptance is unusually high on the synthetic input; do not extrapolate to real chat/code.",
+    "No broad end-to-end quality comparison was run in this research task.",
+    "Inherited descriptor lifetime hazard and weak legacy MTP test criterion were found by source inspection; no corruption caused by either was demonstrated."
+  ]
+}
