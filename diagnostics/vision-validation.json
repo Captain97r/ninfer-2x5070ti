@@ -1,0 +1,133 @@
+{
+  "verified_at": "2026-09-22T14:02:00.908761+00:00",
+  "server": "http://127.0.0.1:8000",
+  "model": "qwen3.8-27b",
+  "context_capacity": 102400,
+  "scope": "HTTP image-grounding integration; not numerical vision-kernel qualification",
+  "passed": 7,
+  "failed": 0,
+  "cases": [
+    {
+      "case": "chart_ocr_count_position",
+      "stream": false,
+      "thinking": false,
+      "content": "```json\n{\n  \"heading_number\": 731,\n  \"red_circles\": 3,\n  \"blue_square_position\": \"left\"\n}\n```",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 40,
+        "prompt_tokens": 454,
+        "total_tokens": 494
+      },
+      "elapsed_seconds": 0.665
+    },
+    {
+      "case": "stream_left_image",
+      "stream": true,
+      "thinking": false,
+      "content": "2",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 268,
+        "total_tokens": 270
+      },
+      "elapsed_seconds": 0.19
+    },
+    {
+      "case": "changed_image_same_question",
+      "stream": true,
+      "thinking": false,
+      "content": "3",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 268,
+        "total_tokens": 270
+      },
+      "elapsed_seconds": 0.183
+    },
+    {
+      "case": "two_image_conversation",
+      "stream": true,
+      "thinking": false,
+      "content": "3",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 539,
+        "total_tokens": 541
+      },
+      "elapsed_seconds": 0.325
+    },
+    {
+      "case": "thinking_image",
+      "stream": true,
+      "thinking": true,
+      "content": "3",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 65,
+        "prompt_tokens": 308,
+        "total_tokens": 373
+      },
+      "elapsed_seconds": 0.536
+    },
+    {
+      "case": "oversized_image_downscale",
+      "stream": false,
+      "thinking": false,
+      "content": " Blue",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 2009,
+        "total_tokens": 2011
+      },
+      "elapsed_seconds": 1.022,
+      "source_dimensions": [
+        2560,
+        1440
+      ]
+    },
+    {
+      "case": "text_after_images",
+      "stream": false,
+      "thinking": false,
+      "content": "vision ready",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 3,
+        "prompt_tokens": 18,
+        "total_tokens": 21
+      },
+      "elapsed_seconds": 0.083
+    }
+  ],
+  "configuration": {
+    "tp": 2,
+    "mtp_draft_tokens": 3,
+    "cuda_graphs": true,
+    "kv_dtype": "int8",
+    "image_max_tokens": 2048
+  },
+  "omp_client": {
+    "version": "18.2.8",
+    "image_attachment": true,
+    "answer": "3",
+    "exit_code": 0,
+    "session_saved": false,
+    "resolved_model": {
+      "id": "qwen3.8-27b",
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 102400
+    }
+  },
+  "server_stopped_after_validation": true,
+  "limitations": [
+    "Short image requests at 102400 capacity; a full 100K multimodal history was not tested.",
+    "Functional image-grounding checks do not replace an independent numerical vision-kernel oracle."
+  ]
+}

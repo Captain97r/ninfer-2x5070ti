@@ -26,8 +26,8 @@ void run_prepared(Context& state, DecodeGraphExecutable* executable, Body&& body
             // Mailbox exchange protocol, host half. The previous round is fully retired here
             // (the caller synchronized both devices to read its egress before asking for the
             // next round), so its aggregate hang-guard word is final: a nonzero word means a
-            // mailbox poller gave up on its peer on the last round -- the output was already
-            // corrupt, and replaying more rounds on a wedged exchange would only hide it.
+            // mailbox poller gave up on its peer. Round retirement checks this BEFORE output
+            // consumption; this launch-side backstop must not clear an outstanding fault.
             // Then, with the fault state clean, clear every slot's release flag so this
             // replay's publish/consume handshake starts from zero: plain stores to the pinned
             // WB words are coherent with the GPUs' PCIe view, and no kernel is running.

@@ -50,6 +50,15 @@ ninfer_add_op_bench(ninfer_nvfp4_linear_add_bench SOURCES ops/nvfp4_linear_add_b
 ninfer_add_op_bench(ninfer_fp8_linear_add_bench SOURCES ops/fp8_linear_add_bench.cu)
 ninfer_add_op_bench(ninfer_causal_softmax_attention_bench
   SOURCES ops/causal_softmax_attention_bench.cu)
+# Isolated split-policy experiment; instantiates production kernels locally and shares the
+# independent Op oracle. It does not link/compile the full ninfer_ops kernel archive.
+add_executable(ninfer_gqa_tp2_split_bench ops/gqa_tp2_split_bench.cu)
+target_include_directories(ninfer_gqa_tp2_split_bench PRIVATE
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests)
+target_link_libraries(ninfer_gqa_tp2_split_bench PRIVATE ninfer_core)
+set_target_properties(ninfer_gqa_tp2_split_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_compile_options(ninfer_gqa_tp2_split_bench PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+
 ninfer_add_op_bench(ninfer_context_softmax_attention_bench
   SOURCES ops/context_softmax_attention_bench.cu)
 ninfer_add_op_bench(ninfer_sliding_window_attention_bench

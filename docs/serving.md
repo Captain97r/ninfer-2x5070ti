@@ -88,13 +88,11 @@ device without a speculative backend and 17.69 GiB with `--spec mtp --draft-toke
 at extended context requires a smaller `--max-context` (roughly 500,000 tokens for two slots at
 INT8 KV). `--kv-dtype int8` is mandatory at that window.
 
-One caveat applies to that combination: **prefix reuse is unavailable at `--tp 2` with
-`--spec mtp`**. Resuming a prefix drives the MTP head from a retained target hidden state that
-only the primary device holds, so such a request is prefilled again from the start instead of
-resumed. The answer is unchanged and no request fails -- only the reuse saving is lost, which
-matters for multi-turn conversations at long context. `--tp 2` without `--spec mtp` reuses
-prefixes normally except for a submission whose reusable prefix already covers the whole prompt,
-which is likewise downgraded to a full prefill.
+At `--tp 2`, compatible text-prefix reuse supports append and rewrite-checkpoint restoration
+with or without `--spec mtp`. For MTP, one retained hidden vector is copied to the second GPU at
+the request boundary and the bridge rebuilds the missing MTP KV column on both ranks. Both GDN
+state shards are restored when rewinding a checkpoint. Requests whose reusable prefix already
+covers the whole prompt, and multimodal reuse requests, still fall back to full prefill.
 
 ## Endpoints
 
@@ -111,6 +109,21 @@ which is likewise downgraded to a full prefill.
 | `GET /v1/responses/{id}/input_items` | list that Response's normalized input Items |
 | `POST /v1/messages` | Anthropic-style message generation |
 | `POST /v1/messages/count_tokens` | checkpoint-native expanded input-token count |
+
+Both model discovery endpoints include the integer fields `max_model_len` and
+`context_length` on each model object. Both equal the server's configured `--max-context`
+per-request token limit; for example, `--max-context 102400` advertises `102400`. This lets
+clients such as oh-my-pi discover the available context window. The value is not the model's
+native or YaRN maximum, shared KV capacity, or default output-token budget. Clients must
+reserve room for generated tokens within this window.
+
+Each model object also reports `input_modalities` and `architecture.input_modalities` as
+`["text", "image"]` when the server starts with `--vision`, otherwise `["text"]`.
+`architecture.output_modalities` is always `["text"]`: vision enables image understanding.
+These fields describe enabled server capabilities, so embedded vision weights alone do not
+advertise image input when the server starts without `--vision`. The `vllm` provider in
+oh-my-pi 18.2.8 does not read these modality fields; also configure `input: [text, image]`
+for this model in its `models.yml` override when using a vision-enabled server.
 
 ## OpenAI Chat Completions
 
@@ -137,9 +150,8 @@ The endpoint supports:
 - non-streaming responses and server-sent event streams;
 - `stream_options.include_usage`;
 - function tools, tool choices, assistant tool-call history, and tool-result messages;
-- the top-level `reasoning_effort` field;
-- the `enable_thinking` extension;
-- `chat_template_kwargs.preserve_thinking` and the top-level `preserve_thinking` alias.
+- `reasoning_effort`, `enable_thinking`, and `preserve_thinking`, either as top-level
+  fields or inside `chat_template_kwargs` (including the form sent by oh-my-pi).
 
 The request `model` must equal the public model ID: the artifact `identity.model_id` by default, or
 the explicit `--model-id` override. Reasoning is returned separately as `reasoning_content`; answer
@@ -161,7 +173,12 @@ For Chat Completions, `reasoning_effort: "none"` disables thinking. `low`, `medi
 select the corresponding template effort when available. The other OpenAI protocol values
 `minimal`, `high`, and `max` are parsed but rejected when the loaded template does not expose them.
 `enable_thinking` controls the same new-turn thinking switch; a contradictory combination with
-`reasoning_effort` returns `conflicting_template_option`.
+`reasoning_effort` returns `conflicting_template_option`. These options can also be supplied as
+`chat_template_kwargs.enable_thinking` and `chat_template_kwargs.reasoning_effort`. For example,
+`{"chat_template_kwargs":{"enable_thinking":true,"reasoning_effort":"xhigh","preserve_thinking":true}}`
+enables xhigh reasoning and retains closed-turn reasoning. Null option values behave as omitted;
+if both spellings contain non-null values, they must agree or the request returns
+`conflicting_template_option`.
 
 `preserve_thinking` controls whether reasoning from closed assistant turns remains in later
 prompts. It defaults to the server setting, which is off unless `--preserve-thinking` is used. If
@@ -274,6 +291,8 @@ wire response contains typed `output` Items.
 | `top_p` | finite number in `[0,1]` |
 | `metadata` | at most 16 string pairs; keys at most 64 characters and values at most 512 |
 | `reasoning.effort` | `none` disables thinking; `low`, `medium`, or `xhigh` selects an effort exposed by the loaded chat template; `minimal`, `high`, and `max` return `reasoning_effort_not_supported` for the registered templates |
+| `chat_template_kwargs.enable_thinking` | optional boolean controlling new-turn thinking; must agree with an explicit reasoning effort |
+| `chat_template_kwargs.reasoning_effort` | alias for `reasoning.effort`; conflicting non-null values are rejected |
 | `chat_template_kwargs.preserve_thinking` | optional boolean controlling whether closed-turn reasoning remains in reconstructed prompts |
 | `preserve_thinking` | top-level alias for the same option; conflicting values are rejected |
 | `text.format` | omitted or `{"type":"text"}` only |

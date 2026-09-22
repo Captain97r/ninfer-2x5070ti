@@ -33,9 +33,10 @@ inline constexpr int kGqaHeadDim = 256;
 // kernels therefore static_assert their own total against this constant.
 //
 // At the 1,048,576-key domain, by this same conservative accounting (per CTA, static + dynamic,
-// times MinBlocksPerSm), the five largest reachable instantiations are:
+// times MinBlocksPerSm), the largest reachable instantiations include:
 //   i8   24|4 TokenTile 6, Wc 6,  Bc 32, static arena,  PageIds 194, MinBlocks 2 -> 99,232 B
 //   i8   12|2 TokenTile 6, Wc 6,  Bc 32, static arena,  PageIds  98, MinBlocks 2 -> 98,464 B
+//   i8   12|2 SM70 T=5,   Wc 8,  Bc 32, static arena,  PageIds 236, MinBlocks 2 -> 89,184 B
 //   i8   24|4 TokenTile 5, Wc 8,  Bc 32, static arena,  PageIds 194, MinBlocks 2 -> 88,864 B
 //   i8   24|4 TokenTile 6, Wc 12, Bc 64, dynamic arena, PageIds 194, MinBlocks 1 -> 85,984 B
 //   bf16 24|4 TokenTile 6, Wc 4,  Bc 32,                PageIds 194, MinBlocks 2 -> 75,296 B
@@ -58,7 +59,8 @@ inline constexpr int kGqaDecodeSharedResidencyBytes = 100 * 1024;
 //
 // A split covers `ceil(ceil(window / KeyBlock) / active_splits) * KeyBlock` keys (see the
 // `units_per_split` computation in both partial kernels). `active_splits` saturates at
-// `Geometry::DecodeSplits`, so the span grows linearly with the window past that point and its
+// `Geometry::DecodeSplits` (or its tuned lower cap). DecodePageSplitFloor conservatively bounds
+// both policies over the full domain, so the span grows linearly with the window and its
 // maximum over the whole declared domain is reached at `kGqaAttentionMaximumVisibleKeys`. The
 // trailing `+ 1` covers a split whose first key tile starts mid-page (KeyBlock < page size).
 //
@@ -69,8 +71,8 @@ inline constexpr int kGqaDecodeSharedResidencyBytes = 100 * 1024;
 template <typename Geometry, int KeyBlock>
 inline constexpr int kGqaSmallTSplitPageIds =
     (((((static_cast<int>(kGqaAttentionMaximumVisibleKeys) + KeyBlock - 1) / KeyBlock) +
-       Geometry::DecodeSplits - 1) /
-      Geometry::DecodeSplits) *
+       Geometry::DecodePageSplitFloor - 1) /
+      Geometry::DecodePageSplitFloor) *
          KeyBlock +
      static_cast<int>(kPagedKVPageSize) - 1) /
         static_cast<int>(kPagedKVPageSize) +
@@ -145,7 +147,13 @@ __device__ __forceinline__ int gqa_small_t_default_splits(int window) {
     constexpr int kMinSplits = 4 * Geometry::DecodeSplitScale;
     int splits               = div_up(window, target_keys_per_split);
     splits                   = splits > kMinSplits ? splits : kMinSplits;
-    return splits < Geometry::DecodeSplits ? splits : Geometry::DecodeSplits;
+    int cap = Geometry::DecodeSplits;
+    if constexpr (Geometry::LongWindowSplits != Geometry::DecodeSplits) {
+        if (window >= Geometry::LongWindowBegin && window <= Geometry::LongWindowEnd) {
+            cap = Geometry::LongWindowSplits;
+        }
+    }
+    return splits < cap ? splits : cap;
 }
 
 template <typename Geometry, bool Int8>

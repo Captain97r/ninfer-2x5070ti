@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 namespace ninfer::ops::detail {
 namespace {
@@ -44,6 +45,11 @@ std::int32_t gqa_small_t_split_upper_bound(std::int32_t window) {
 
 template <typename Geometry>
 std::int32_t gqa_small_t_split_count(std::int32_t window, std::int32_t tokens, DType kv_dtype) {
+    if constexpr (Geometry::LongWindowSplits != Geometry::DecodeSplits) {
+        if (window >= Geometry::LongWindowBegin && window <= Geometry::LongWindowEnd) {
+            return Geometry::LongWindowSplits;
+        }
+    }
     // A 64-key default split just above a 32-key boundary makes the partial
     // kernel execute a nearly empty second tile. These short ranges instead
     // launch one 32-key tile per split; the larger CTAs keep the small grid busy.
@@ -81,6 +87,10 @@ std::int32_t gqa_small_t_launch_capacity(GqaExecutionEnvelope envelope, std::int
     // Evaluating every segment end plus both interval ends gives the exact interval maximum.
     constexpr std::uint32_t ends[] = {128, 160, 512, 4096, 5000, 8198, 16390};
     for (const std::uint32_t end : ends) { include(end); }
+    if constexpr (Geometry::LongWindowSplits != Geometry::DecodeSplits) {
+        include(Geometry::LongWindowBegin - 1);
+        include(Geometry::LongWindowEnd);
+    }
     return capacity;
 }
 
@@ -200,6 +210,65 @@ void launch_tc_partial_i8(const Tensor& q, CacheInput input, const Tensor& pos, 
     CUDA_CHECK(cudaGetLastError());
 }
 
+// Engine graph preparation performs an eager GQA pass on both ranks before capture.
+// Initialize this immutable device table on that pass, including for short envelopes;
+// graph capture then performs only a current-device lookup, and replay needs no host dispatch.
+bool current_device_is_sm70() {
+    static const std::vector<bool> qualified = [] {
+        int count = 0;
+        CUDA_CHECK(cudaGetDeviceCount(&count));
+        std::vector<bool> result(static_cast<std::size_t>(count));
+        for (int device = 0; device < count; ++device) {
+            cudaDeviceProp properties{};
+            CUDA_CHECK(cudaGetDeviceProperties(&properties, device));
+            result[static_cast<std::size_t>(device)] = properties.major == 12 &&
+                properties.minor == 0 && properties.multiProcessorCount == 70;
+        }
+        return result;
+    }();
+    int device = 0;
+    CUDA_CHECK(cudaGetDevice(&device));
+    return qualified.at(static_cast<std::size_t>(device));
+}
+
+template <int Tokens, bool Masked, typename CacheInput>
+void launch_sm70_i8(const Tensor& q, CacheInput input, const Tensor& pos, float scale,
+                    PagedKVBatchLayerView cache, const GqaSmallTInvocation& invocation,
+                    GqaExecutionEnvelope envelope, Tensor& partial_acc, Tensor& partial_m,
+                    Tensor& partial_l, Tensor& out, cudaStream_t stream) {
+    using G = Gqa27Tp2Sm70Geometry;
+    const int splits = gqa_small_t_launch_capacity<G>(envelope, Tokens, DType::I8);
+    // This specialization is selected only for long envelopes. For broad graph envelopes,
+    // positions outside the measured interval retain the existing active-split policy.
+    gqa_attention_decode_i8_tiled_kernel<G, Tokens, 8, 2, 32, false, false, Masked, CacheInput>
+        <<<dim3(G::KVHeads, splits), 256, 0, stream>>>(
+            static_cast<const __nv_bfloat16*>(q.data), input,
+            static_cast<const std::int32_t*>(pos.data),
+            static_cast<std::int8_t*>(cache.k_pages.data),
+            static_cast<std::int8_t*>(cache.v_pages.data),
+            static_cast<__half*>(cache.k_scale_pages.data),
+            static_cast<__half*>(cache.v_scale_pages.data),
+            static_cast<const std::int32_t*>(cache.block_tables.data),
+            invocation.valid_columns == nullptr ? nullptr :
+                static_cast<const std::int32_t*>(invocation.valid_columns->data),
+            invocation.table_rows == nullptr ? nullptr :
+                static_cast<const std::int32_t*>(invocation.table_rows->data),
+            cache.block_tables.ne[0], invocation.full_width, invocation.column_begin,
+            static_cast<std::int32_t>(envelope.max_visible_keys), scale,
+            static_cast<__nv_bfloat16*>(partial_acc.data), static_cast<float*>(partial_m.data),
+            static_cast<float*>(partial_l.data));
+    gqa_attention_small_t_reduce_output_kernel<G, 64, true, false, Masked, false>
+        <<<dim3(G::QHeads, 4, Tokens), 256, 0, stream>>>(
+            static_cast<const __nv_bfloat16*>(partial_acc.data),
+            static_cast<const float*>(partial_m.data), static_cast<const float*>(partial_l.data),
+            static_cast<const std::int32_t*>(pos.data),
+            invocation.valid_columns == nullptr ? nullptr :
+                static_cast<const std::int32_t*>(invocation.valid_columns->data),
+            Tokens, invocation.full_width, invocation.column_begin, 1, splits,
+            static_cast<__nv_bfloat16*>(out.data));
+    CUDA_CHECK(cudaGetLastError());
+}
+
 PagedKVBatchLayerView single_row_batch_view(const PagedKVLayerView& cache) {
     return {
         .k_pages       = cache.k_pages,
@@ -236,6 +305,29 @@ void gqa_attention_small_t_launch_for(const Tensor& q, CacheInput input, const T
                                       GqaExecutionEnvelope envelope, Tensor& partial_acc,
                                       Tensor& partial_m, Tensor& partial_l, Tensor& out,
                                       cudaStream_t stream) {
+    if constexpr (Geometry::QHeads == 12 && Geometry::KVHeads == 2) {
+        const bool sm70 = current_device_is_sm70();
+        if (sm70 && cache.dtype == DType::I8 && invocation.batch_size == 1 &&
+            invocation.column_begin == 0 &&
+            envelope.max_visible_keys >= Gqa27Tp2Sm70Geometry::LongWindowBegin &&
+            envelope.min_visible_keys <= Gqa27Tp2Sm70Geometry::LongWindowEnd &&
+            (invocation.width == 1 || invocation.width == 4 || invocation.width == 5)) {
+            const auto tuned = [&]<int Tokens, bool Masked>() {
+                launch_sm70_i8<Tokens, Masked>(q, input, pos, scale, cache, invocation,
+                    envelope, partial_acc, partial_m, partial_l, out, stream);
+            };
+            const auto width = [&]<int Tokens>() {
+                if (invocation.valid_columns == nullptr) tuned.template operator()<Tokens, false>();
+                else tuned.template operator()<Tokens, true>();
+            };
+            switch (invocation.width) {
+            case 1: width.template operator()<1>(); break;
+            case 4: width.template operator()<4>(); break;
+            case 5: width.template operator()<5>(); break;
+            }
+            return;
+        }
+    }
     const auto logical_capacity      = static_cast<std::int32_t>(envelope.max_visible_keys);
     const auto implementation_window = static_cast<std::int32_t>(envelope.max_visible_keys);
     const auto splits =

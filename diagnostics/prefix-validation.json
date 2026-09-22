@@ -1,0 +1,119 @@
+﻿{
+    "schema_version":  1,
+    "recorded_utc":  "2026-09-22T10:41:17.3022220Z",
+    "test":  "ninfer_qwen3_8_27b_prefix_tp2_real_test",
+    "executable":  "diagnostics/build/prefix-matched-control.exe",
+    "outcome":  "passed",
+    "elapsed_seconds":  45.916744,
+    "model":  {
+                  "model_id":  "qwen3.8-27b",
+                  "weights_id":  "nvfp4",
+                  "sha256":  "bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32",
+                  "artifact":  "C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2\\qwen3_8_27b_nvfp4.ninfer"
+              },
+    "environment":  {
+                        "os":  "Windows 11",
+                        "gpu":  "2 x NVIDIA GeForce RTX 5070 Ti",
+                        "cuda_toolkit":  "13.3",
+                        "nvidia_driver":  "616.92",
+                        "tensor_parallel":  2,
+                        "kv_storage":  "INT8 group64",
+                        "max_context":  2048,
+                        "prefill_chunk":  128,
+                        "speculative_backend":  "MTP",
+                        "draft_tokens":  3,
+                        "proposal_head":  "optimized",
+                        "modes":  [
+                                      "eager",
+                                      "CUDA Graphs"
+                                  ]
+                    },
+    "initial_state":  "Each mode constructed a fresh Engine. GPU model state was not reused between modes. Filesystem cache was not cleared; earlier model runs had occurred.",
+    "exact_same_schedule_cases":  [
+                                      {
+                                          "name":  "append versus cold prefill",
+                                          "source_prompt_tokens":  128,
+                                          "source_output_tokens":  1,
+                                          "continuation_prompt_tokens":  256,
+                                          "reused_tokens":  128,
+                                          "first_token_bf16_logits":  "exact",
+                                          "first_logit_max_abs":  0,
+                                          "greedy_tokens_agreed":  16,
+                                          "greedy_tokens_compared":  16,
+                                          "mtp_round_accepted_drafted_counts":  "exact",
+                                          "passed_in_both_modes":  true
+                                      },
+                                      {
+                                          "name":  "response checkpoint versus cold prefill",
+                                          "source_prompt_tokens":  384,
+                                          "source_output_tokens":  16,
+                                          "continuation_prompt_tokens":  512,
+                                          "reused_tokens":  384,
+                                          "first_token_bf16_logits":  "exact",
+                                          "first_logit_max_abs":  0,
+                                          "greedy_tokens_agreed":  16,
+                                          "greedy_tokens_compared":  16,
+                                          "mtp_round_accepted_drafted_counts":  "exact",
+                                          "passed_in_both_modes":  true
+                                      },
+                                      {
+                                          "name":  "rolling response checkpoint versus cold prefill",
+                                          "source_prompt_tokens":  512,
+                                          "source_output_tokens":  16,
+                                          "continuation_prompt_tokens":  640,
+                                          "reused_tokens":  512,
+                                          "first_token_bf16_logits":  "exact",
+                                          "first_logit_max_abs":  0,
+                                          "greedy_tokens_agreed":  16,
+                                          "greedy_tokens_compared":  16,
+                                          "mtp_round_accepted_drafted_counts":  "exact",
+                                          "passed_in_both_modes":  true
+                                      },
+                                      {
+                                          "name":  "append after speculative decoding, repeated identical schedule",
+                                          "source_prompt_tokens":  160,
+                                          "source_output_tokens":  16,
+                                          "continuation_prompt_tokens":  200,
+                                          "reused_tokens":  175,
+                                          "first_token_bf16_logits":  "exact",
+                                          "first_logit_max_abs":  0,
+                                          "greedy_tokens_agreed":  16,
+                                          "greedy_tokens_compared":  16,
+                                          "mtp_round_accepted_drafted_counts":  "exact",
+                                          "passed_in_both_modes":  true
+                                      }
+                                  ],
+    "cross_rank_mtp_egress":  {
+                                  "eager_rounds":  75,
+                                  "cuda_graph_rounds":  75,
+                                  "field_mismatches":  0
+                              },
+    "zero_suffix_full_reset_fallback":  "passed in both modes",
+    "different_schedule_diagnostics":  {
+                                           "is_exact_parity_contract":  false,
+                                           "explanation":  "NVFP4 historical tokens use small-T A16 during decode and large-T W4A4 during cold prefill. The compared schedules can produce different GDN/KV states and logits. This diagnostic is retained rather than used as a token-equality gate.",
+                                           "source_prompt_tokens":  160,
+                                           "source_output_tokens":  16,
+                                           "continuation_prompt_tokens":  200,
+                                           "reused_tokens":  175,
+                                           "initial_prefill_chunk_256_run":  {
+                                                                                 "first_logit_max_abs":  0.46875,
+                                                                                 "first_logit_rms":  0.0790777,
+                                                                                 "initial_greedy_agreement":  4,
+                                                                                 "compared_tokens":  16
+                                                                             },
+                                           "final_prefill_chunk_128_run":  {
+                                                                               "first_logit_max_abs":  0.40625,
+                                                                               "first_logit_rms":  0.0756257,
+                                                                               "initial_greedy_agreement":  11,
+                                                                               "compared_tokens":  16,
+                                                                               "same_results_in_both_modes":  true
+                                                                           }
+                                       },
+    "log":  "diagnostics/prefix-matched-control.log",
+    "limitations":  [
+                        "Validation covers text suffix append and response checkpoint restoration on the tested artifact.",
+                        "Exact prompt hits with no suffix and multimodal reuse still use full prefill.",
+                        "Linux runtime execution was not tested."
+                    ]
+}

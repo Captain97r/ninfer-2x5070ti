@@ -475,6 +475,21 @@ void reject_unsupported_features(const Json& body) {
     }
 }
 
+Json model_object_json(const std::string& model_id, std::int64_t created,
+                       std::uint32_t max_context, bool enable_vision) {
+    Json input_modalities = Json::array({"text"});
+    if (enable_vision) { input_modalities.push_back("image"); }
+    return Json{{"id", model_id},
+                {"object", "model"},
+                {"created", created},
+                {"owned_by", "ninfer"},
+                {"max_model_len", max_context},
+                {"context_length", max_context},
+                {"input_modalities", input_modalities},
+                {"architecture", Json{{"input_modalities", input_modalities},
+                                       {"output_modalities", Json::array({"text"})}}}};
+}
+
 Json base_chunk(const std::string& id, const std::string& model, std::int64_t created) {
     return Json{
         {"id", id}, {"object", "chat.completion.chunk"}, {"created", created}, {"model", model}};
@@ -497,57 +512,73 @@ std::string sse_event(const Json& payload) { return "data: " + payload.dump() + 
 
 } // namespace
 
-std::optional<bool> parse_openai_preserve_thinking(const Json& body) {
-    std::optional<bool> top_level;
-    if (body.contains("preserve_thinking") && !body.at("preserve_thinking").is_null()) {
-        if (!body.at("preserve_thinking").is_boolean()) {
-            bad_request("preserve_thinking must be a boolean or null", "preserve_thinking");
-        }
-        top_level = body.at("preserve_thinking").get<bool>();
-    }
-
-    std::optional<bool> template_value;
+void parse_openai_template_options(const Json& body, GenerationRequest& out) {
+    const Json* kwargs = nullptr;
     if (body.contains("chat_template_kwargs")) {
-        const Json& kwargs = body.at("chat_template_kwargs");
-        if (!kwargs.is_object()) {
+        kwargs = &body.at("chat_template_kwargs");
+        if (!kwargs->is_object()) {
             bad_request("chat_template_kwargs must be an object", "chat_template_kwargs");
         }
-        for (auto it = kwargs.begin(); it != kwargs.end(); ++it) {
-            if (it.key() != "preserve_thinking" && !it.value().is_null()) {
+        for (auto it = kwargs->begin(); it != kwargs->end(); ++it) {
+            if (it.key() != "preserve_thinking" && it.key() != "enable_thinking" &&
+                it.key() != "reasoning_effort" && !it.value().is_null()) {
                 bad_request("chat_template_kwargs." + it.key() + " is not supported",
                             "chat_template_kwargs", "chat_template_option_not_supported");
             }
         }
-        if (kwargs.contains("preserve_thinking") && !kwargs.at("preserve_thinking").is_null()) {
-            if (!kwargs.at("preserve_thinking").is_boolean()) {
-                bad_request("chat_template_kwargs.preserve_thinking must be a boolean or null",
+    }
+
+    const auto parse_boolean = [&](const char* key) -> std::optional<bool> {
+        std::optional<bool> value;
+        if (body.contains(key) && !body.at(key).is_null()) {
+            if (!body.at(key).is_boolean()) {
+                bad_request(std::string(key) + " must be a boolean or null", key);
+            }
+            value = body.at(key).get<bool>();
+        }
+        if (kwargs && kwargs->contains(key) && !kwargs->at(key).is_null()) {
+            if (!kwargs->at(key).is_boolean()) {
+                bad_request("chat_template_kwargs." + std::string(key) +
+                                " must be a boolean or null",
                             "chat_template_kwargs");
             }
-            template_value = kwargs.at("preserve_thinking").get<bool>();
+            const bool nested = kwargs->at(key).get<bool>();
+            if (value && *value != nested) {
+                bad_request("conflicting " + std::string(key) + " values", key,
+                            "conflicting_template_option");
+            }
+            value = nested;
         }
-    }
+        return value;
+    };
+    out.enable_thinking   = parse_boolean("enable_thinking");
+    out.preserve_thinking = parse_boolean("preserve_thinking");
 
-    if (top_level && template_value && *top_level != *template_value) {
-        bad_request("conflicting preserve_thinking values", "preserve_thinking",
-                    "conflicting_template_option");
-    }
-    return template_value ? template_value : top_level;
-}
-
-void parse_openai_reasoning_effort(const Json& body, GenerationRequest& out) {
-    if (!body.contains("reasoning_effort") || body.at("reasoning_effort").is_null()) { return; }
-    if (!body.at("reasoning_effort").is_string()) {
-        bad_request("reasoning_effort must be a string or null", "reasoning_effort");
-    }
-    const std::string value = body.at("reasoning_effort").get<std::string>();
-    const std::optional<RequestedReasoningEffort> effort = parse_requested_reasoning_effort(value);
-    if (!effort) {
-        bad_request("reasoning_effort must be one of none, minimal, low, medium, high, xhigh, or "
-                    "max",
-                    "reasoning_effort");
-    }
-    out.reasoning_effort       = *effort;
-    out.reasoning_effort_param = "reasoning_effort";
+    // Responses has already parsed reasoning.effort. Merge aliases into that
+    // value so contradictory options are rejected instead of silently overridden.
+    const auto parse_effort = [&](const Json& options, const char* param) {
+        if (!options.contains("reasoning_effort") || options.at("reasoning_effort").is_null()) {
+            return;
+        }
+        if (!options.at("reasoning_effort").is_string()) {
+            bad_request(std::string(param) + " must be a string or null", param);
+        }
+        const auto effort =
+            parse_requested_reasoning_effort(options.at("reasoning_effort").get<std::string>());
+        if (!effort) {
+            bad_request(std::string(param) +
+                            " must be one of none, minimal, low, medium, high, xhigh, or max",
+                        param);
+        }
+        if (out.reasoning_effort && *out.reasoning_effort != *effort) {
+            bad_request("conflicting reasoning_effort values", param,
+                        "conflicting_template_option");
+        }
+        out.reasoning_effort       = *effort;
+        out.reasoning_effort_param = param;
+    };
+    parse_effort(body, "reasoning_effort");
+    if (kwargs) { parse_effort(*kwargs, "chat_template_kwargs.reasoning_effort"); }
 }
 
 GenerationRequest parse_chat_completion_request(const Json& body, const RequestLimits& limits) {
@@ -571,11 +602,7 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
     if (body.contains("stream_options") && body.at("stream_options").is_object()) {
         out.include_usage = get_bool(body.at("stream_options"), "include_usage", false);
     }
-    if (body.contains("enable_thinking") && !body.at("enable_thinking").is_null()) {
-        out.enable_thinking = get_bool(body, "enable_thinking", false);
-    }
-    parse_openai_reasoning_effort(body, out);
-    out.preserve_thinking = parse_openai_preserve_thinking(body);
+    parse_openai_template_options(body, out);
 
     std::optional<int> max_tokens = get_int(body, "max_completion_tokens");
     if (!max_tokens) { max_tokens = get_int(body, "max_tokens"); }
@@ -699,19 +726,17 @@ std::string make_chat_chunk_usage(const std::string& id, const std::string& mode
 
 std::string sse_done() { return "data: [DONE]\n\n"; }
 
-std::string make_models_list(const std::string& model_id, std::int64_t created) {
-    const Json payload = {{"object", "list"},
-                          {"data", Json::array({Json{{"id", model_id},
-                                                     {"object", "model"},
-                                                     {"created", created},
-                                                     {"owned_by", "ninfer"}}})}};
+std::string make_models_list(const std::string& model_id, std::int64_t created,
+                             std::uint32_t max_context, bool enable_vision) {
+    const Json payload = {
+        {"object", "list"},
+        {"data", Json::array({model_object_json(model_id, created, max_context, enable_vision)})}};
     return payload.dump();
 }
 
-std::string make_model_object(const std::string& model_id, std::int64_t created) {
-    const Json payload = {
-        {"id", model_id}, {"object", "model"}, {"created", created}, {"owned_by", "ninfer"}};
-    return payload.dump();
+std::string make_model_object(const std::string& model_id, std::int64_t created,
+                              std::uint32_t max_context, bool enable_vision) {
+    return model_object_json(model_id, created, max_context, enable_vision).dump();
 }
 
 std::string make_error_body(const ApiError& error) {

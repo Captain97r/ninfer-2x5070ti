@@ -54,18 +54,28 @@ KvCacheStorage parse_kv_cache(std::string_view text) {
     throw std::invalid_argument("--kv-dtype must be bf16 or int8");
 }
 
-std::vector<int> parse_int_list(std::string_view value, const char* label) {
+std::vector<int> parse_int_list(std::string_view value, const char* label,
+                                bool allow_zero = false) {
     std::vector<int> out;
     std::size_t start = 0;
     while (true) {
         const std::size_t comma      = value.find(',', start);
         const std::string_view piece = value.substr(
             start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
-        out.push_back(parse_positive(piece, label));
+        out.push_back(allow_zero ? parse_nonnegative(piece, label) : parse_positive(piece, label));
         if (comma == std::string_view::npos) { break; }
         start = comma + 1;
     }
     return out;
+}
+
+std::string device_list(const std::vector<int>& devices) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        if (i != 0) { out << ','; }
+        out << devices[i];
+    }
+    return out.str();
 }
 
 std::vector<std::pair<int, int>> parse_pair_list(std::string_view value, const char* label) {
@@ -274,6 +284,8 @@ std::string usage_text(std::string_view program) {
         << "  --mtp-draft-tokens <0..5>   speculative draft window (default: 0)\n"
         << "  --lm-head-draft             use the optimized proposal head; requires MTP\n"
         << "  --device <id>               CUDA device ordinal (default: 0)\n"
+        << "  --tp <1|2>                  tensor-parallel degree (default: 1)\n"
+        << "  --devices <list>            one distinct CUDA id per rank; required for --tp 2\n"
         << "  --no-cuda-graph             use eager decode\n"
         << "  --profile-measured          bracket one measured repetition with CUDA profiler API\n"
         << "  -o, --output <table|json|csv>  output format (default: table)\n"
@@ -286,7 +298,9 @@ std::string usage_text(std::string_view program) {
 
 BenchOptions parse_args(int argc, char** argv) {
     BenchOptions options;
-    bool saw_artifact = false;
+    bool saw_artifact     = false;
+    bool device_explicit  = false;
+    bool devices_explicit = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
         auto value = [&](const char* flag) -> std::string {
@@ -333,6 +347,12 @@ BenchOptions parse_args(int argc, char** argv) {
             options.proposal_head = ProposalHead::Optimized;
         } else if (arg == "--device") {
             options.device = parse_nonnegative(value("--device"), "device");
+            device_explicit = true;
+        } else if (arg == "--tp") {
+            options.tp = parse_positive(value("--tp"), "tp");
+        } else if (arg == "--devices") {
+            options.devices = parse_int_list(value("--devices"), "devices", true);
+            devices_explicit = true;
         } else if (arg == "--no-cuda-graph") {
             options.use_cuda_graph = false;
         } else if (arg == "--profile-measured") {
@@ -355,6 +375,25 @@ BenchOptions parse_args(int argc, char** argv) {
         }
     }
     if (!saw_artifact) { throw std::invalid_argument("--weights is required"); }
+    if (options.tp != 1 && options.tp != 2) {
+        throw std::invalid_argument("--tp must be 1 or 2");
+    }
+    if (devices_explicit) {
+        if (options.devices.size() != static_cast<std::size_t>(options.tp)) {
+            throw std::invalid_argument("--devices must list exactly --tp device ids");
+        }
+        if (options.tp == 2 && options.devices[0] == options.devices[1]) {
+            throw std::invalid_argument("--devices must list distinct device ids");
+        }
+        if (device_explicit && options.device != options.devices.front()) {
+            throw std::invalid_argument("--device and --devices disagree on the primary device");
+        }
+        options.device = options.devices.front();
+    } else if (options.tp == 1) {
+        options.devices = {options.device};
+    } else {
+        throw std::invalid_argument("--tp 2 requires an explicit --devices list");
+    }
     if (options.prefill_chunk % kPrefillChunkAlignment != 0) {
         throw std::invalid_argument("--prefill-chunk must be a multiple of 128");
     }
@@ -549,6 +588,7 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << "  target:     " << env.load.target << '\n'
         << "  weights:    " << env.load.weights_id << '\n'
         << "  gpu:        " << env.gpu_name << " (device " << env.device_id << ")\n"
+        << "  execution:  tp=" << env.tp << " devices=" << device_list(env.devices) << '\n'
         << "  cuda:       runtime " << env.cuda_runtime_version << ", driver "
         << env.cuda_driver_version << '\n'
         << "  artifact:   " << env.artifact_path << " (" << env.artifact_file_size_bytes
@@ -624,7 +664,16 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         << "  \"environment\": {\"gpu_name\": \"" << json_escape(env.gpu_name)
         << "\", \"cuda_runtime_version\": \"" << json_escape(env.cuda_runtime_version)
         << "\", \"cuda_driver_version\": \"" << json_escape(env.cuda_driver_version)
-        << "\", \"device_id\": " << env.device_id << "},\n"
+        << "\", \"device_id\": " << env.device_id << ", \"devices\": [";
+    for (std::size_t i = 0; i < env.devices.size(); ++i) {
+        if (i != 0) { out << ", "; }
+        const std::string_view name = i < env.gpu_names.size()
+                                          ? std::string_view(env.gpu_names[i])
+                                          : std::string_view{};
+        out << "{\"device_id\": " << env.devices[i] << ", \"gpu_name\": \""
+            << json_escape(name) << "\"}";
+    }
+    out << "]},\n"
         << "  \"artifact\": {\"path\": \"" << json_escape(env.artifact_path)
         << "\", \"file_size_bytes\": " << env.artifact_file_size_bytes << "},\n"
         << "  \"load\": {\n"
@@ -669,6 +718,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         << "    \"kv_payload_bytes\": " << env.memory.kv_payload_bytes << "\n"
         << "  },\n"
         << "  \"config\": {\n"
+        << "    \"tp\": " << env.tp << ",\n"
+        << "    \"devices\": [" << device_list(env.devices) << "],\n"
         << "    \"max_context\": " << env.max_context << ",\n"
         << "    \"prefill_chunk\": " << env.prefill_chunk << ",\n"
         << "    \"kv_cache\": \"" << kv_cache_name(env.kv_cache) << "\",\n"
@@ -737,7 +788,7 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
 
 std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult>& results) {
     std::ostringstream out;
-    out << "label,kind,n_prompt,n_gen,target,weights_id,max_context,prefill_chunk,mtp_draft_tokens,"
+    out << "label,kind,n_prompt,n_gen,target,weights_id,tp,devices,max_context,prefill_chunk,mtp_draft_tokens,"
            "proposal_head,decode_path,kv_cache,kv_payload_bytes,load_host_to_device_bytes,"
            "weights_capacity_bytes,sequence_capacity_bytes,workspace_capacity_bytes,"
            "request_transient_capacity_bytes,cuda_graph_allowance_bytes,"
@@ -760,7 +811,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
                                                     static_cast<double>(spec.drafted_tokens));
         out << result.test.label << ',' << kind_string(result.test.kind) << ','
             << result.test.n_prompt << ',' << result.test.n_gen << ',' << env.load.target << ','
-            << env.load.weights_id << ',' << env.max_context << ',' << env.prefill_chunk << ','
+            << env.load.weights_id << ',' << env.tp << ",\"" << device_list(env.devices) << "\","
+            << env.max_context << ',' << env.prefill_chunk << ','
             << env.mtp_draft_tokens << ',' << proposal_head_name(env.proposal_head) << ','
             << decode_path_name(env.use_cuda_graph, env.mtp_draft_tokens) << ','
             << kv_cache_name(env.kv_cache) << ',' << env.memory.kv_payload_bytes << ','

@@ -112,6 +112,32 @@ int test_cli_contract() {
         expect(parsed.output == qb::OutputFormat::Json && parsed.output_file == "report.json",
                "output settings");
 
+    failures += expect(parsed.tp == 1 && parsed.devices == std::vector<int>({1}),
+                       "single-device selection resolves rank list");
+    const auto tp2 = parse_for_test({"ninfer_bench", "--weights", "model.ninfer",
+                                    "--devices", "1,0", "--tp", "2", "--device", "1"});
+    failures += expect(tp2.tp == 2 && tp2.device == 1 &&
+                           tp2.devices == std::vector<int>({1, 0}),
+                       "TP2 preserves rank order and primary device");
+    const auto primary_from_list =
+        parse_for_test({"ninfer_bench", "--weights", "model.ninfer", "--devices", "1"});
+    failures += expect(primary_from_list.device == 1 &&
+                           primary_from_list.devices == std::vector<int>({1}),
+                       "explicit rank list selects primary device");
+    for (const auto& flags : std::vector<std::vector<std::string>>{
+             {"--tp", "3"}, {"--tp", "2"}, {"--tp", "2", "--devices", "0"},
+             {"--devices", "0,1"}, {"--tp", "2", "--devices", "1,1"},
+             {"--tp", "2", "--devices", "0,-1"}, {"--tp", "2", "--devices", "0,"},
+             {"--tp", "2", "--devices", "0,1", "--device", "1"}}) {
+        failures += expect_throws<std::invalid_argument>(
+            [&] {
+                std::vector<std::string> arguments{"ninfer_bench", "--weights", "model.ninfer"};
+                arguments.insert(arguments.end(), flags.begin(), flags.end());
+                (void)parse_for_test(std::move(arguments));
+            },
+            "reject invalid TP/device selection");
+    }
+
     const auto defaults = qb::expand_tests(qb::BenchOptions{});
     failures +=
         expect(defaults.size() == 2 && defaults[0].label == "pp512" && defaults[1].label == "tg128",
@@ -218,7 +244,10 @@ std::vector<qb::TestResult> sample_results() {
 
 qb::BenchEnvironment sample_environment() {
     qb::BenchEnvironment env;
-    env.gpu_name                          = "RTX 5090";
+    env.gpu_name                          = "RTX 5070 Ti";
+    env.tp                                = 2;
+    env.devices                           = {0, 1};
+    env.gpu_names                         = {"RTX 5070 Ti", "RTX 5070 Ti"};
     env.cuda_runtime_version              = "13.1";
     env.cuda_driver_version               = "590.1";
     env.device_id                         = 0;
@@ -270,8 +299,16 @@ int test_report_contract() {
         return fail(std::string("invalid benchmark JSON: ") + error.what());
     }
 
-    failures += expect(report.at("schema_version") == 11, "report schema v11");
+    failures += expect(report.at("schema_version") == 12, "report schema v12");
     failures += expect(report.at("artifact_type") == "ninfer_bench_report", "report identity");
+    failures += expect(report.at("config").at("tp") == 2 &&
+                           report.at("config").at("devices") == Json::array({0, 1}),
+                       "report identifies TP ranks");
+    const auto& gpus = report.at("environment").at("devices");
+    failures += expect(gpus.size() == 2 && gpus.at(0).at("device_id") == 0 &&
+                           gpus.at(1).at("device_id") == 1 &&
+                           gpus.at(1).at("gpu_name") == "RTX 5070 Ti",
+                       "report names both CUDA devices");
     failures += expect(report.at("artifact").at("path") == "model.ninfer", "artifact path");
     failures += expect(report.at("load").at("target") == "qwen3_6_27b", "load target");
     failures += expect(report.at("load").at("weights_id") == "groupwise-int", "load weights id");
@@ -332,6 +369,8 @@ int test_human_and_csv_reports() {
     failures += expect(table.find("qwen3_6_27b") != std::string::npos, "table target");
     failures += expect(table.find("groupwise-int") != std::string::npos, "table weights id");
     failures += expect(table.find("model.ninfer") != std::string::npos, "table artifact");
+    failures += expect(table.find("tp=2 devices=0,1") != std::string::npos,
+                       "table identifies tensor parallelism");
     failures +=
         expect(table.find("proposal_head=optimized") != std::string::npos, "table proposal head");
     failures +=
@@ -349,6 +388,10 @@ int test_human_and_csv_reports() {
         failures += expect(csv.find(field) != std::string::npos,
                            std::string("CSV field ") + std::string(field));
     }
+    failures += expect(csv.find("weights_id,tp,devices,max_context") != std::string::npos,
+                       "CSV names TP/device columns");
+    failures += expect(csv.find("groupwise-int,2,\"0,1\",4096,1024") != std::string::npos,
+                       "CSV quotes comma-separated device ids");
     failures += expect(std::count(csv.begin(), csv.end(), '\n') == 3, "CSV header plus two rows");
     return failures;
 }

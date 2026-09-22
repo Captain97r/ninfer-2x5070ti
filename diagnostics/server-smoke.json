@@ -1,0 +1,29 @@
+﻿{
+    "response":  {
+                     "choices":  [
+                                     {
+                                         "finish_reason":  "stop",
+                                         "index":  0,
+                                         "message":  {
+                                                         "content":  "inference ready",
+                                                         "role":  "assistant"
+                                                     }
+                                     }
+                                 ],
+                     "created":  1790074288,
+                     "id":  "chatcmpl-61b8d638648b1e5c",
+                     "model":  "qwen3.8-27b",
+                     "object":  "chat.completion",
+                     "usage":  {
+                                   "completion_tokens":  4,
+                                   "prompt_tokens":  18,
+                                   "total_tokens":  22
+                               }
+                 },
+    "tp":  2,
+    "process_stopped_after_test":  true,
+    "context_capacity":  102400,
+    "model":  "qwen3.8-27b",
+    "endpoint":  "http://127.0.0.1:18080",
+    "mtp_draft_tokens":  3
+}

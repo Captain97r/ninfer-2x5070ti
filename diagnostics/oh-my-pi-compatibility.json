@@ -1,0 +1,28 @@
+{
+  "verified_at": "2026-09-22T12:28:17.129069+00:00",
+  "schema_tests": "2/2 passed",
+  "server": "http://127.0.0.1:8000",
+  "logged_request_replay": {
+    "http_status": 200,
+    "sse_done": true,
+    "reasoning_delta": true,
+    "message_count": 2,
+    "tool_count": 12,
+    "output_limit": 32,
+    "chat_template_kwargs": {
+      "preserve_thinking": true,
+      "enable_thinking": true,
+      "reasoning_effort": "xhigh"
+    },
+    "usage": {
+      "completion_tokens": 32,
+      "prompt_tokens": 21621,
+      "total_tokens": 21653
+    }
+  },
+  "thinking_disabled": {
+    "http_status": 200,
+    "content_present": true,
+    "reasoning_present": false
+  }
+}

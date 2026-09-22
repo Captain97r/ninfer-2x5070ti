@@ -176,6 +176,109 @@ int test_preserve_thinking_options() {
     return failures;
 }
 
+int test_chat_template_thinking_aliases() {
+    const Json base = {
+        {"model", "qwen3.8-27b"},
+        {"messages", Json::array({Json{{"role", "user"}, {"content", "hello"}}})},
+    };
+    int failures = 0;
+
+    // oh-my-pi sends all three options together in its streaming request.
+    Json client      = base;
+    client["stream"] = true;
+    client["chat_template_kwargs"] =
+        Json{{"preserve_thinking", true}, {"enable_thinking", true}, {"reasoning_effort", "xhigh"}};
+    const GenerationRequest request  = parse_chat_completion_request(client, default_limits());
+    const ninfer::PromptInput prompt = translate(request);
+    failures += check(request.stream && request.enable_thinking == true &&
+                          request.preserve_thinking == true &&
+                          request.reasoning_effort == RequestedReasoningEffort::XHigh,
+                      "oh-my-pi streaming thinking options were not parsed");
+    failures += check(prompt.options.enable_thinking && prompt.options.preserve_thinking &&
+                          prompt.options.reasoning_effort == ninfer::ReasoningEffort::XHigh,
+                      "nested thinking options did not reach PromptInput");
+
+    Json same                 = client;
+    same["enable_thinking"]   = true;
+    same["reasoning_effort"]  = "xhigh";
+    same["preserve_thinking"] = true;
+    failures += check(parse_chat_completion_request(same, default_limits()).reasoning_effort ==
+                          RequestedReasoningEffort::XHigh,
+                      "matching top-level and nested thinking options rejected");
+    for (const char* key : {"enable_thinking", "reasoning_effort"}) {
+        Json conflict = same;
+        conflict[key] = std::string(key) == "enable_thinking" ? Json(false) : Json("low");
+        failures += check(api_code([&] {
+                              (void)parse_chat_completion_request(conflict, default_limits());
+                          }) == "conflicting_template_option",
+                          std::string("conflicting thinking alias accepted: ") + key);
+    }
+
+    Json nulls                      = base;
+    nulls["enable_thinking"]        = nullptr;
+    nulls["reasoning_effort"]       = nullptr;
+    nulls["chat_template_kwargs"]   = Json{{"enable_thinking", nullptr},
+                                           {"reasoning_effort", nullptr},
+                                           {"preserve_thinking", nullptr}};
+    const GenerationRequest omitted = parse_chat_completion_request(nulls, default_limits());
+    failures +=
+        check(!omitted.enable_thinking && !omitted.reasoning_effort && !omitted.preserve_thinking,
+              "null thinking aliases must remain omitted");
+    for (bool enabled : {false, true}) {
+        ServeOptions server;
+        server.enable_thinking   = enabled;
+        server.preserve_thinking = enabled;
+        const ResolvedPromptSemantics semantics =
+            resolve_prompt_semantics(omitted, server, effort_capabilities());
+        failures += check(semantics.enable_thinking == enabled &&
+                              semantics.preserve_thinking == enabled && !semantics.reasoning_effort,
+                          "null thinking aliases changed server/template defaults");
+    }
+    Json nested_wins                = client;
+    nested_wins["enable_thinking"]  = nullptr;
+    nested_wins["reasoning_effort"] = nullptr;
+    failures += check(translate(parse_chat_completion_request(nested_wins, default_limits()))
+                              .options.reasoning_effort == ninfer::ReasoningEffort::XHigh,
+                      "top-level null suppressed a nested thinking option");
+    Json top_wins                = nulls;
+    top_wins["enable_thinking"]  = true;
+    top_wins["reasoning_effort"] = "low";
+    failures += check(translate(parse_chat_completion_request(top_wins, default_limits()))
+                              .options.reasoning_effort == ninfer::ReasoningEffort::Low,
+                      "nested null suppressed a top-level thinking option");
+
+    Json disabled = base;
+    disabled["chat_template_kwargs"] =
+        Json{{"enable_thinking", false}, {"reasoning_effort", "none"}};
+    const ninfer::PromptInput disabled_prompt =
+        translate(parse_chat_completion_request(disabled, default_limits()));
+    failures +=
+        check(!disabled_prompt.options.enable_thinking && !disabled_prompt.options.reasoning_effort,
+              "nested false/none did not disable thinking");
+    disabled["chat_template_kwargs"]["reasoning_effort"] = "xhigh";
+    failures +=
+        check(api_code([&] {
+                  (void)translate(parse_chat_completion_request(disabled, default_limits()));
+              }) == "conflicting_template_option",
+              "nested thinking toggle/effort semantic conflict was accepted");
+
+    for (const Json& value : {Json("true"), Json(1), Json::array()}) {
+        Json invalid                    = base;
+        invalid["chat_template_kwargs"] = Json{{"enable_thinking", value}};
+        failures += check(
+            throws_api([&] { (void)parse_chat_completion_request(invalid, default_limits()); }),
+            "non-boolean nested enable_thinking accepted");
+    }
+    for (const Json& value : {Json(true), Json(1), Json("ultra")}) {
+        Json invalid                    = base;
+        invalid["chat_template_kwargs"] = Json{{"reasoning_effort", value}};
+        failures += check(
+            throws_api([&] { (void)parse_chat_completion_request(invalid, default_limits()); }),
+            "invalid nested reasoning_effort accepted");
+    }
+    return failures;
+}
+
 int test_reasoning_effort() {
     const Json base = {
         {"model", "m"},
@@ -708,16 +811,37 @@ int test_tool_chunk_serialization() {
 }
 
 int test_models_and_error() {
-    int failures    = 0;
-    const Json list = Json::parse(make_models_list("qwen3.6-27b", 1));
-    failures += check(list.at("object") == "list", "models list object");
-    failures += check(list.at("data").at(0).at("id") == "qwen3.6-27b", "models list id");
-    failures += check(list.at("data").at(0).at("object") == "model", "models list entry object");
-    failures += check(list.at("data").at(0).at("owned_by") == "ninfer", "models list owner");
+    int failures = 0;
+    for (const std::uint32_t max_context : {102400U, 32768U}) {
+        for (const bool enable_vision : {false, true}) {
+            const Json list =
+                Json::parse(make_models_list("qwen3.8-27b", 1, max_context, enable_vision));
+            failures += check(list.at("object") == "list", "models list object");
+            failures += check(list.at("data").size() == 1, "models list contains one model");
+            const Json& entry = list.at("data").at(0);
+            failures += check(entry.at("id") == "qwen3.8-27b", "models list id");
+            failures += check(entry.at("object") == "model", "models list entry object");
+            failures += check(entry.at("owned_by") == "ninfer", "models list owner");
 
-    const Json one = Json::parse(make_model_object("qwen3.6-27b", 1));
-    failures += check(one.at("id") == "qwen3.6-27b" && one.at("object") == "model", "model object");
-    failures += check(one.at("owned_by") == "ninfer", "model owner");
+            const Json one =
+                Json::parse(make_model_object("qwen3.8-27b", 1, max_context, enable_vision));
+            failures += check(one == entry, "single model matches models list entry");
+            failures += check(one.at("created") == 1, "model creation timestamp");
+            for (const char* field : {"max_model_len", "context_length"}) {
+                failures += check(one.at(field).is_number_integer(), "model context is an integer");
+                failures += check(one.at(field) == max_context,
+                                  "model context follows configured request limit");
+            }
+            const Json expected_input = enable_vision ? Json::array({"text", "image"})
+                                                      : Json::array({"text"});
+            failures += check(one.at("input_modalities") == expected_input,
+                              "model input follows enabled vision capability");
+            failures += check(one.at("architecture").at("input_modalities") == expected_input,
+                              "architecture input matches enabled vision capability");
+            failures += check(one.at("architecture").at("output_modalities") == Json::array({"text"}),
+                              "model output remains text with and without vision");
+        }
+    }
 
     ApiError error;
     error.status   = 400;
@@ -751,6 +875,7 @@ int main() {
     failures += test_parse_string_content();
     failures += test_preserve_thinking_options();
     failures += test_reasoning_effort();
+    failures += test_chat_template_thinking_aliases();
     failures += test_parse_parts_and_flatten();
     failures += test_instruction_roles_preserved();
     failures += test_parse_media_in_translate();

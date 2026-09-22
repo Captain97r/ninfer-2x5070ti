@@ -179,6 +179,12 @@ std::size_t PeerMailbox::slot_bytes() const noexcept { return slot_bytes_; }
 
 volatile std::uint32_t* PeerMailbox::hang_word() const noexcept { return hang_; }
 
+void PeerMailbox::validate_completed_round() const {
+    if (*static_cast<volatile std::uint32_t*>(hang_) != 0) {
+        throw std::runtime_error("TP2 mailbox exchange timed out waiting for the peer device");
+    }
+}
+
 std::uint32_t* PeerMailbox::arrival(int rank) const noexcept { return arrival_[rank]; }
 
 int PeerMailbox::take_capture_slot() noexcept {

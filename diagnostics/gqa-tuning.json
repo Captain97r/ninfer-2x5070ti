@@ -1,0 +1,218 @@
+{
+  "date": "2026-09-22",
+  "scope": "Isolated local TP2 GQA attention shard; each GPU measured separately; no TP collectives or end-to-end speedup claim.",
+  "hardware": {
+    "devices": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "sm_count": 70
+      },
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "sm_count": 70
+      }
+    ],
+    "os": "Windows",
+    "architecture": "sm_120a",
+    "host_compiler": "MSVC 19.44",
+    "relocatable_device_code": true,
+    "cuda_compiler": "13.3.73"
+  },
+  "workload": {
+    "query_heads": 12,
+    "kv_heads": 2,
+    "head_dim": 256,
+    "kv_dtype": "INT8-G64 with FP16 scales",
+    "query_output_dtype": "BF16",
+    "batch": 1,
+    "context_tokens": 100000,
+    "tokens": [
+      1,
+      4,
+      5
+    ],
+    "page_mapping": "fragmented",
+    "execution": "CUDA Graph replay",
+    "warmup_replays_per_policy": 10,
+    "timed_samples_per_policy": 31,
+    "l2_flush_bytes": 134217728,
+    "timing": "CUDA events around partial and reducer only; flush and CPU oracle excluded; policies interleaved and order reversed each round"
+  },
+  "production_policy": {
+    "device_compute_capability": "12.0",
+    "sm_count": 70,
+    "query_heads": 12,
+    "kv_heads": 2,
+    "batch": 1,
+    "kv_dtype": "INT8",
+    "tokens": [
+      1,
+      4,
+      5
+    ],
+    "column_begin": 0,
+    "visible_keys_min": 81920,
+    "visible_keys_max": 131077,
+    "baseline_active_splits_per_kv_head": 170,
+    "tuned_active_splits_per_kv_head": 70,
+    "broad_graph_launched_splits_per_kv_head": 170,
+    "workspace_splits_upper_bound": 170,
+    "shared_page_ids_per_split": 236,
+    "other_windows": "original active-split policy"
+  },
+  "oracle": {
+    "formula": "Independent CPU FP64 causal dot-product, stable softmax and weighted value sum over represented BF16 queries and decoded INT8 cache; all 12 heads and every query token.",
+    "relative_l2_limit": "2.5 times each case measured BF16 output-storage floor",
+    "gross_absolute_limit": 0.0011,
+    "gross_relative_to_max_reference": 0.0022,
+    "reference_source": "tests/ops/gqa_attention_fixture.h"
+  },
+  "cases": [
+    {
+      "device": 0,
+      "tokens": 1,
+      "baseline": {
+        "min_us": 166.784,
+        "median_us": 168.448,
+        "p90_us": 168.928,
+        "relative_l2": 0.00295037
+      },
+      "tuned": {
+        "min_us": 143.872,
+        "median_us": 145.792,
+        "p90_us": 146.4,
+        "relative_l2": 0.00289163
+      },
+      "median_latency_reduction_percent": 13.45,
+      "fp64_relative_l2_limit": 0.00407322,
+      "fp64_passed": true
+    },
+    {
+      "device": 0,
+      "tokens": 4,
+      "baseline": {
+        "min_us": 189.088,
+        "median_us": 191.104,
+        "p90_us": 191.488,
+        "relative_l2": 0.00292331
+      },
+      "tuned": {
+        "min_us": 150.368,
+        "median_us": 152.096,
+        "p90_us": 154.368,
+        "relative_l2": 0.00289096
+      },
+      "median_latency_reduction_percent": 20.41,
+      "fp64_relative_l2_limit": 0.004097,
+      "fp64_passed": true
+    },
+    {
+      "device": 0,
+      "tokens": 5,
+      "baseline": {
+        "min_us": 195.488,
+        "median_us": 197.536,
+        "p90_us": 198.08,
+        "relative_l2": 0.00291068
+      },
+      "tuned": {
+        "min_us": 152.48,
+        "median_us": 154.432,
+        "p90_us": 156.096,
+        "relative_l2": 0.00289616
+      },
+      "median_latency_reduction_percent": 21.82,
+      "fp64_relative_l2_limit": 0.00409168,
+      "fp64_passed": true
+    },
+    {
+      "device": 1,
+      "tokens": 1,
+      "baseline": {
+        "min_us": 170.4,
+        "median_us": 172.352,
+        "p90_us": 172.736,
+        "relative_l2": 0.00295037
+      },
+      "tuned": {
+        "min_us": 146.048,
+        "median_us": 148.256,
+        "p90_us": 150.144,
+        "relative_l2": 0.00289163
+      },
+      "median_latency_reduction_percent": 13.98,
+      "fp64_relative_l2_limit": 0.00407322,
+      "fp64_passed": true
+    },
+    {
+      "device": 1,
+      "tokens": 4,
+      "baseline": {
+        "min_us": 193.504,
+        "median_us": 195.488,
+        "p90_us": 197.088,
+        "relative_l2": 0.00292331
+      },
+      "tuned": {
+        "min_us": 153.984,
+        "median_us": 156.384,
+        "p90_us": 158.176,
+        "relative_l2": 0.00289096
+      },
+      "median_latency_reduction_percent": 20.0,
+      "fp64_relative_l2_limit": 0.004097,
+      "fp64_passed": true
+    },
+    {
+      "device": 1,
+      "tokens": 5,
+      "baseline": {
+        "min_us": 199.392,
+        "median_us": 203.168,
+        "p90_us": 203.68,
+        "relative_l2": 0.00291068
+      },
+      "tuned": {
+        "min_us": 156.096,
+        "median_us": 158.144,
+        "p90_us": 158.848,
+        "relative_l2": 0.00289616
+      },
+      "median_latency_reduction_percent": 22.16,
+      "fp64_relative_l2_limit": 0.00409168,
+      "fp64_passed": true
+    }
+  ],
+  "production_route_test": {
+    "target": "ninfer_gqa_tp2_sm70_test",
+    "status": "passed",
+    "devices": [
+      0,
+      1
+    ],
+    "context_tokens": 100000,
+    "query_tokens": [
+      1,
+      4,
+      5
+    ],
+    "checks": [
+      "independent FP64 oracle for every query head and token",
+      "exact eager and captured envelopes",
+      "broad MTP graph envelope 1..131077",
+      "cached and append routes",
+      "append rows poisoned before eager and graph execution",
+      "masked MTP 5-to-4 replay with exact BF16 zero tail",
+      "short-context replay of the same broad graph",
+      "exact final INT8 cache codes/scales",
+      "exact queried workspace capacity and cache/output guards"
+    ],
+    "commands": [
+      "build/windows/tests/ninfer_gqa_tp2_sm70_test.exe 0",
+      "build/windows/tests/ninfer_gqa_tp2_sm70_test.exe 1"
+    ]
+  },
+  "reproduce": "ninfer_gqa_tp2_split_bench --device 0 --context 100000 --repeat 31; repeat with --device 1"
+}

@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/ivanov84/ninfer-windows-tp2.git",
+  "source_branch": "windows-tp2",
+  "source_commit": "2ea110eeee606e24d9383fc8e719d4cc04ec8bf0",
+  "local_directory": ".",
+  "local_branch": "main",
+  "upstream": "https://github.com/Neroued/ninfer",
+  "artifact_format": "NInferv2",
+  "local_build_validated": true,
+  "local_inference_validated": true,
+  "local_prefix_reuse_validated": true,
+  "local_long_context_validated": true,
+  "fork_repository": "https://github.com/Captain97r/ninfer-2x5070ti.git",
+  "local_remotes": {
+    "origin": "https://github.com/Captain97r/ninfer-2x5070ti.git",
+    "upstream": "https://github.com/ivanov84/ninfer-windows-tp2.git"
+  }
+}

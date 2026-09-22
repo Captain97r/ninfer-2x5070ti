@@ -17,6 +17,10 @@ struct GqaGeometry {
     static constexpr int GroupSize        = QHeads / KVHeads;
     static constexpr int DecodeSplitScale = DecodeSplitScaleValue;
     static constexpr int DecodeSplits     = 85 * DecodeSplitScale;
+    static constexpr int DecodePageSplitFloor = DecodeSplits;
+    static constexpr int LongWindowSplits = DecodeSplits;
+    static constexpr int LongWindowBegin = 0;
+    static constexpr int LongWindowEnd = 0;
 };
 
 using Gqa27Geometry = GqaGeometry<24, 4, 1>;
@@ -35,6 +39,18 @@ using Gqa35Geometry = GqaGeometry<16, 2, 2>;
 // split form here follows: the split reuses its family's measured policy rather than re-deriving
 // one.
 using Gqa27Tp2Geometry = GqaGeometry<12, 2, 2>;
+
+// Measured INT8 T=1/4/5 profile for a single TP2 shard on a 70-SM sm_120 GPU.
+// Keep the ordinary policy outside the qualified 80K..128K visible-key interval.
+// Broad replay envelopes still need the 170-split launch/workspace upper bound;
+// the kernels select 70 active splits from the current device-side positions.
+struct Gqa27Tp2Sm70Geometry : Gqa27Tp2Geometry {
+    static constexpr int LongWindowSplits = 70;
+    static constexpr int LongWindowBegin = 81920;
+    static constexpr int LongWindowEnd = 131077; // 128K context plus five verify tokens
+    // Conservative full-domain staging even when a replay chooses fewer active splits.
+    static constexpr int DecodePageSplitFloor = LongWindowSplits;
+};
 
 static_assert(Gqa27Tp2Geometry::QHeads * 2 == Gqa27Geometry::QHeads);
 static_assert(Gqa27Tp2Geometry::KVHeads * 2 == Gqa27Geometry::KVHeads);

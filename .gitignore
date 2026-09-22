@@ -57,3 +57,14 @@ dist/*
 
 # Out-of-tree experimental benches staged on this branch but not part of any PR yet.
 tools/phase2a/
+
+# Local Windows tools, models and generated artifacts
+**/build/
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+*.ninfer
+*.part

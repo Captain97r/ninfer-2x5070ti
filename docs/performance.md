@@ -29,14 +29,81 @@ speculative-decode corpus at C=1, 2, 4, and 8; its C=1 point also supplies the s
 results below. The registered Qwen3.8-27B `groupwise-int` profile remains outside the published
 benchmark campaign.
 
-Every campaign above and below is single-GPU except **Dual-GPU (TP2) and YaRN 1M context**, which
-is measured across two RTX 5090s and under a power limit the single-GPU campaigns were not; the two
-sets are not comparable to each other.
+The historical model campaigns use one RTX 5090 except **Dual-GPU (TP2) and YaRN 1M context**,
+which uses two RTX 5090s under a different power limit. The local RTX 5070 Ti operator measurements
+below have their own workload and timing method; these sets are not directly comparable.
 
 The single-request corpus requests were submitted serially to a persistent `ninfer-serve` process
 over the loopback OpenAI-compatible HTTP endpoint. Each reported corpus fixture used five fixed
 seeds. Values are arithmetic mean ± sample standard deviation, and server warm-up completes before
 the measured requests. The concurrent campaign has its own sustained-wave method below.
+
+## Local RTX 5070 Ti attention tuning
+
+The 70-SM `sm_120` profile automatically selects 70 active splits per KV head for INT8-G64
+attention at 81,920..131,077 visible keys, with one request, 12 query heads, two KV heads, and
+T=1, 4, or 5. These are the local TP2 shard shapes for ordinary decode and MTP3/MTP4 verification.
+Other widths, devices, cache formats and context windows retain their existing split policies.
+
+Broad CUDA Graph envelopes keep the 170-split launch/workspace upper bound; kernels choose the
+active count from device positions on each replay. Page-ID staging conservatively supports the
+lower split count over the full declared context domain. This avoids changing short-context
+behavior or underallocating staging when a graph is reused.
+
+Measured on each local RTX 5070 Ti separately under Windows, CUDA 13.3 and MSVC 19.44, with
+relocatable device code enabled. The workload has 100,000 cached tokens, fragmented pages, BF16
+queries/output, ten warmup replays and 31 interleaved timing samples per policy. A 128 MiB cache
+flush precedes each sample outside the CUDA event interval. Medians include the partial kernel
+and reducer:
+
+| GPU | Query tokens | Original 170 splits, us | Tuned broad graph, us | Latency reduction |
+|---|---:|---:|---:|---:|
+| 0 | 1 | 168.45 | 145.79 | 13.4% |
+| 0 | 4 | 191.10 | 152.10 | 20.4% |
+| 0 | 5 | 197.54 | 154.43 | 21.8% |
+| 1 | 1 | 172.35 | 148.26 | 14.0% |
+| 1 | 4 | 195.49 | 156.38 | 20.0% |
+| 1 | 5 | 203.17 | 158.14 | 22.2% |
+
+Every measured output passes the independent FP64 attention oracle over all query heads and
+tokens. Tuned relative L2 error is approximately 0.0029 against limits of 0.00407..0.00410 derived
+from the existing long-window BF16 storage-floor criterion. These are operator latency reductions;
+they do not establish an end-to-end token-throughput gain. The compact local record is
+[diagnostics/gqa-tuning.json](../diagnostics/gqa-tuning.json).
+
+The public-Op regression `ninfer_gqa_tp2_sm70_test` checks exact and broad graph envelopes,
+append/cached attention, masked MTP output, short-window replay, and workspace/cache guards.
+Append rows are deliberately poisoned before each call so a missing cache write cannot pass.
+See [benchmark commands](../bench/README.md#local-tp2-attention-split-experiment).
+
+## TP2 prefix-state correctness
+
+`ninfer_qwen3_8_27b_prefix_tp2_real_test` compares restored text suffixes with cold prefill using
+matching 128-token chunk boundaries. Append and two rolling response checkpoints must produce
+exactly the same first-token BF16 logits, 16 generated tokens, and MTP round/acceptance counts.
+Sixteen generated tokens modify current state before each checkpoint rewind, exercising both
+GPUs' restored GDN shards. Eager and CUDA Graph runs also compare both ranks' speculative egress.
+
+A separate decoded-prefix diagnostic reports differences against cold prefill, and requires exact
+reproducibility when the same decode/append schedule is repeated. Unconditional cached-versus-cold
+token equality is not the contract across different schedules: NVFP4 kernels use A16 activations
+for small decode shapes and W4A4 for larger prefill shapes, so historical GDN/KV states can differ.
+The local dual-5070-Ti validation record is `diagnostics/prefix-validation.json` in the wrapper
+workspace; this test is a correctness check, not an inference throughput measurement.
+## Collective correctness and timing
+
+`ninfer_allreduce_test` always checks both devices against its independent sum and exact gather
+oracles, buffer guards, and the chained cross-stream ordering regression. It also reports the
+10 KiB eager all-reduce mean, p50, p99, and maximum latency, including synchronization of both
+GPU streams. These timings are descriptive by default: WDDM scheduling, driver, transport and
+PCIe topology affect them, and they do not predict captured decode performance.
+
+A benchmark owner may set `NINFER_ALLREDUCE_MAX_MEAN_US` to a finite positive value to enforce
+an explicit mean-latency budget for their qualified machine. For example, setting it to `100`
+opts into the former 100 us gate; that value is not a portable dual-GPU requirement. The test
+prints both device names, driver API version, Windows driver mode, transport, and the configured
+budget. Numerical and guard failures remain failures regardless of that setting. Unset the
+variable to return to correctness-only acceptance with timing reports retained.
 
 ## Single-request serving performance method
 

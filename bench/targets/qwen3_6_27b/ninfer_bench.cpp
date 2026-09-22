@@ -30,8 +30,10 @@ std::string cuda_version_string(int version) {
     return std::to_string(version / 1000) + "." + std::to_string((version % 1000) / 10);
 }
 
-void fill_cuda_environment(ninfer::bench::BenchEnvironment& env, int device) {
-    env.device_id       = device;
+void fill_cuda_environment(ninfer::bench::BenchEnvironment& env, const std::vector<int>& devices) {
+    env.device_id       = devices.front();
+    env.devices         = devices;
+    env.gpu_names.clear();
     int runtime_version = 0;
     if (cudaRuntimeGetVersion(&runtime_version) == cudaSuccess) {
         env.cuda_runtime_version = cuda_version_string(runtime_version);
@@ -40,10 +42,16 @@ void fill_cuda_environment(ninfer::bench::BenchEnvironment& env, int device) {
     if (cudaDriverGetVersion(&driver_version) == cudaSuccess) {
         env.cuda_driver_version = cuda_version_string(driver_version);
     }
-    cudaDeviceProp properties{};
-    if (cudaGetDeviceProperties(&properties, device) == cudaSuccess) {
-        env.gpu_name = properties.name;
+    for (const int device : devices) {
+        cudaDeviceProp properties{};
+        const auto status = cudaGetDeviceProperties(&properties, device);
+        if (status != cudaSuccess) {
+            throw std::runtime_error("cudaGetDeviceProperties: " +
+                                     std::string(cudaGetErrorString(status)));
+        }
+        env.gpu_names.emplace_back(properties.name);
     }
+    env.gpu_name = env.gpu_names.front();
 }
 
 void require_cuda(cudaError_t status, const char* operation) {
@@ -150,6 +158,8 @@ int main(int argc, char** argv) {
         ninfer::EngineOptions engine_options;
         engine_options.artifact_path = options.artifact_path;
         engine_options.device        = options.device;
+        engine_options.tp            = options.tp;
+        engine_options.devices       = options.devices;
         engine_options.max_context   = max_context;
         engine_options.kv_capacity   = ninfer::KvCapacityPolicy::explicit_capacity(max_context);
         engine_options.prefill_chunk = options.prefill_chunk;
@@ -163,6 +173,7 @@ int main(int argc, char** argv) {
 
         ninfer::bench::BenchEnvironment env;
         env.artifact_path            = options.artifact_path;
+        env.tp                       = options.tp;
         env.artifact_file_size_bytes = ninfer::bench::file_size_or_zero(options.artifact_path);
         env.max_context              = max_context;
         env.prefill_chunk            = options.prefill_chunk;
@@ -181,9 +192,10 @@ int main(int argc, char** argv) {
 
         std::cerr << "[ninfer_bench] loading " << options.artifact_path
                   << " (max_context=" << max_context
+                  << ", tp=" << options.tp
                   << ", kv_cache=" << ninfer::bench::kv_cache_name(options.kv_cache) << ")\n";
         ninfer::Engine engine(std::move(engine_options));
-        fill_cuda_environment(env, options.device);
+        fill_cuda_environment(env, options.devices);
         env.load   = engine.load_summary();
         env.memory = engine.memory_summary();
 

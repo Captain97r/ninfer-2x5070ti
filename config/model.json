@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "repository": "neroued/Qwen3.8-27B-nvfp4-NInfer",
+  "revision": "204e3d92c30d9d05f3300d2f52e443ad1edf6ddf",
+  "filename": "qwen3_8_27b_nvfp4.ninfer",
+  "url": "https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer/resolve/204e3d92c30d9d05f3300d2f52e443ad1edf6ddf/qwen3_8_27b_nvfp4.ninfer?download=true",
+  "bytes": 21492695040,
+  "sha256": "bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32",
+  "container_version": 2,
+  "magic_hex": "4E494E4645520002",
+  "model_id": "qwen3.8-27b",
+  "weights_id": "nvfp4",
+  "target_key": "qwen3_8_27b",
+  "default_directory": "C:\\LLM\\neroued\\Qwen3.8-27B-nvfp4-NInfer-v2",
+  "embedded_mtp": true,
+  "embedded_frontend": true,
+  "source_manifest": "https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer/blob/204e3d92c30d9d05f3300d2f52e443ad1edf6ddf/artifact-manifest.json"
+}

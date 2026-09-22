@@ -491,10 +491,10 @@ capture and transport probes all live in `tools/tp2/`. The 1M needle, soak and p
   rejected together with `--vision`, because the encoder ropes 2-D image-grid positions.
 - **DFlash is rejected at `--tp 2`.** It remains a 35B-A3B text-only backend, and that target has no
   tensor-parallel path at all.
-- **MTP prefix reuse resets at `--tp 2`.** Resuming a prefix drives the MTP head from a retained
-  target hidden state that only rank 0 holds, so `--tp 2 --spec mtp` downgrades every reuse to a
-  full prefill. The answer is unchanged and no request fails; the saving is lost. The fix is
-  separable.
+- **Text suffix prefix reuse works with MTP at `--tp 2`.** Append and rewrite-checkpoint
+  continuation copy the retained normalized hidden to the second GPU once, rebuild the missing
+  MTP KV column on both ranks, and restore both ranks' GDN checkpoint state when rewinding.
+  Exact prompt hits with no suffix and multimodal reuse still fall back to a full prefill.
 - **A resubmission whose reusable prefix covers the whole prompt is recomputed at `--tp 2`** — the
   planner's zero-suffix path. It releases the lane cleanly; an earlier form threw and bricked the
   engine.

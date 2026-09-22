@@ -1,4 +1,4 @@
-﻿find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # This target deliberately receives no src/, CUDA, artifact, kernel, or target
 # include root. It proves that the installed product headers stand alone.
@@ -148,6 +148,12 @@ ninfer_add_test(ninfer_qwen3_8_27b_tp2_real_test
   LIBRARIES ninfer_engine)
 target_link_libraries(ninfer_qwen3_8_27b_tp2_real_test PRIVATE ${NINFER_CUDART_TARGET})
 set_tests_properties(ninfer_qwen3_8_27b_tp2_real_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+# TP2-only prefix state regression: cached versus cold generation, eager and CUDA Graphs.
+ninfer_add_test(ninfer_qwen3_8_27b_prefix_tp2_real_test
+  SOURCES targets/qwen3_6_27b/test_engine_prefix_tp2_real.cpp
+  LIBRARIES ninfer_engine)
+target_link_libraries(ninfer_qwen3_8_27b_prefix_tp2_real_test PRIVATE ${NINFER_CUDART_TARGET})
+set_tests_properties(ninfer_qwen3_8_27b_prefix_tp2_real_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
 # MTP3 speculative decoding under TP2. Opt-in on the same env/device gate as its siblings; the
 # timeout is larger because every leg runs four engines (tp1/tp2 x MTP/off).
 ninfer_add_test(ninfer_qwen3_8_27b_mtp_tp2_real_test
@@ -320,6 +326,9 @@ ninfer_add_op_test(ninfer_rope_yarn_test
 ninfer_add_op_test(ninfer_allreduce_test
   SOURCES ops/test_allreduce.cpp
   LIBRARIES ninfer_ops)
+ninfer_add_op_test(ninfer_peer_mailbox_test
+  SOURCES ops/test_peer_mailbox.cu
+  LIBRARIES ninfer_ops)
 
 # Tensor-parallel split forms. Same two-device requirement and skip code as the collectives above.
 ninfer_add_op_test(ninfer_linear_split_test
@@ -361,6 +370,10 @@ ninfer_add_op_test(ninfer_gqa_attention_long_context_test
   SOURCES ops/test_gqa_attention_long_context.cpp
   LIBRARIES ninfer_ops)
 set_tests_properties(ninfer_gqa_attention_long_context_test PROPERTIES TIMEOUT 1800)
+ninfer_add_op_test(ninfer_gqa_tp2_sm70_test
+  SOURCES ops/test_gqa_tp2_sm70.cpp
+  LIBRARIES ninfer_ops)
+set_tests_properties(ninfer_gqa_tp2_sm70_test PROPERTIES TIMEOUT 600)
 ninfer_add_op_test(ninfer_bidirectional_gqa_attention_test
   SOURCES ops/test_bidirectional_gqa_attention.cpp
   LIBRARIES ninfer_ops)

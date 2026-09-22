@@ -742,6 +742,13 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
                 LinearStateSlots::rewrite_checkpoint_state_slot(sequence.lane, max_concurrency),
                 LinearStateSlots::current_state_slot(sequence.lane, max_concurrency),
                 device.stream);
+            if (peer) {
+                const ScopedDevice scope(peer->device.device);
+                peer->decoder->linear_attention.copy_slot(
+                    LinearStateSlots::rewrite_checkpoint_state_slot(sequence.lane, max_concurrency),
+                    LinearStateSlots::current_state_slot(sequence.lane, max_concurrency),
+                    peer->device.stream);
+            }
             if (base == prompt_tokens) { copy_tail(sequence, sequence.rewrite_checkpoint_hidden); }
             sequence.ledger.resize(base);
         } else {
@@ -1414,6 +1421,7 @@ void ProgramImplCore::prepare_graphs() {
     const auto synchronize_all = [&] {
         if (peer) { peer->device.synchronize(); }
         device.synchronize();
+        if (peer_mailbox) { peer_mailbox->validate_completed_round(); }
     };
 
     std::vector<PagedKVAllocation> text_capture_allocations;
@@ -2460,6 +2468,9 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
                                         envelope, executable);
         if (peer) { peer->device.synchronize(); }
         device.synchronize();
+        // A skipped mailbox reduction invalidates this round even when there is no next
+        // graph replay. Reject it before reading tokens or changing the sequence ledger.
+        if (peer_mailbox) { peer_mailbox->validate_completed_round(); }
 
         const double seconds = std::chrono::duration<double>(Clock::now() - start).count();
         for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -2600,6 +2611,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         // rank 1 has not finished contributing to.
         if (peer) { peer->device.synchronize(); }
         device.synchronize();
+        if (peer_mailbox) { peer_mailbox->validate_completed_round(); }
         check_peer_mtp_egress(lanes.size());
 
         const double seconds = std::chrono::duration<double>(Clock::now() - started).count();

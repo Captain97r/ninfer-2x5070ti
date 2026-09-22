@@ -23,7 +23,8 @@ namespace ninfer::serve {
 GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
                                                 const RequestLimits& limits);
 
-std::optional<bool> parse_openai_preserve_thinking(const nlohmann::json& body);
+// Shared Chat/Responses template options. Merge explicit aliases and reject conflicts.
+void parse_openai_template_options(const nlohmann::json& body, GenerationRequest& out);
 
 // Non-streaming chat completion response body (JSON string). When `reasoning` is
 // non-empty it is attached as `message.reasoning_content` (the DeepSeek/vLLM-style
@@ -65,9 +66,11 @@ std::string make_chat_chunk_usage(const std::string& id, const std::string& mode
                                   std::int64_t created, const CompletionUsage& usage);
 std::string sse_done();
 
-// /v1/models payloads.
-std::string make_models_list(const std::string& model_id, std::int64_t created);
-std::string make_model_object(const std::string& model_id, std::int64_t created);
+// /v1/models payloads. Limits and input modalities reflect the server's startup configuration.
+std::string make_models_list(const std::string& model_id, std::int64_t created,
+                             std::uint32_t max_context, bool enable_vision);
+std::string make_model_object(const std::string& model_id, std::int64_t created,
+                              std::uint32_t max_context, bool enable_vision);
 
 // Error object body.
 std::string make_error_body(const ApiError& error);

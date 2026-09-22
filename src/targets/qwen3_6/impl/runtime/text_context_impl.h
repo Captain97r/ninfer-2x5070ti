@@ -2801,6 +2801,17 @@ void TextContext::mtp_forward_decode_batch(const Tensor& ids,
     mtp_forward_core_tp2(ids, hidden, cache_positions, rope_positions, envelope, mtp_hidden);
 }
 
+void TextContext::mtp_append_prefix_bridge(const Tensor& token,
+                                            const std::array<Tensor, 2>& hidden,
+                                            const std::array<Tensor, 2>& positions,
+                                            const std::array<Tensor, 2>& rope_positions,
+                                            ops::GqaExecutionEnvelope envelope) {
+    if (!tp2()) { throw std::logic_error("tensor-parallel MTP bridge requires a peer"); }
+    require_tensor_shape(token, DType::I32, {1}, "MTP bridge token");
+    mtp_prefill_chunk_tp2(token, hidden, positions, rope_positions, envelope,
+                          /*final_chunk=*/false, nullptr, nullptr, nullptr);
+}
+
 void TextContext::mtp_propose_batch(const std::array<Tensor, 2>& hidden,
                                     const std::array<Tensor, 2>& logits, Tensor& draft_tokens) {
     if (!tp2()) { throw std::logic_error("tensor-parallel MTP proposal requires a peer"); }

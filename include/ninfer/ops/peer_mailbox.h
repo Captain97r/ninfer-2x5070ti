@@ -89,6 +89,11 @@ public:
     // pollers' fault report, not engine state.
     [[nodiscard]] volatile std::uint32_t* hang_word() const noexcept;
 
+    // Call after BOTH execution streams have retired, before consuming any round output or
+    // committing state. A timed-out exchange skipped its reduction, including on the final
+    // round of a request. This checks this instance's word and never clears the fault.
+    void validate_completed_round() const;
+
     // Per-slot block-arrival counters, in the memory of device `rank`.
     [[nodiscard]] std::uint32_t* arrival(int rank) const noexcept;
 
@@ -102,10 +107,9 @@ public:
     // view, so plain stores are the whole protocol.
     static void reset_host_flags() noexcept;
 
-    // True when any exchange's hang guard fired on a previous round: a mailbox poller gave up
-    // waiting for its peer. Read once per round, before reset_host_flags(), by the graph launch
-    // path; a reported hang is a hard fault (the round's reductions were skipped), not a stall
-    // to retry.
+    // Launch-side backstop before reset_host_flags(). Completed rounds must already have been
+    // checked with validate_completed_round() before their output is consumed; waiting until
+    // the next launch would let a faulted final round escape without any check.
     [[nodiscard]] static bool hang_reported() noexcept;
 
     // Environment override: NINFER_TP2_MAILBOX=0 keeps every collective on the staged path.

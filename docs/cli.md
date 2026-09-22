@@ -212,10 +212,10 @@ Tensor-parallel execution is implemented for the 27B execution package (`qwen3.6
 (dual-replicated tower, per-rank encode, one media item per request capped at `--image-max-tokens`
 merged vision tokens — default 2048 = 2,097,152 px, at most 16384 = the artifact full 16.7 MP
 budget — see the fork README's "Vision on TP2"); upstream rejected `--tp 2 --vision` at startup. `--spec mtp`
-is supported at `--tp 2`,
-with one behavioral difference: compatible-prefix reuse is downgraded to a full prefill, because
-the MTP head resumes from a retained target hidden state that only the primary device holds. The
-answer is unchanged; only the reuse saving is lost.
+is supported at `--tp 2`, including compatible text-prefix reuse when the request has a
+nonempty suffix. Append and rewrite-checkpoint restoration preserve both ranks' KV and GDN
+state; the MTP bridge copies the retained hidden to the second device once per resumed request.
+Zero-suffix exact hits and multimodal reuse still fall back to full prefill.
 
 The load summary reports weights, KV pool, GDN state, sequence, workspace, CUDA Graph and reserved
 bytes per device, plus a free/total row for each. `--no-cuda-graph` runs decode eagerly; at `--tp 2`

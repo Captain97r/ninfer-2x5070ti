@@ -104,22 +104,25 @@ intermediate artifacts are excluded unless requested or themselves the deliverab
 
 ## Current product contract
 
-NInfer is a from-scratch C++/CUDA inference engine for maximum single-GPU inference performance on
-a small set of explicitly registered checkpoint artifacts. The supported identities are
-`qwen3.6-27b/groupwise-int`, `qwen3.6-27b/nvfp4`, `qwen3.8-27b/groupwise-int`,
-`qwen3.8-27b/nvfp4`, and `qwen3.6-35b-a3b/groupwise-int`. The current implementation is compiled
-for `sm_120a` and tuned and measured on NVIDIA GeForce RTX 5090. All identities execute Text,
-image/video Vision, MTP, prefix reuse, CLI, OpenAI/Anthropic serving, and measurement through the
-same public `.ninfer` Engine route; the 35B-A3B target additionally supports text-only DFlash.
+This branch targets one Qwen3.8-27B session around 100K context on two RTX 5070 Ti
+16 GB GPUs, using tensor parallelism, mixed NVFP4 weights and MTP. Native Windows
+is primary; retain Linux portability. Both cards have 70 SMs (sm_120a). Direct
+CUDA peer access is unavailable on the measured Windows system, so mapped pinned
+host communication is part of the supported execution path. Layer splitting is
+outside this branch's optimization scope.
 
-The current workload is one GPU and one resident model instance with a startup-fixed one to eight
-active requests. The Engine forms one compact decode batch at every round boundary and uses bounded
-FIFO ingress with no request preemption. Large-scale or preemptive continuous batching, priority/QoS
-scheduling, additional checkpoint targets, and retargeting the implementation to another execution
-platform are outside the current product. This is a local, single-owner project. Registered models,
-generated artifacts, and the local workflow are trusted.
-Requirements derived from a different workload, trust model, or deployment model are out of scope
-until that product contract is explicitly changed.
+Retain the inherited registered artifact identities and numerical contracts.
+The selected primary model is a pinned NInfer v2 Qwen3.8 NVFP4 artifact; current
+upstream v3 artifacts are not interchangeable. Large model artifacts live in
+`C:\LLM`, not the repository. Single-GPU reference runs that require more than
+16 GB are not local validation prerequisites: use independent operator oracles,
+saved reference data, and focused TP2 integration tests as appropriate.
+
+The user explicitly authorized platform and architecture adaptation. Prioritize
+correctness, useful prompt/prefix processing, and committed-token throughput for
+this hardware. Other inherited model targets remain reference paths rather than
+new optimization goals. Do not claim local performance from upstream 5090 or
+5060 Ti measurements.
 
 The 27B and 35B-A3B execution packages are peer compile-time Variants of one identity-free Qwen3.6
 family runtime. The family owns the shared `SequencePlan<Variant>`, `RequestPlan<Variant>`, and

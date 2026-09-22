@@ -1,0 +1,25 @@
+{
+  "configured_context_tokens": 102400,
+  "omp_version": "18.2.8",
+  "cached_context_before": null,
+  "discovery_fields": [
+    "max_model_len",
+    "context_length"
+  ],
+  "early_compaction_evidence": {
+    "tokens_before": [
+      23194,
+      30436,
+      24930
+    ],
+    "preceding_stop_reason": "length",
+    "output_tokens": 8192
+  },
+  "launcher_default_output_limit": "configured context, clamped by engine to remaining capacity; explicit client limits honored",
+  "validation": {
+    "server_build": "passed",
+    "openai_schema_test": "passed",
+    "launcher_syntax": "passed",
+    "live_gpu_run": "not run; server remains stopped"
+  }
+}

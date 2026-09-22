@@ -1,0 +1,27 @@
+{
+  "workload": "short CLI smoke; not a long-context benchmark",
+  "model_manifest": "config/model.json",
+  "hardware": "2 x RTX 5070 Ti 16 GB; Windows WDDM; CUDA 13.3",
+  "tp": 2,
+  "devices": [
+    0,
+    1
+  ],
+  "mtp_draft_tokens": 3,
+  "cuda_graphs": true,
+  "kv_dtype": "int8-group64",
+  "context_capacity": 4096,
+  "prompt": "Explain tensor parallel inference in three sentences.",
+  "sampling": "greedy, thinking disabled",
+  "prompt_tokens": 21,
+  "generated_tokens": 64,
+  "load_seconds": 18.803,
+  "prefill_seconds": 0.084,
+  "decode_seconds": 0.506,
+  "reported_decode_tokens_per_second": 124.41,
+  "reported_overall_tokens_per_second": 108.5,
+  "mtp_acceptance_rate_percent": 51.35,
+  "weights_gib_per_device": 10.46,
+  "planned_gib_per_device": 10.89,
+  "exit_code": 0
+}

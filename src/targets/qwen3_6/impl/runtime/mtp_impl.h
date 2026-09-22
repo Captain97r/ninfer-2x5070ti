@@ -120,16 +120,67 @@ void mtp_bridge_and_propose(PrefillContext& state, const Tensor& next_token,
     if (!state.mtp_kv.valid() || !state.execution.io.mtp) {
         throw std::logic_error("MTP bridge requires MTP storage");
     }
-    if (state.execution.peer != nullptr) {
-        // Unreachable backstop, and deliberately kept as one. The bridge resumes the MTP head
-        // from a RETAINED target hidden, which lives only in rank 0's tail/checkpoint stores; the
-        // planner therefore downgrades every tp2 MTP prefix reuse to a full reset before a bridge
-        // can be staged (request_plan_impl.h). Throwing from inside prefill execution would take
-        // the executor down rather than fail one request, which is why the decision is made there.
-        throw std::logic_error("MTP bridge has no tensor-parallel path in this build");
-    }
     if (rope_position.size() != 3) {
         throw std::invalid_argument("MTP bridge requires one three-axis rope position");
+    }
+    if (state.execution.peer != nullptr) {
+        // Exact-hit and multimodal reuse remain planner fallbacks. A text suffix needs only
+        // this missing MTP KV column; its final prefill chunk creates all draft proposals.
+        if (build_proposal || next_embedding != nullptr || !state.mtp_kv_peer.valid()) {
+            throw std::logic_error("tensor-parallel MTP bridge requires a text suffix");
+        }
+        const TpPeerCore& peer = *state.execution.peer;
+        if (!peer.io->mtp || peer.prefill_hidden == nullptr ||
+            previous_hidden.dtype != DType::BF16 || previous_hidden.ne[0] != TextConfig::hidden ||
+            previous_hidden.ne[1] != 1 || previous_hidden.ne[2] != 1 ||
+            previous_hidden.ne[3] != 1 || previous_hidden.data == nullptr) {
+            throw std::logic_error("tensor-parallel MTP bridge storage is unavailable");
+        }
+        const CurrentDevice restore;
+        CUDA_CHECK(cudaSetDevice(state.execution.device.device));
+        state.execution.work.reset();
+        peer.work->reset();
+        Tensor peer_hidden = peer.prefill_hidden->slice(1, 0, 1);
+        // The target's final normalized hidden is replicated. Keep one canonical retained copy
+        // and transfer it once per resumed request, outside CUDA Graph capture. CUDA stages this
+        // copy through host memory when peer access is unavailable (including Windows GeForce).
+        CUDA_CHECK(cudaStreamSynchronize(state.execution.device.stream));
+        CUDA_CHECK(cudaSetDevice(peer.device->device));
+        CUDA_CHECK(cudaMemcpyPeerAsync(peer_hidden.data, peer.device->device,
+                                       previous_hidden.data, state.execution.device.device,
+                                       previous_hidden.bytes(), peer.device->stream));
+        CUDA_CHECK(cudaSetDevice(state.execution.device.device));
+        std::optional<TpExecution> tp = tp_execution(state.execution);
+        tp->mtp_kv = state.mtp_kv_peer;
+        TextContext card(state.execution.device, state.execution.model, state.execution.work,
+                         state.execution.rope_frequency, state.text_kv,
+                         state.execution.linear_attention, state.execution.io,
+                         state.execution.prefill_hidden, state.execution.prefill_chunk,
+                         state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache, &*tp);
+        configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
+                            state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
+        std::array<Tensor, 2> positions = {
+            state.execution.io.mtp->target_positions.slice(0, 0, 1),
+            peer.io->mtp->target_positions.slice(0, 0, 1)};
+        std::array<Tensor, 2> rope_positions = {
+            state.execution.work.alloc(DType::I32, {1, 3}),
+            peer.work->alloc(DType::I32, {1, 3})};
+        for_each_rank(*peer.execution, [&](int rank) {
+            cudaStream_t stream = peer.execution->dev[rank]->stream;
+            ops::set_i32_scalar(positions[rank], position, stream);
+            CUDA_CHECK(cudaMemcpyAsync(rope_positions[rank].data, rope_position.data(),
+                                       rope_position.size_bytes(), cudaMemcpyHostToDevice, stream));
+        });
+        const auto visible = static_cast<std::uint32_t>(position + 1);
+        card.mtp_append_prefix_bridge(next_token, {previous_hidden, peer_hidden}, positions,
+                                       rope_positions, {visible, visible});
+        // The next prefill chunk resets both workspaces and overwrites prefill_hidden. Retire
+        // both streams before releasing the bridge's scratch and host position storage.
+        state.execution.device.synchronize();
+        peer.device->synchronize();
+        state.execution.work.reset();
+        peer.work->reset();
+        return;
     }
     state.execution.work.reset();
     TextContext card(state.execution.device, state.execution.model, state.execution.work,

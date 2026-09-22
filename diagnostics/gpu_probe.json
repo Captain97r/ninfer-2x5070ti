@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "cuda_runtime_version": 13040,
+  "cuda_driver_api_version": 13040,
+  "devices": [
+    {"ordinal": 0, "name": "NVIDIA GeForce RTX 5070 Ti", "compute_capability": "12.0", "sm_count": 70, "warp_size": 32, "shared_memory_per_block_bytes": 49152, "shared_memory_per_block_optin_bytes": 101376, "shared_memory_per_sm_bytes": 102400, "registers_per_block": 65536, "registers_per_sm": 65536, "max_threads_per_sm": 1536, "memory_bus_width_bits": 256, "l2_cache_bytes": 50331648, "free_memory_before_probe_buffers_bytes": 15767437312, "total_memory_bytes": 17066033152, "pci_domain_id": 0, "pci_bus_id": 1, "pci_device_id": 0, "tcc_driver": false},
+    {"ordinal": 1, "name": "NVIDIA GeForce RTX 5070 Ti", "compute_capability": "12.0", "sm_count": 70, "warp_size": 32, "shared_memory_per_block_bytes": 49152, "shared_memory_per_block_optin_bytes": 101376, "shared_memory_per_sm_bytes": 102400, "registers_per_block": 65536, "registers_per_sm": 65536, "max_threads_per_sm": 1536, "memory_bus_width_bits": 256, "l2_cache_bytes": 50331648, "free_memory_before_probe_buffers_bytes": 15767437312, "total_memory_bytes": 17066033152, "pci_domain_id": 0, "pci_bus_id": 3, "pci_device_id": 0, "tcc_driver": false}
+  ],
+  "peer_access": [
+    {"from": 0, "to": 1, "cuda_device_can_access_peer": false},
+    {"from": 1, "to": 0, "cuda_device_can_access_peer": false}
+  ],
+  "staging": {"host_allocation": "cudaHostAllocPortable", "gpu_buffer_bytes_per_device": 16777216, "warmup_iterations": 8, "method": "Serial D2H then H2D; per-iteration steady_clock includes cudaSetDevice and both cudaStreamSynchronize calls; no overlap."},
+  "host_staged_transfers": [
+    {"from": 0, "to": 1, "bytes": 8192, "iterations": 100, "mean_us": 45.506, "median_us": 41.000, "p95_us": 55.300, "effective_payload_GB_per_s": 0.180, "correct": true},
+    {"from": 0, "to": 1, "bytes": 10240, "iterations": 100, "mean_us": 45.016, "median_us": 41.100, "p95_us": 54.300, "effective_payload_GB_per_s": 0.227, "correct": true},
+    {"from": 0, "to": 1, "bytes": 65536, "iterations": 100, "mean_us": 74.941, "median_us": 75.450, "p95_us": 102.000, "effective_payload_GB_per_s": 0.875, "correct": true},
+    {"from": 0, "to": 1, "bytes": 1048576, "iterations": 100, "mean_us": 158.144, "median_us": 149.300, "p95_us": 177.400, "effective_payload_GB_per_s": 6.631, "correct": true},
+    {"from": 0, "to": 1, "bytes": 16777216, "iterations": 40, "mean_us": 1820.023, "median_us": 1812.700, "p95_us": 1888.200, "effective_payload_GB_per_s": 9.218, "correct": true},
+    {"from": 1, "to": 0, "bytes": 8192, "iterations": 100, "mean_us": 32.892, "median_us": 32.200, "p95_us": 36.000, "effective_payload_GB_per_s": 0.249, "correct": true},
+    {"from": 1, "to": 0, "bytes": 10240, "iterations": 100, "mean_us": 33.164, "median_us": 32.400, "p95_us": 36.500, "effective_payload_GB_per_s": 0.309, "correct": true},
+    {"from": 1, "to": 0, "bytes": 65536, "iterations": 100, "mean_us": 70.742, "median_us": 75.500, "p95_us": 80.000, "effective_payload_GB_per_s": 0.926, "correct": true},
+    {"from": 1, "to": 0, "bytes": 1048576, "iterations": 100, "mean_us": 177.582, "median_us": 175.000, "p95_us": 195.100, "effective_payload_GB_per_s": 5.905, "correct": true},
+    {"from": 1, "to": 0, "bytes": 16777216, "iterations": 40, "mean_us": 1801.418, "median_us": 1789.450, "p95_us": 1835.200, "effective_payload_GB_per_s": 9.313, "correct": true}
+  ],
+  "limitations": ["Single run under the current Windows/display workload; WDDM scheduling can add jitter.", "Serial pinned-host staging baseline, not a pipelined transfer implementation or collective benchmark.", "Effective bandwidth counts payload once; each staged transfer crosses PCIe twice.", "Eight warmup iterations do not establish sustained clocks; the three-second load runs after all measured tests.", "No inference, tensor-core, GEMM, attention, or quantization throughput is measured.", "Only CUDA ordinals 0 and 1 are transfer-benchmarked; all visible devices are inventoried."]
+}

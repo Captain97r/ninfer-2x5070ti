@@ -324,6 +324,12 @@ public:
                                   const std::array<Tensor, 2>& kv_table_rows,
                                   ops::GqaExecutionEnvelope envelope,
                                   const std::array<Tensor, 2>& mtp_hidden);
+    // Rebuild the one MTP KV column immediately before a reused text suffix. No proposal is
+    // needed: the suffix's final prefill chunk creates the initial draft window.
+    void mtp_append_prefix_bridge(const Tensor& token, const std::array<Tensor, 2>& hidden,
+                                   const std::array<Tensor, 2>& positions,
+                                   const std::array<Tensor, 2>& rope_positions,
+                                   ops::GqaExecutionEnvelope envelope);
     void mtp_propose_batch(const std::array<Tensor, 2>& hidden,
                            const std::array<Tensor, 2>& logits, Tensor& draft_tokens);
     void mtp_forward_ar_step(const Tensor& token, const std::array<Tensor, 2>& previous_hidden,

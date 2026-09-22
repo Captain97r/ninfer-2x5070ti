@@ -46,7 +46,8 @@ ninfer_bench --weights <artifact.ninfer>
           [--max-ctx <tokens>] [--prefill-chunk <tokens>]
           [--kv-dtype <bf16|int8>]
           [--mtp-draft-tokens <0..5>] [--lm-head-draft]
-          [--device <id>] [--no-cuda-graph] [--profile-measured]
+          [--device <id>] [--tp <1|2>] [--devices <id,id>]
+          [--no-cuda-graph] [--profile-measured]
           [-o, --output <table|json|csv>] [--output-file <path>]
 ```
 
@@ -63,6 +64,23 @@ Example:
 `bf16` selects BF16 KV storage and `int8` selects INT8 group-64 KV storage. MTP is enabled with
 `--mtp-draft-tokens`; `--lm-head-draft` selects the optimized proposal head. CUDA Graph decode is
 enabled by default.
+
+For two GPUs, pass `--tp 2 --devices 0,1`. Device order selects rank 0 first; an explicit
+`--device` must agree with that first id. TP2 requires two distinct device ids and uses the same
+public Engine path for prefill, decode, and MTP:
+
+```bash
+./build/bench/ninfer_bench \
+  --weights /path/to/qwen3_8_27b_nvfp4.ninfer \
+  --tp 2 --devices 0,1 --kv-dtype int8 \
+  --mtp-draft-tokens 3 --lm-head-draft \
+  -pg '2048,128' -r 3 --warmup 1 -o json --output-file tp2.json
+```
+
+JSON schema 12 records `config.tp`, ordered `config.devices`, and each GPU's name and ordinal
+in `environment.devices`. CSV records `tp` and a quoted `devices` list. Timing definitions are
+the same for both tensor-parallel degrees. Memory arena capacities and workspace peaks describe
+rank 0; they are not total VRAM consumption across both GPUs.
 
 `--profile-measured` is a benchmark-only profiler boundary. It requires exactly one selected test
 and `-r 1`, synchronizes after warmup, and brackets only the measured repetition with
@@ -694,6 +712,37 @@ qualification uses the append entry:
 The former `attention_layer` executable composed multiple implementation-level stages and exposed
 private route controls, so it is not retained as a public Op benchmark. Complete mixer and target
 effects are measured through the public Engine benchmark or the target round benchmarks.
+
+## Local TP2 attention split experiment
+
+`ninfer_gqa_tp2_split_bench` isolates the production INT8 partial/reduce kernels for a 12-query,
+2-KV-head TP2 shard (head dimension 256). It compares fixed split caps with the production 70-SM
+broad-graph policy at T=1, 4 and 5. The `sm70_broad_graph` row launches the original 170 splits per
+KV head and selects 70 active splits from device positions in the qualified 81,920..131,077
+visible-key interval. Outside that interval the production policy keeps its original split count.
+
+```bash
+cmake --build build --parallel --target ninfer_gqa_tp2_split_bench ninfer_gqa_tp2_sm70_test
+./build/bench/ninfer_gqa_tp2_split_bench --device 0 --context 100000 --repeat 31
+./build/bench/ninfer_gqa_tp2_split_bench --device 1 --context 100000 --repeat 31
+./build/tests/ninfer_gqa_tp2_sm70_test 0
+./build/tests/ninfer_gqa_tp2_sm70_test 1
+```
+
+Configure with `NINFER_BUILD_BENCHMARKS=ON` and `BUILD_TESTING=ON`. Native Windows uses the
+corresponding `.exe` paths under the selected build directory. The experiment links only core
+helpers; the public-Op regression links the production launchers.
+
+Every candidate is checked against the existing independent FP64 oracle using represented BF16
+queries and decoded INT8-G64 cache, across all 12 heads and query tokens. It then times cold-cache
+CUDA Graph replay with interleaved candidates, ten warmup replays, and a 128 MiB flush outside the
+CUDA event interval. CSV reports minimum, median, p90, relative L2 error and its criterion. The
+production compiler's relocatable-device-code mode is enabled for this benchmark.
+
+The tuning applies to one active request on a 70-SM `sm_120` GPU, INT8 cache and T=1/4/5. The local
+100K measurements reduce attention latency by 13-22%; this isolated Op result does not measure
+TP communication, prefill throughput, model accuracy or an end-to-end inference speedup. See
+[the local measurements](../docs/performance.md#local-rtx-5070-ti-attention-tuning).
 
 ## Pointwise Op benchmarks
 

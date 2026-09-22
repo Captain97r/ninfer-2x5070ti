@@ -148,6 +148,94 @@ int test_instruction_message_order() {
     return failures;
 }
 
+int test_chat_template_thinking_aliases() {
+    const Json base = {{"model", "qwen3.8-27b"}, {"input", "hello"}, {"stream", true}};
+    int failures    = 0;
+    Json client     = base;
+    client["chat_template_kwargs"] =
+        Json{{"preserve_thinking", true}, {"enable_thinking", true}, {"reasoning_effort", "xhigh"}};
+    ResponsesRequest request = parse_responses_request(client, limits());
+    compose_responses_generation_messages(request, {});
+    const ResolvedPromptSemantics semantics =
+        resolve_prompt_semantics(request.generation, ServeOptions{}, effort_capabilities());
+    const ninfer::PromptInput prompt = to_prompt_input(request.generation, semantics, {});
+    failures += check(request.stream && request.generation.enable_thinking == true &&
+                          request.generation.preserve_thinking == true &&
+                          request.generation.reasoning_effort == RequestedReasoningEffort::XHigh,
+                      "Responses nested streaming thinking options were not parsed");
+    failures += check(prompt.options.enable_thinking && prompt.options.preserve_thinking &&
+                          prompt.options.reasoning_effort == ninfer::ReasoningEffort::XHigh,
+                      "Responses nested thinking options did not reach PromptInput");
+
+    Json same         = client;
+    same["reasoning"] = Json{{"effort", "xhigh"}};
+    failures += check(parse_responses_request(same, limits()).generation.reasoning_effort ==
+                          RequestedReasoningEffort::XHigh,
+                      "Responses matching native and nested effort rejected");
+    Json conflict         = same;
+    conflict["reasoning"] = Json{{"effort", "low"}};
+    failures += check(api_code([&] { (void)parse_responses_request(conflict, limits()); }) ==
+                          "conflicting_template_option",
+                      "Responses conflicting native and nested effort accepted");
+
+    Json nulls                      = base;
+    nulls["reasoning"]              = Json{{"effort", nullptr}};
+    nulls["chat_template_kwargs"]   = Json{{"enable_thinking", nullptr},
+                                           {"reasoning_effort", nullptr},
+                                           {"preserve_thinking", nullptr}};
+    const GenerationRequest omitted = parse_responses_request(nulls, limits()).generation;
+    failures +=
+        check(!omitted.enable_thinking && !omitted.reasoning_effort && !omitted.preserve_thinking,
+              "Responses null thinking aliases must remain omitted");
+    ServeOptions server;
+    server.enable_thinking   = false;
+    server.preserve_thinking = true;
+    const ResolvedPromptSemantics defaults =
+        resolve_prompt_semantics(omitted, server, effort_capabilities());
+    failures +=
+        check(!defaults.enable_thinking && defaults.preserve_thinking && !defaults.reasoning_effort,
+              "Responses null thinking aliases changed server/template defaults");
+    Json nested_wins         = client;
+    nested_wins["reasoning"] = Json{{"effort", nullptr}};
+    failures += check(parse_responses_request(nested_wins, limits()).generation.reasoning_effort ==
+                          RequestedReasoningEffort::XHigh,
+                      "Responses native null suppressed nested effort");
+    Json native_wins         = nulls;
+    native_wins["reasoning"] = Json{{"effort", "low"}};
+    failures += check(parse_responses_request(native_wins, limits()).generation.reasoning_effort ==
+                          RequestedReasoningEffort::Low,
+                      "Responses nested null suppressed native effort");
+
+    Json disabled = base;
+    disabled["chat_template_kwargs"] =
+        Json{{"enable_thinking", false}, {"reasoning_effort", "none"}};
+    const ResolvedPromptSemantics off =
+        resolve_prompt_semantics(parse_responses_request(disabled, limits()).generation,
+                                 ServeOptions{}, effort_capabilities());
+    failures += check(!off.enable_thinking && !off.reasoning_effort,
+                      "Responses nested false/none did not disable thinking");
+    disabled["chat_template_kwargs"]["reasoning_effort"] = "xhigh";
+    failures += check(api_code([&] {
+                          (void)resolve_prompt_semantics(
+                              parse_responses_request(disabled, limits()).generation,
+                              ServeOptions{}, effort_capabilities());
+                      }) == "conflicting_template_option",
+                      "Responses nested thinking toggle/effort conflict accepted");
+    for (const Json& value : {Json("true"), Json(1)}) {
+        Json invalid                    = base;
+        invalid["chat_template_kwargs"] = Json{{"enable_thinking", value}};
+        failures += check(throws_api([&] { (void)parse_responses_request(invalid, limits()); }),
+                          "Responses non-boolean nested enable_thinking accepted");
+    }
+    for (const Json& value : {Json(true), Json(1), Json("ultra")}) {
+        Json invalid                    = base;
+        invalid["chat_template_kwargs"] = Json{{"reasoning_effort", value}};
+        failures += check(throws_api([&] { (void)parse_responses_request(invalid, limits()); }),
+                          "Responses invalid nested reasoning_effort accepted");
+    }
+    return failures;
+}
+
 int test_reasoning_effort() {
     const Json base = {{"model", "m"}, {"input", "hello"}, {"max_output_tokens", 32}};
     int failures    = 0;
@@ -521,6 +609,7 @@ int main() {
     failures += test_instruction_message_order();
     failures += test_preserve_thinking_options_and_inheritance();
     failures += test_reasoning_effort();
+    failures += test_chat_template_thinking_aliases();
     failures += test_typed_items_and_tools();
     failures += test_explicit_rejections();
     failures += test_response_object();
