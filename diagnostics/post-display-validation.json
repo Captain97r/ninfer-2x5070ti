@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "scope": "Display moved from discrete GPU to motherboard and PC rebooted; same engine and 102400-token settings. New context and further changes are recorded separately.",
+  "engine_revision": "85e33e4a",
+  "hardware": "2 x RTX5070Ti16GB, 70SM, nativeWindowsWDDM, both display_active Disabled, Gen5 x8/x4 under load, no CUDA peer access in either direction.",
+  "artifact": "Pinned Qwen3.8-27B NInfer v2 mixed NVFP4",
+  "model_method": "Same cycling corpus, TP2/MTP3 optimized draft head, INT8G64KV, context102400/chunk1024, one warmup and three repetitions in each saved run; pre/post reboot runs are separate sessions.",
+  "config_equal": true,
+  "model_workloads": [
+    {
+      "label": "pp8192+tg256",
+      "before": {
+        "prefill_tok_s_mean": 3206.52237,
+        "prefill_tok_s_stddev": 0.705039444,
+        "decode_output_tok_s_mean": 206.7586303,
+        "decode_output_tok_s_stddev": 0.03059401921
+      },
+      "after": {
+        "prefill_tok_s_mean": 3212.553121,
+        "prefill_tok_s_stddev": 1.600574508,
+        "decode_output_tok_s_mean": 206.7253398,
+        "decode_output_tok_s_stddev": 0.1850491891
+      },
+      "speculative_counts_equal": true,
+      "pp_change_percent": 0.18807762130159666,
+      "tg_change_percent": -0.016101141679880637
+    },
+    {
+      "label": "pp100000+tg512",
+      "before": {
+        "prefill_tok_s_mean": 2324.173382,
+        "prefill_tok_s_stddev": 0.4086411167,
+        "decode_output_tok_s_mean": 178.010293,
+        "decode_output_tok_s_stddev": 0.09021127669
+      },
+      "after": {
+        "prefill_tok_s_mean": 2326.114615,
+        "prefill_tok_s_stddev": 0.3177007674,
+        "decode_output_tok_s_mean": 178.0140855,
+        "decode_output_tok_s_stddev": 0.08170376145
+      },
+      "speculative_counts_equal": true,
+      "pp_change_percent": 0.08352358800054471,
+      "tg_change_percent": 0.002130494779883918
+    }
+  ],
+  "short_serving": {
+    "method": "Three fixed short-prompt scenarios x three seeds, output cap1024, same warmups/configuration as prior record; retained caps and one40-token earlyPython stop, no task scoring.",
+    "summary": [
+      {
+        "fixture": "scenario_code_python",
+        "requests": 3,
+        "finish_reasons": [
+          "length",
+          "length",
+          "stop"
+        ],
+        "prompt_tokens": {
+          "n": 3,
+          "mean": 122.0,
+          "sample_stddev": 0.0
+        },
+        "computed_prefill_tokens": {
+          "n": 3,
+          "mean": 43.333333333333336,
+          "sample_stddev": 68.12733176437584
+        },
+        "prefix_cache_hit_tokens": {
+          "n": 3,
+          "mean": 78.66666666666667,
+          "sample_stddev": 68.12733176437584
+        },
+        "completion_tokens": {
+          "n": 3,
+          "mean": 696.0,
+          "sample_stddev": 568.1126648825917
+        },
+        "prefill_tok_s": {
+          "n": 3,
+          "mean": 373.2298604282525,
+          "sample_stddev": 497.24257992669936
+        },
+        "decode_tok_s": {
+          "n": 3,
+          "mean": 148.81042264100054,
+          "sample_stddev": 9.648172159642865
+        },
+        "server_ttft_ms": {
+          "n": 3,
+          "mean": 74.58083333333333,
+          "sample_stddev": 47.53695573607268
+        },
+        "speculative_acceptance": {
+          "n": 3,
+          "mean": 0.6012230514096185,
+          "sample_stddev": 0.0606362205768446
+        },
+        "speculative_tokens_per_round": {
+          "n": 3,
+          "mean": 2.801889566864693,
+          "sample_stddev": 0.18061271829836847
+        }
+      },
+      {
+        "fixture": "scenario_story_en_mystery",
+        "requests": 3,
+        "finish_reasons": [
+          "length",
+          "length",
+          "length"
+        ],
+        "prompt_tokens": {
+          "n": 3,
+          "mean": 131.0,
+          "sample_stddev": 0.0
+        },
+        "computed_prefill_tokens": {
+          "n": 3,
+          "mean": 46.333333333333336,
+          "sample_stddev": 73.32348418708247
+        },
+        "prefix_cache_hit_tokens": {
+          "n": 3,
+          "mean": 84.66666666666667,
+          "sample_stddev": 73.32348418708247
+        },
+        "completion_tokens": {
+          "n": 3,
+          "mean": 1024.0,
+          "sample_stddev": 0.0
+        },
+        "prefill_tok_s": {
+          "n": 3,
+          "mean": 418.0491273744101,
+          "sample_stddev": 610.5102858656523
+        },
+        "decode_tok_s": {
+          "n": 3,
+          "mean": 117.15273045106404,
+          "sample_stddev": 1.7507969358744673
+        },
+        "server_ttft_ms": {
+          "n": 3,
+          "mean": 80.19279999999999,
+          "sample_stddev": 32.25397482900363
+        },
+        "speculative_acceptance": {
+          "n": 3,
+          "mean": 0.40228792220915466,
+          "sample_stddev": 0.011722830708323794
+        },
+        "speculative_tokens_per_round": {
+          "n": 3,
+          "mean": 2.205981323926259,
+          "sample_stddev": 0.034643420306956205
+        }
+      },
+      {
+        "fixture": "scenario_structured_jsonl",
+        "requests": 3,
+        "finish_reasons": [
+          "length",
+          "length",
+          "length"
+        ],
+        "prompt_tokens": {
+          "n": 3,
+          "mean": 130.0,
+          "sample_stddev": 0.0
+        },
+        "computed_prefill_tokens": {
+          "n": 3,
+          "mean": 46.0,
+          "sample_stddev": 72.74613391789285
+        },
+        "prefix_cache_hit_tokens": {
+          "n": 3,
+          "mean": 84.0,
+          "sample_stddev": 72.74613391789285
+        },
+        "completion_tokens": {
+          "n": 3,
+          "mean": 1024.0,
+          "sample_stddev": 0.0
+        },
+        "prefill_tok_s": {
+          "n": 3,
+          "mean": 448.0595538647355,
+          "sample_stddev": 618.5183380555397
+        },
+        "decode_tok_s": {
+          "n": 3,
+          "mean": 204.96142358037932,
+          "sample_stddev": 0.7857022694991735
+        },
+        "server_ttft_ms": {
+          "n": 3,
+          "mean": 66.99393333333333,
+          "sample_stddev": 39.23344658443014
+        },
+        "speculative_acceptance": {
+          "n": 3,
+          "mean": 0.9554696885098896,
+          "sample_stddev": 0.003917712421916871
+        },
+        "speculative_tokens_per_round": {
+          "n": 3,
+          "mean": 3.864025594288752,
+          "sample_stddev": 0.015841452333900306
+        }
+      }
+    ],
+    "all_observables_equal": true,
+    "all_prompt_counts_equal": true
+  },
+  "interpretation": "No meaningful throughput change measured from the display move alone. PP changes under0.2%; syntheticTG effectively identical and short-serving rates near prior values.",
+  "limits": [
+    "Display inactivity does not change WDDM or enable CUDA P2P.",
+    "Synthetic high-acceptance TG is not ordinary coding throughput.",
+    "Before/after reboot blocks do not isolate every environmental variable."
+  ],
+  "evidence": {
+    "before": "build/optimization-research/stage18-pipeline.json",
+    "after": "build/post-display/same-config.json",
+    "short_serving": "build/serving-comparison/post-display-same-config/report.json",
+    "hardware": "build/post-display/hardware-probe.json"
+  }
+}

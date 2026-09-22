@@ -35,8 +35,12 @@ def main():
                         default=ROOT / "tests/data/quality-panel.json")
     parser.add_argument("--binary", type=Path, default=ROOT / "build/windows/apps/ninfer-serve.exe")
     parser.add_argument("--weights", type=Path, default=WEIGHTS)
+    parser.add_argument("--context", type=int, default=102400,
+                        help="Session/KV tokens; default 102400 matches the frozen references")
     parser.add_argument("--no-spec", action="store_true", help="Target-only diagnostic control")
     args = parser.parse_args()
+    if not 512 <= args.context <= 262144:
+        raise ValueError("context must be within the native 512..262144-token range")
     if os.name != "nt" or sys.version_info[:2] != (3, 11):
         raise RuntimeError("Use Python 3.11 on Windows for this launch configuration")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.label):
@@ -53,10 +57,10 @@ def main():
     with socket.socket() as check:
         check.bind(("127.0.0.1", 19080))
 
-    runtime_options = ["--tp", "2", "--devices", "0,1", "--max-context", "102400",
-                       "--kv-capacity", "102400", "--kv-dtype", "int8",
+    runtime_options = ["--tp", "2", "--devices", "0,1", "--max-context", str(args.context),
+                       "--kv-capacity", str(args.context), "--kv-dtype", "int8",
                        "--prefill-chunk", "1024", "--vision", "--image-max-tokens", "2048",
-                       "--max-concurrency", "1", "--default-max-tokens", "102400"]
+                       "--max-concurrency", "1", "--default-max-tokens", str(args.context)]
     if not args.no_spec:
         runtime_options += ["--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft"]
     print("Hashing the exact model artifact for the comparison contract...", flush=True)
@@ -90,7 +94,7 @@ def main():
                 time.sleep(0.25)
             print("Quality server ready for " + args.label, flush=True)
             check = [sys.executable, str(ROOT / "tools/test_quality.py"), "--vision",
-                     "--label", args.label, "--report", str(report),
+                     "--label", args.label, "--report", str(report), "--context", str(args.context),
                      "--runtime-config", str(runtime_path),
                      "--fixtures", str(args.fixtures.resolve(strict=True))]
             if args.baseline:

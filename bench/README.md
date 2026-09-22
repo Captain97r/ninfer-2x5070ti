@@ -1280,3 +1280,38 @@ compared two and four tiles against the former whole-buffer route. Four tiles
 submitted more work and was slightly slower than two. That record preserves the
 historical selection evidence; the current executable measures only the two
 public policies described above.
+
+## Local Windows long-context serving checks
+
+Run these with Python 3.11 while no server owns port 19080. Each helper starts and
+stops its own TP2/MTP3 server, with INT8-G64 KV, native RoPE, chunk 1024, CUDA Graphs,
+vision with 2,048 image tokens, one active request and prefix reuse disabled. Large context values
+require their own memory qualification on the local machine.
+
+```powershell
+py -3.11 tools/bench/context_sweep_windows.py --label long-context --context 196608 --prompt-tokens 8192 100000 180000 --completion-tokens 16384
+py -3.11 tools/bench/qualify_context_windows.py --binary build/windows/apps/ninfer-serve.exe --label near-limit --context 196608
+```
+
+The sweep freezes unique tracked code/document excerpts and every request before
+inference. It records cold prompt throughput, committed generation throughput,
+actual output length and early EOS, full answers, MTP counters, sampled dedicated
+memory and Windows per-process memory. Early/middle/late rates use complete
+one-second committed-token counter intervals; they are elapsed-time sections,
+not exact token quantiles. Short runs without enough complete intervals say so.
+This is throughput evidence, not task-accuracy scoring. Results live under
+`build/context-sweep/<label>/`; the requested output cap is not the actual length.
+
+The qualifier independently scores exact retrieval at roughly 5/50/95% ledger
+depth and absent-key handling, then attempts a real-document request that exceeds
+the remaining context and checks a fresh short request afterward. At context
+exhaustion, `prompt_tokens + completion_tokens -1 == context`: the final emitted
+token needs no cache slot. Early EOS is reported as an unexercised boundary.
+Results live under `build/context-qualification/<label>/`; task scores, runtime
+validation, boundary exercise and exact baseline parity are separate outcomes.
+
+Pass `--binary` to select a preserved engine and `--replay-from` pointing to a
+previous `workload.json` to reuse identical text and sampling controls. Use the
+same context, prompt budgets and workloads for sweep replays. The qualifier also
+compares a validated sibling `report.json` when present. Both helpers preserve
+failed observations and refuse to take over an existing server.

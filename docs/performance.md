@@ -38,6 +38,29 @@ over the loopback OpenAI-compatible HTTP endpoint. Each reported corpus fixture 
 seeds. Values are arithmetic mean ± sample standard deviation, and server warm-up completes before
 the measured requests. The concurrent campaign has its own sustained-wave method below.
 
+## Local dual-5070-Ti display move
+
+After moving the monitor to the motherboard and rebooting, both NVIDIA cards report
+`display_active=Disabled`. CUDA peer access remains unavailable in both directions.
+The loaded links remain Gen5 x8/x4; moving the display does not change the TP2
+communication route.
+
+The unchanged engine and 102,400-token launch were measured again with the same
+cycling corpus, one warmup and three repetitions. Values are means +/- sample
+standard deviations; pre/post measurements are separate sessions.
+
+| Prompt tokens | Before / after PP, tok/s | Before / after TG, tok/s |
+|---:|---:|---:|
+| 8,192 | 3206.52 +/- 0.71 / 3212.55 +/- 1.60 | 206.76 +/- 0.03 / 206.73 +/- 0.19 |
+| 100,000 | 2324.17 +/- 0.41 / 2326.11 +/- 0.32 | 178.01 +/- 0.09 / 178.01 +/- 0.08 |
+
+All changes are below 0.2%; this does not establish a useful inference speedup.
+The same nine short serving requests measured 148.81 +/- 9.65 tok/s for Python,
+117.15 +/- 1.75 for prose, and 204.96 +/- 0.79 for JSONL. Every observable response
+matches its prior reference. Eight responses hit the 1,024-token cap and one
+Python response stops after 40 tokens, so these remain throughput/parity checks,
+not completed-task scores. [Evidence](../diagnostics/post-display-validation.json).
+
 ## Local RTX 5070 Ti attention tuning
 
 The 70-SM `sm_120` profile automatically selects 70 active splits per KV head for INT8-G64
