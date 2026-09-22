@@ -4,3 +4,7 @@
 # core.autocrlf on Windows would otherwise materialize CRLF files whose sha256 no longer
 # matches the compiled-in digest, failing every frontend/executor test on Windows.
 tests/fixtures/frontend/*.jinja text eol=lf
+
+# Quality references bind these exact bytes, including line endings.
+tests/data/quality-panel.json text eol=lf
+tests/data/retrieval-panel.json text eol=lf
