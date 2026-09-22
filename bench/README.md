@@ -1032,3 +1032,21 @@ device order. Eager execution is slower. The next runtime experiment should sele
 rank-zero acceptance during CUDA capture and retain replicated acceptance eagerly.
 Runtime integration and end-to-end gains remain unproven; the measured benefit is
 for this acceptance pipeline. [Validation and timing record](../diagnostics/rank0-acceptance-op-validation.json).
+
+## Local TP2 mailbox geometry experiment
+
+`ninfer_mailbox_geometry_bench --devices 0 1 --qualify-only` checks the actual
+private mailbox sum kernel in place, including every output from 137 exchanges,
+changing inputs, both producer skew directions, independent FP64/BF16 arithmetic,
+published payloads, counters, flags and guards. Run the default 31 paired samples
+with `--devices 0 1`, then `--devices 1 0`. Retired timeout flags are checked after
+every replay; reset/input restore are excluded from timing. The captured end event
+joins both ranks. This target matches production RDC compilation.
+
+The 40 KiB experiment compares production `3x256` against `1x256`, keeping grouping,
+fences, mailbox ownership and per-element addition unchanged. The 10 KiB control
+uses the same one-block launch on both routes. Local paired median joined latency
+was 1.6-2.3% higher with the 40 KiB one-block candidate across both device orders
+and skew settings, so **production remains at three blocks**. No inference speed
+claim or runtime change follows from this homogeneous exchange-chain benchmark.
+See [qualification and timings](../diagnostics/mailbox-geometry-validation.json).

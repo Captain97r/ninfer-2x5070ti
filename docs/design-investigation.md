@@ -373,6 +373,14 @@ These are schedule counts, not measured timing shares. Ordinary decoding retains
 128 hidden allreduces and one T1 target-logit gather per token. Do not apply eager
 allreduce timings to captured mailbox collectives, which use a different path.
 
+A bounded exact mailbox launch experiment compared three versus one 256-thread
+blocks for the 40 KiB hidden reduction. All complete outputs, publication state
+and guards passed in both device orders, including changed replay inputs and
+producer skew. One block increased paired median joined latency by 1.6-2.3%, so
+three blocks is retained. These 137-exchange chains are not full model timings;
+further protocol/access changes lack supporting evidence from this experiment.
+[Evidence](../diagnostics/mailbox-geometry-validation.json).
+
 ### 3. Retune actual 70-SM FP4 and FP8 shapes
 
 [NVFP4 schedules](../src/ops/linear/nvfp4/nvfp4_config.h#L253) explicitly name

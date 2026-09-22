@@ -127,3 +127,12 @@ ninfer_add_op_bench(ninfer_fp8_gdn_tp2_access_bench
   SOURCES ops/fp8_gdn_tp2_access_bench.cu)
 target_include_directories(ninfer_fp8_gdn_tp2_access_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_fp8_gdn_tp2_access_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+# Exact mailbox geometry experiment; directly instantiates the unchanged private kernel.
+# Link core only so the allreduce TU does not define that header kernel a second time.
+add_executable(ninfer_mailbox_geometry_bench ops/mailbox_geometry_bench.cu)
+target_include_directories(ninfer_mailbox_geometry_bench PRIVATE
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ninfer_mailbox_geometry_bench PRIVATE ninfer_core)
+set_target_properties(ninfer_mailbox_geometry_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_compile_options(ninfer_mailbox_geometry_bench PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)

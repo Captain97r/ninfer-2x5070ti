@@ -1,0 +1,331 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows WDDM, no CUDA peer access",
+  "scope": "Homogeneous captured chains of 137 exact in-place BF16 mailbox sums; not complete inference",
+  "decision": "Retain production three-block geometry for 40 KiB. One block is consistently slower; no runtime change.",
+  "production_dispatch_changed": false,
+  "method": {
+    "samples": 31,
+    "warmup": 5,
+    "threads_per_block": 256,
+    "elements_per_vector": 8,
+    "vectors_per_thread_group": 4,
+    "production_blocks_10KiB": 1,
+    "production_blocks_40KiB": 3,
+    "candidate_blocks": 1,
+    "order": "Alternating paired routes, both device orders, with/without alternating producer skew",
+    "timing": "Both-rank captured join; input restore and retired mailbox reset excluded; fault flag checked after every timed/warmup replay outside timing",
+    "compilation": "RDC enabled, same as the production mailbox kernel"
+  },
+  "qualification": {
+    "both_device_orders_passed": true,
+    "all_outputs": "Every BF16 output for all 137 calls, both ranks, both sizes, three changing epochs and both producer-skew schedules",
+    "oracle": "Independent finite BF16 decode to FP64, exact two-operand mathematical sum, integer ties-to-even encoding directly to BF16",
+    "input_domain": "Signed zero, rounding ties, cancellation, wide exponent differences, finite overflow, deterministic dense finite values; no NaN/subnormal claim",
+    "state_and_lifetimes": "Immutable input seeds, complete mapped publication images, host/device guards, arrival counters, release flags and per-replay timeout status checked",
+    "timed_outputs": "Each route retains and verifies its final timed result before any reset; exact candidate/baseline BF16 comparison"
+  },
+  "measurements": [
+    {
+      "devices": [
+        0,
+        1
+      ],
+      "bytes_per_rank": 10240,
+      "producer_skew": false,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 0,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 1,
+        "median_joined_device_us": 1025.568008,
+        "p95_joined_device_us": 1051.136017,
+        "median_complete_wall_us": 1037.6,
+        "median_host_enqueue_us": 23.6,
+        "median_joined_us_per_exchange": 7.485897872,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 0,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 1025.760055,
+        "p95_joined_device_us": 1050.207973,
+        "median_complete_wall_us": 1042.3,
+        "median_host_enqueue_us": 25.5,
+        "median_joined_us_per_exchange": 7.487299669,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.002345255
+    },
+    {
+      "devices": [
+        0,
+        1
+      ],
+      "bytes_per_rank": 10240,
+      "producer_skew": true,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 1,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 1,
+        "median_joined_device_us": 1094.112039,
+        "p95_joined_device_us": 1122.431993,
+        "median_complete_wall_us": 1102,
+        "median_host_enqueue_us": 21.9,
+        "median_joined_us_per_exchange": 7.98621926,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 1,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 1093.440056,
+        "p95_joined_device_us": 1117.344022,
+        "median_complete_wall_us": 1101.3,
+        "median_host_enqueue_us": 24.5,
+        "median_joined_us_per_exchange": 7.981314276,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.000349656
+    },
+    {
+      "devices": [
+        0,
+        1
+      ],
+      "bytes_per_rank": 40960,
+      "producer_skew": false,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 0,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 3,
+        "median_joined_device_us": 2276.128054,
+        "p95_joined_device_us": 2291.327953,
+        "median_complete_wall_us": 2288.6,
+        "median_host_enqueue_us": 27.9,
+        "median_joined_us_per_exchange": 16.61407338,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 0,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 2322.207928,
+        "p95_joined_device_us": 2352.288008,
+        "median_complete_wall_us": 2335.6,
+        "median_host_enqueue_us": 23.1,
+        "median_joined_us_per_exchange": 16.95042283,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.019907148
+    },
+    {
+      "devices": [
+        0,
+        1
+      ],
+      "bytes_per_rank": 40960,
+      "producer_skew": true,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 1,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 3,
+        "median_joined_device_us": 2354.496002,
+        "p95_joined_device_us": 2384.19199,
+        "median_complete_wall_us": 2368.8,
+        "median_host_enqueue_us": 24.5,
+        "median_joined_us_per_exchange": 17.18610221,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 1,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 2388.672113,
+        "p95_joined_device_us": 2417.023897,
+        "median_complete_wall_us": 2398.3,
+        "median_host_enqueue_us": 23.1,
+        "median_joined_us_per_exchange": 17.43556287,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.016353782
+    },
+    {
+      "devices": [
+        1,
+        0
+      ],
+      "bytes_per_rank": 10240,
+      "producer_skew": false,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 0,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 1,
+        "median_joined_device_us": 1013.023973,
+        "p95_joined_device_us": 1027.199984,
+        "median_complete_wall_us": 1019.1,
+        "median_host_enqueue_us": 19.6,
+        "median_joined_us_per_exchange": 7.394335566,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 0,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 1015.424013,
+        "p95_joined_device_us": 1045.951962,
+        "median_complete_wall_us": 1024.2,
+        "median_host_enqueue_us": 19.8,
+        "median_joined_us_per_exchange": 7.41185411,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.002623621
+    },
+    {
+      "devices": [
+        1,
+        0
+      ],
+      "bytes_per_rank": 10240,
+      "producer_skew": true,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 1,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 1,
+        "median_joined_device_us": 1114.11202,
+        "p95_joined_device_us": 1151.551962,
+        "median_complete_wall_us": 1125.7,
+        "median_host_enqueue_us": 20.7,
+        "median_joined_us_per_exchange": 8.132204522,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 10240,
+        "skew": 1,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 1112.032056,
+        "p95_joined_device_us": 1142.20798,
+        "median_complete_wall_us": 1125.6,
+        "median_host_enqueue_us": 21.5,
+        "median_joined_us_per_exchange": 8.117022306,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 0.9956166149
+    },
+    {
+      "devices": [
+        1,
+        0
+      ],
+      "bytes_per_rank": 40960,
+      "producer_skew": false,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 0,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 3,
+        "median_joined_device_us": 2280.639887,
+        "p95_joined_device_us": 2295.840025,
+        "median_complete_wall_us": 2290.1,
+        "median_host_enqueue_us": 20.9,
+        "median_joined_us_per_exchange": 16.64700647,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 0,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 2314.08,
+        "p95_joined_device_us": 2339.103937,
+        "median_complete_wall_us": 2328.6,
+        "median_host_enqueue_us": 21.4,
+        "median_joined_us_per_exchange": 16.89109489,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.015684961
+    },
+    {
+      "devices": [
+        1,
+        0
+      ],
+      "bytes_per_rank": 40960,
+      "producer_skew": true,
+      "baseline": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 1,
+        "calls": 137,
+        "route": "production-grid",
+        "blocks": 3,
+        "median_joined_device_us": 2349.503994,
+        "p95_joined_device_us": 2385.152102,
+        "median_complete_wall_us": 2361.1,
+        "median_host_enqueue_us": 21,
+        "median_joined_us_per_exchange": 17.14966419,
+        "qualified_after_timing": true
+      },
+      "candidate": {
+        "type": "summary",
+        "bytes_per_rank": 40960,
+        "skew": 1,
+        "calls": 137,
+        "route": "one-block",
+        "blocks": 1,
+        "median_joined_device_us": 2404.06394,
+        "p95_joined_device_us": 2446.91205,
+        "median_complete_wall_us": 2414.7,
+        "median_host_enqueue_us": 23.5,
+        "median_joined_us_per_exchange": 17.54791197,
+        "qualified_after_timing": true
+      },
+      "median_paired_joined_ratio": 1.023116865
+    }
+  ],
+  "limits": [
+    "These are exchange-chain measurements with resident inputs, not real model-round or token-throughput improvements.",
+    "The 10 KiB control executes identical one-block geometry; small differences there are timing variation.",
+    "A fourth block has no payload work under the current grouping (640 useful threads for 40 KiB); unmeasured protocol/access changes are not justified by this experiment.",
+    "Linux not executed locally."
+  ]
+}
