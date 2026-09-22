@@ -13,6 +13,26 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNINFER_BUILD_BENCHMARKS=ON
 cmake --build build --parallel --target ninfer_bench
 ```
 
+## TP2 draft selection comparison
+
+`ninfer_argmax_row_parallel_bench` compares the former full-logit gather, argmax and remap
+with exact distributed argmax and remap, using both mailbox and staged transport. It uses
+65,536 BF16 rows per rank, resident input logits, CUDA Graphs, ten warmups and 31 interleaved
+samples. Origin-stream events enclose each complete cross-device graph; input uploads,
+oracle checks and model projection are outside timing. Results describe selection latency,
+not an end-to-end generation speedup.
+
+```bash
+cmake --build build -j --target ninfer_argmax_row_parallel_bench
+./build/bench/ninfer_argmax_row_parallel_bench --cols 1
+./build/bench/ninfer_argmax_row_parallel_bench --cols 8 --reverse-devices
+```
+
+The executable checks every compared route against the shared scalar argmax oracle and
+the subsequent token-ID map. The matching `ninfer_argmax_row_parallel_test` covers nonfinite
+values, ties, padded domains, repeated replays, arena reuse and mailbox fallback cases.
+Run it again with `--reverse-devices` to exchange primary/peer roles.
+
 ## Product benchmark
 
 The benchmark slices exact token counts from `bench/fixtures/bench_corpus.ids`, calls

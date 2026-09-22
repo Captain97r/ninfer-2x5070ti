@@ -328,6 +328,9 @@ ninfer_add_op_test(ninfer_rope_yarn_test
 ninfer_add_op_test(ninfer_allreduce_test
   SOURCES ops/test_allreduce.cpp
   LIBRARIES ninfer_ops)
+ninfer_add_op_test(ninfer_argmax_row_parallel_test
+  SOURCES ops/test_argmax_row_parallel.cpp
+  LIBRARIES ninfer_ops)
 ninfer_add_op_test(ninfer_peer_mailbox_test
   SOURCES ops/test_peer_mailbox.cu
   LIBRARIES ninfer_ops)

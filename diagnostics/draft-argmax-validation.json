@@ -1,0 +1,163 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB, Windows WDDM, no CUDA P2P",
+  "comparison": "77cb6647 engine versus exact distributed optimized-draft argmax",
+  "configuration": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "prefill_chunk": 1024,
+    "kv_cache": "int8-group64",
+    "mtp_draft_tokens": 3,
+    "proposal_head": "optimized",
+    "use_cuda_graph": true,
+    "decode_path": "mtp_cuda_graph",
+    "decode_graph_prime": {
+      "primed": true,
+      "output_tokens": 9
+    },
+    "repetitions": 3,
+    "warmup": 1,
+    "corpus_path": "C:\\Users\\capta\\OneDrive\\Documents\\GitHub\\ninfer-2x5070ti\\build\\bench_corpus_100000.ids",
+    "corpus_tokens": 100000
+  },
+  "microbenchmark": {
+    "scope": "captured selection plus remap, resident BF16 logits, route verified via retired mailbox flags",
+    "warmup": 10,
+    "interleaved_samples": 31,
+    "results": {
+      "t1-devices01": {
+        "gather_argmax_remap": {
+          "n": 31.0,
+          "mean_us": 258.987,
+          "median_us": 264.736,
+          "p90_us": 301.76,
+          "stddev_us": 40.02
+        },
+        "distributed_mailbox_remap": {
+          "n": 31.0,
+          "mean_us": 78.005,
+          "median_us": 72.288,
+          "p90_us": 110.144,
+          "stddev_us": 21.362
+        },
+        "distributed_staged_remap": {
+          "n": 31.0,
+          "mean_us": 99.571,
+          "median_us": 95.296,
+          "p90_us": 128.064,
+          "stddev_us": 16.93
+        }
+      },
+      "t8-devices10": {
+        "gather_argmax_remap": {
+          "n": 31.0,
+          "mean_us": 1709.396,
+          "median_us": 1625.952,
+          "p90_us": 1995.488,
+          "stddev_us": 297.788
+        },
+        "distributed_mailbox_remap": {
+          "n": 31.0,
+          "mean_us": 101.144,
+          "median_us": 93.6,
+          "p90_us": 131.84,
+          "stddev_us": 28.221
+        },
+        "distributed_staged_remap": {
+          "n": 31.0,
+          "mean_us": 133.522,
+          "median_us": 117.728,
+          "p90_us": 186.976,
+          "stddev_us": 52.498
+        }
+      }
+    }
+  },
+  "end_to_end": [
+    {
+      "workload": "pp8192+tg256",
+      "prompt_tokens": 8192,
+      "decode_tokens": 256,
+      "before": {
+        "prefill_tok_s_mean": 3048.62506,
+        "prefill_tok_s_stddev": 0.4734696855,
+        "decode_output_tok_s_mean": 194.5691245,
+        "decode_output_tok_s_stddev": 0.1196028995
+      },
+      "after": {
+        "prefill_tok_s_mean": 3044.391896,
+        "prefill_tok_s_stddev": 1.021591831,
+        "decode_output_tok_s_mean": 199.5390602,
+        "decode_output_tok_s_stddev": 0.1974572013
+      },
+      "decode_gain_percent": 2.554329065709493,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 195,
+        "drafted_tokens": 585,
+        "accepted_tokens": 573,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.9794871795,
+        "acceptance_length": 3.938461538,
+        "accepted_per_position": [
+          195,
+          192,
+          186
+        ]
+      }
+    },
+    {
+      "workload": "pp100000+tg512",
+      "prompt_tokens": 100000,
+      "decode_tokens": 512,
+      "before": {
+        "prefill_tok_s_mean": 2238.621411,
+        "prefill_tok_s_stddev": 0.8903915199,
+        "decode_output_tok_s_mean": 168.1418288,
+        "decode_output_tok_s_stddev": 0.2155818145
+      },
+      "after": {
+        "prefill_tok_s_mean": 2238.04726,
+        "prefill_tok_s_stddev": 0.917087111,
+        "decode_output_tok_s_mean": 172.2789089,
+        "decode_output_tok_s_stddev": 0.06835352797
+      },
+      "decode_gain_percent": 2.460470502507106,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 405,
+        "drafted_tokens": 1209,
+        "accepted_tokens": 1131,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.935483871,
+        "acceptance_length": 3.792592593,
+        "accepted_per_position": [
+          387,
+          375,
+          369
+        ]
+      }
+    }
+  ],
+  "correctness": {
+    "distributed_exact_oracle_both_rank_orders": true,
+    "eager_mailbox_staged_exhausted_undersized_paths": true,
+    "ties_nan_infinities_padding_remap_guards": true,
+    "existing_argmax_allreduce_mailbox_tests": true,
+    "quality_panel_observables_unchanged": 18,
+    "quality_panel_task_score": "16/18; two inherited failures retained"
+  },
+  "limits": [
+    "Synthetic cycling token corpus has high MTP acceptance; these are not coding-session throughput claims.",
+    "Three measured repetitions per workload after one warmup; runs are sequential blocks, not randomized engine pairs.",
+    "PP changed by -0.14% at 8K and -0.03% at 100K; this stage targets TG.",
+    "No precision, target verification, sampler or token mapping change."
+  ]
+}

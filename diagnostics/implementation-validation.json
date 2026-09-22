@@ -81,6 +81,15 @@
         "Legacy full-model TP1/TP2 MTP comparison was not run: its TP1 allocation exceeds one 16 GB GPU.",
         "Independent sampler oracle checks represented target logits, not full-model state equivalence."
       ]
+    },
+    {
+      "name": "Exact distributed optimized-draft argmax",
+      "kind": "performance",
+      "inference_math_changed": false,
+      "validation_record": "diagnostics/draft-argmax-validation.json",
+      "quality_regression_passed": true,
+      "decode_gain_percent_8k": 2.554329065709493,
+      "decode_gain_percent_100k": 2.460470502507106
     }
   ]
 }

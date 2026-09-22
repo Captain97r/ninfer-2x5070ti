@@ -117,6 +117,23 @@ collective only when
 
 Every failed predicate falls back to the staged path unchanged.
 
+### Optimized draft selection on this branch
+
+The optimized TP2 draft head uses `argmax_row_parallel` to select a global row before
+`proposal_remap_token_ids` maps it to a token. Each rank first reduces its own BF16 logits.
+A captured call sends one 16-byte value/index candidate per column from rank 1 to rank 0
+through an existing mailbox slot; it does not gather the 131,072-row draft vocabulary.
+
+Only rank 0 waits for the release flag and consumes this candidate. Rank 1 needs no
+acknowledgment: the captured call owns its host slot until the whole round retires, and the
+receiver never reads rank 1's reusable device scratch. Eager calls, disabled mailboxes,
+oversized payloads and exhausted slots use a one-way event-ordered staged copy. Its
+read-completion event protects rank 1's scratch before the next call reuses it.
+
+The sum and argmax kernels share the same bounded flag-wait primitive and fault word.
+This changes neither the target-logit path nor the MTP acceptance algorithm. The historical
+5060 Ti measurements in this document do not measure this draft-selection implementation.
+
 ## 6. CUDA graph integration
 
 The whole round — both devices' kernels, the 128 exchanges, the MTP verify/draft branches —

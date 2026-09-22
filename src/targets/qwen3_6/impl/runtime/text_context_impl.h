@@ -2625,31 +2625,19 @@ void TextContext::proposal_argmax_tp2(const std::array<Tensor, 2>& hidden,
     }
     // `proposal_head_n_` is THIS RANK'S shard row count -- `set_proposal_head` is called with
     // `proposal.head.n`, which the loader already halved -- so the logical vocabulary of the draft
-    // head is the two shards summed. The winning index is a global row in that logical space,
-    // which is why the gather has to run before the argmax and why `draft_head_token_ids` is
-    // replicated.
+    // head is the two shards summed. Argmax compares GLOBAL row indices before the winning
+    // row is mapped through the replicated draft_head_token_ids.
     const std::int32_t total_rows = proposal_head_n_ + proposal_head_peer_->n;
     auto scope_0                  = work_.scope();
     auto scope_1                  = tp_->work->scope();
     std::array<Tensor, 2> part;
-    std::array<Tensor, 2> whole;
     for (std::size_t r = 0; r < 2; ++r) {
-        part[r]  = ws[r]->alloc(DType::BF16, {shard_rows, T});
-        whole[r] = ws[r]->alloc(DType::BF16, {total_rows, T});
+        part[r] = ws[r]->alloc(DType::BF16, {shard_rows, T});
     }
     ops::linear_column_parallel(hidden, {*proposal_head_, *proposal_head_peer_}, part, execution);
-    // As in logits_tp2: allgather_rows gathers along ne[1] while the vocabulary is ne[0], so the
-    // gather runs one column at a time over contiguous V-element runs -- no transpose.
-    for (std::int32_t column = 0; column < T; ++column) {
-        const std::array<Tensor, 2> piece = {part[0].slice(1, column, 1).view({1, shard_rows}),
-                                             part[1].slice(1, column, 1).view({1, shard_rows})};
-        const std::array<Tensor, 2> full  = {whole[0].slice(1, column, 1).view({1, total_rows}),
-                                             whole[1].slice(1, column, 1).view({1, total_rows})};
-        ops::allgather_rows(full, piece, execution, *tp_->events);
-    }
+    ops::argmax_row_parallel(part, proposal_tokens, total_rows, ws, execution, *tp_->events);
     const CurrentDevice restore;
     CUDA_CHECK(cudaSetDevice(ctx_.device));
-    ops::argmax(whole[0], proposal_tokens, total_rows, ctx_.stream);
     ops::proposal_remap_token_ids(proposal_tokens, proposal_head_ids_, total_rows, ctx_.stream);
 }
 

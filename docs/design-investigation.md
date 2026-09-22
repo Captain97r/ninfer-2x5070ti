@@ -202,17 +202,22 @@ comparing those settings with another engine. See
 
 ## Generation opportunities
 
-### 1. Exact distributed draft argmax
+### 1. Exact distributed draft argmax: implemented
 
-[proposal_argmax_tp2](../src/targets/qwen3_6/impl/runtime/text_context_impl.h#L2626)
-computes a shard of the draft vocabulary on each GPU, then gathers all 131,072
-rows onto both GPUs although only rank 0 selects the proposal. Each rank could
-instead return its maximum value and global row index; merging those two results
-produces the same proposal with much less communication. Keep BF16 represented
-logits, valid-row handling, lowest-global-row tie breaking and the subsequent
-token-ID remapping exactly as they are. Test adversarial ties across shard
-boundaries as well as real logits. This is the strongest first TG candidate
-because it can preserve the mathematical result exactly.
+The optimized draft head now uses exact rank-local reduction, a one-way
+16-byte candidate exchange, and a global merge before the unchanged token mapping.
+This replaces gathering both full 131,072-row draft vectors. Captured execution
+uses an owned mailbox slot; eager execution and unsupported mailbox envelopes
+use an event-ordered candidate transfer. No quantization, projection, target
+verification or sampling arithmetic changed.
+
+Independent exact tests passed in both physical GPU orders, covering non-finite
+inputs, ties, padding, remapping, changed replays, scratch reuse and fallback
+transports. All 18 saved response observables remain identical, including the two
+known task failures. Repeated complete-inference measurements improved synthetic
+TG by 2.55% at 8K and 2.46% at 100K, with matching speculative counts. The
+[performance record](performance.md#local-dual-5070-ti-exact-draft-selection)
+separates those results from the larger isolated selection speedup.
 
 ### 2. Avoid redundant target-logit communication
 

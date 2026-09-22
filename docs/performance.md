@@ -76,6 +76,36 @@ append/cached attention, masked MTP output, short-window replay, and workspace/c
 Append rows are deliberately poisoned before each call so a missing cache write cannot pass.
 See [benchmark commands](../bench/README.md#local-tp2-attention-split-experiment).
 
+## Local dual-5070-Ti exact draft selection
+
+Optimized MTP draft selection now reduces each vocabulary shard locally and sends
+one 16-byte score/index candidate per column to rank zero. Global tie handling,
+NaN behavior and the final token-ID mapping are unchanged. Full target verification
+and sampling retain their existing paths and precision.
+
+On this Windows pair without CUDA peer access, the captured one-token selection
+plus remap median fell from 264.736 us to 72.288 us. The benchmark used ten warmups
+and 31 interleaved samples, checked every result against the independent exact
+oracle, and verified the selected mailbox route after both GPUs retired.
+
+Complete inference on the same cycling corpus, with one warmup and three measured
+repetitions, TP2, INT8-G64 KV, MTP3, optimized draft head, chunk 1024 and context
+capacity 102400:
+
+| Prompt / generated tokens | Before TG, tok/s | After TG, tok/s | TG gain | Before / after PP, tok/s |
+|---|---:|---:|---:|---:|
+| 8192 / 256 | 194.57 +/- 0.12 | 199.54 +/- 0.20 | 2.55% | 3048.6 / 3044.4 |
+| 100000 / 512 | 168.14 +/- 0.22 | 172.28 +/- 0.07 | 2.46% | 2238.6 / 2238.0 |
+
+The +/- values are sample standard deviations. These sequential benchmark blocks
+have high MTP acceptance (97.95% / 93.55%) and do not represent ordinary coding
+sessions. PP improved neither materially nor by design in this stage. Both device
+orders pass exact operator tests, including changed graph replays and transport
+fallbacks. All 18 saved response observables match; the task score remains 16/18,
+with the two existing failures explicitly retained. Acceptance counts also match
+at both benchmark lengths. See the [validation record](../diagnostics/draft-argmax-validation.json)
+and [bounded quality criteria](design-investigation.md#quality-qualification-implemented-checks-and-remaining-limits).
+
 ## TP2 prefix-state correctness
 
 `ninfer_qwen3_8_27b_prefix_tp2_real_test` compares restored text suffixes with cold prefill using

@@ -49,16 +49,13 @@
 
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
+#include "ops/kernel/peer_mailbox_device.cuh"
 
 #include <cstdint>
 
 namespace ninfer::ops::detail {
 
-// ~0.4 s of __nanosleep(100) polling before the poller gives up and reports: deliberately well
-// under the ~2 s Windows WDDM watchdog timeout for a GPU hang, so a broken peer surfaces as a
-// reported fault (the engine checks the aggregate word once per round) instead of a TDR device
-// reset that takes the driver down with it.
-inline constexpr std::uint32_t kPeerSpinLimit = 4000000u;
+// The bounded flag wait is shared with row-parallel argmax in peer_mailbox_device.cuh.
 
 using PeerVec = uint4;  // 16 bytes = 8 BF16 elements, one PCIe transaction per access
 
@@ -118,21 +115,11 @@ __global__ __launch_bounds__(256) void peer_exchange_sum_kernel(
         // store from every block is already system-visible.
         const std::uint32_t arrived = atomicAdd(arrival, 1u);
         if (arrived == gridDim.x - 1u) {
-            *mine_flag = 1;   // release
+            peer_mailbox_release(mine_flag);
             *arrival   = 0;   // restore the counter for this slot's next replay
         }
         // Consume-side spin: system-memory reads are uncached, so this always observes RAM.
-        __threadfence_system();
-        std::uint32_t spins = 0;
-        while (*peer_flag != 1u) {
-            __nanosleep(100);
-            if (++spins > kPeerSpinLimit) {
-                *hang = 1;  // report the fault, then fall through: the block must still meet
-                break;
-            }
-        }
-        // Acquire: the peer payload reads below are ordered after the observed release.
-        __threadfence_system();
+        peer_mailbox_wait(peer_flag, hang);
     }
     __syncthreads();
 

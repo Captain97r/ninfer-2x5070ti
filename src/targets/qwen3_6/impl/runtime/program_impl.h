@@ -2019,8 +2019,8 @@ void ProgramImplCore::check_peer_mtp_egress(std::size_t rows) {
                                                                                               : 0U;
         }
         // `next_drafts` is deliberately NOT compared: the proposal head is vocabulary-split, so
-        // TextContext::mtp_propose_batch's tp2 overload gathers both halves and writes ONE argmax
-        // -- rank 0's. Rank 1's next_drafts region is never written (it reads back as zeros) and
+        // TextContext::mtp_propose_batch's tp2 overload selects ONE global argmax on rank 0
+        // (distributed for the optimized head). Rank 1's next_drafts region is never written and
         // is not part of its egress; next round's drafts reach rank 1 through the pinned MTP
         // ingress record, not through its own egress. Measured while writing this check: with the
         // field included, 34 of 36 rounds reported exactly `next_extents` (3) mismatches each and

@@ -6,6 +6,7 @@
 #include "targets/qwen3_6/impl/runtime/yarn_rope.h"
 
 #include "core/device.h"
+#include "ninfer/ops/argmax.h"
 #include "ninfer/ops/gated_delta_net.h"
 #include "ninfer/ops/gdn_gating_proj.h"
 #include "ninfer/ops/gdn_input_proj.h"
@@ -330,7 +331,12 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     };
     const auto proposal_scratch = [&](WorkspaceLayoutBuilder& layout, std::int32_t columns) {
         if (plan.proposal_head == ProposalHead::Optimized) {
-            matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
+            if (plan.tp > 1) {
+                scratch(layout, ops::argmax_row_parallel_workspace_capacity_bytes(
+                                    Variant::draft_head_rows / plan.tp, columns));
+            } else {
+                matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
+            }
         }
     };
     const auto mtp_stem = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
@@ -412,10 +418,10 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
 
     // The MTP round's own tp2 additions. Its three all-reduces share ONE [hidden, T] staging
     // buffer per device (allocated once per MTP call, reused by the stem's fc, the attention
-    // output projection and the post-mixer), and the proposal head's gather needs this device's
-    // own half of the proposal logits alongside the full gathered vector the tp1 plan already
-    // covers. Every other MTP extent is planned at the tp1 (whole-model) width above, which
-    // over-plans a tp2 device rather than under-planning it.
+    // output projection and the post-mixer). The proposal head also needs this device's
+    // own half of its logits. Optimized proposals reduce those shards with rank-local argmax
+    // scratch; full-head proposals still gather into persistent RoundState logits. Every other
+    // MTP extent is planned at the tp1 width, over-planning rather than under-planning tp2.
     const auto tp_mtp_call_roots = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
                                        std::int32_t logit_columns) {
         if (plan.tp <= 1) { return; }
@@ -697,9 +703,9 @@ std::uint32_t validate_target_options(DeviceContext& device, const EngineOptions
         }
     }
     if (options.tp == 2) {
-        // MTP is split-aware (sharded stem/attention/post-mixer, sharded draft head with an
-        // allgather before the proposal argmax, per-device GDN replay records and per-device
-        // replay fold). DFlash is NOT: its weights are sharded by the load plan but
+        // MTP is split-aware (sharded stem/attention/post-mixer, distributed optimized-draft
+        // argmax or full-head logit gathering, per-device GDN replay records and replay fold).
+        // DFlash is NOT: its weights are sharded by the load plan but
         // its forward path composes plain linear/residual_add over whole-width tensors.
         // Vision IS split-aware in the dual-replicated sense: both ranks run the same
         // single-device encoder against replicated weights and the tp2 prefill scatters the
