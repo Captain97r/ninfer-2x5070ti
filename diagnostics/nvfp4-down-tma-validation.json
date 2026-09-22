@@ -1,0 +1,323 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows CUDA 13.3",
+  "scope": "Private NVFP4 TMA down projection at N5120/K8704/T1024; identity and residual epilogues",
+  "decision": "Retain M256/S3/min1. Both M128/min1 candidates are slower in every measured setting; no production dispatch change or full-engine speed claim.",
+  "production_dispatch_changed": false,
+  "method": {
+    "seeds": [
+      1803,
+      1811
+    ],
+    "warmup": 10,
+    "paired_samples": 31,
+    "route_order": "Rotating/reversing each three-round cycle",
+    "cache_conditions": [
+      "warm",
+      "128 MiB read/write scrub outside kernel event interval"
+    ],
+    "timed_scope": "TMA GEMM plus epilogue; quantization/descriptors/output reset/scrub excluded. Graph wall interval is separately labeled and not substituted for kernel latency.",
+    "compilation": "Non-RDC, matching ninfer_nvfp4_tma and its M256 setmaxnreg contract"
+  },
+  "resources": {
+    "M256S3": {
+      "ctas": 160,
+      "dynamic_shared_bytes": 89216,
+      "static_registers": 168,
+      "occupancy_api_ctas_per_sm": 1
+    },
+    "M128S3": {
+      "ctas": 320,
+      "dynamic_shared_bytes": 58496,
+      "static_registers_identity_residual": [
+        141,
+        143
+      ],
+      "occupancy_api_ctas_per_sm": 1
+    },
+    "M128S2": {
+      "ctas": 320,
+      "dynamic_shared_bytes": 39040,
+      "static_registers_identity_residual": [
+        139,
+        141
+      ],
+      "occupancy_api_ctas_per_sm": 1
+    }
+  },
+  "qualification": {
+    "both_devices_passed": true,
+    "eager_and_captured_passed": true,
+    "oracle": "Direct signed packed-weight/stored-scale FP64 decode, complete K8704 sum from public BF16 activation values, plus represented BF16 residual where applicable; no private activation quantizer or reduction staging copied",
+    "sampled_outputs_per_fixture": 2520,
+    "total_outputs_per_fixture": 5242880,
+    "numerical_scope": "Every N128 tile seam and specified token/vector/warp/M128/M256 seams. This is sampled mathematical coverage, not full-matrix FP64 coverage.",
+    "criterion": {
+      "relative_l2_max": 0.16,
+      "max_abs_absolute_floor": 0.00390625,
+      "max_abs_relative_to_reference_max": 0.16
+    },
+    "production_checked_first": true,
+    "all_output_bits_equal_public_linear_or_linear_add": true,
+    "all_outputs_finite": true,
+    "guards_and_input_descriptor_preservation_passed": true,
+    "final_timed_output_checked_before_reset": true
+  },
+  "candidate_paired_latency_increase_percent": {
+    "M128_S3_min1": {
+      "minimum": 0.8709089309999918,
+      "maximum": 7.024795132000006
+    },
+    "M128_S2_min1": {
+      "minimum": 5.351873529999995,
+      "maximum": 11.222377499999991
+    }
+  },
+  "measurements": [
+    {
+      "device": 0,
+      "seed": 1803,
+      "epilogue": "identity",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 195.51999867,
+      "M128_S3_min1": {
+        "median_us": 205.344006419,
+        "median_paired_ratio": 1.042694791
+      },
+      "M128_S2_min1": {
+        "median_us": 210.368007421,
+        "median_paired_ratio": 1.07377052059
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1803,
+      "epilogue": "identity",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 199.616000056,
+      "M128_S3_min1": {
+        "median_us": 211.648002267,
+        "median_paired_ratio": 1.06074241957
+      },
+      "M128_S2_min1": {
+        "median_us": 218.303993344,
+        "median_paired_ratio": 1.09396617613
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1803,
+      "epilogue": "residual",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 207.55200088,
+      "M128_S3_min1": {
+        "median_us": 215.680003166,
+        "median_paired_ratio": 1.03811136813
+      },
+      "M128_S2_min1": {
+        "median_us": 221.727997065,
+        "median_paired_ratio": 1.06619458247
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1803,
+      "epilogue": "residual",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 227.807998657,
+      "M128_S3_min1": {
+        "median_us": 229.888007045,
+        "median_paired_ratio": 1.00940876449
+      },
+      "M128_S2_min1": {
+        "median_us": 240.12799561,
+        "median_paired_ratio": 1.05467321703
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1811,
+      "epilogue": "identity",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 195.26399672,
+      "M128_S3_min1": {
+        "median_us": 204.512000084,
+        "median_paired_ratio": 1.0434070296
+      },
+      "M128_S2_min1": {
+        "median_us": 209.792003036,
+        "median_paired_ratio": 1.07392229677
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1811,
+      "epilogue": "identity",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 199.551999569,
+      "M128_S3_min1": {
+        "median_us": 211.423993111,
+        "median_paired_ratio": 1.06000314077
+      },
+      "M128_S2_min1": {
+        "median_us": 218.079999089,
+        "median_paired_ratio": 1.09142947053
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1811,
+      "epilogue": "residual",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 207.55200088,
+      "M128_S3_min1": {
+        "median_us": 215.424001217,
+        "median_paired_ratio": 1.03498768452
+      },
+      "M128_S2_min1": {
+        "median_us": 220.735996962,
+        "median_paired_ratio": 1.06305190872
+      }
+    },
+    {
+      "device": 0,
+      "seed": 1811,
+      "epilogue": "residual",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 227.840006351,
+      "M128_S3_min1": {
+        "median_us": 229.888007045,
+        "median_paired_ratio": 1.00870908931
+      },
+      "M128_S2_min1": {
+        "median_us": 240.096002817,
+        "median_paired_ratio": 1.0535187353
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1803,
+      "epilogue": "identity",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 197.824001312,
+      "M128_S3_min1": {
+        "median_us": 208.031997085,
+        "median_paired_ratio": 1.05247909921
+      },
+      "M128_S2_min1": {
+        "median_us": 215.0080055,
+        "median_paired_ratio": 1.08820677828
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1803,
+      "epilogue": "identity",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 201.471999288,
+      "M128_S3_min1": {
+        "median_us": 214.208006859,
+        "median_paired_ratio": 1.06440840687
+      },
+      "M128_S2_min1": {
+        "median_us": 223.872005939,
+        "median_paired_ratio": 1.1113931696
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1803,
+      "epilogue": "residual",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 209.759995341,
+      "M128_S3_min1": {
+        "median_us": 219.487994909,
+        "median_paired_ratio": 1.04256293443
+      },
+      "M128_S2_min1": {
+        "median_us": 226.495996118,
+        "median_paired_ratio": 1.07871985173
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1803,
+      "epilogue": "residual",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 228.256002069,
+      "M128_S3_min1": {
+        "median_us": 234.400004148,
+        "median_paired_ratio": 1.0266292989
+      },
+      "M128_S2_min1": {
+        "median_us": 245.087996125,
+        "median_paired_ratio": 1.07278041205
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1811,
+      "epilogue": "identity",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 197.247996926,
+      "M128_S3_min1": {
+        "median_us": 207.583993673,
+        "median_paired_ratio": 1.05550123009
+      },
+      "M128_S2_min1": {
+        "median_us": 214.239999652,
+        "median_paired_ratio": 1.0923375449
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1811,
+      "epilogue": "identity",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 201.120004058,
+      "M128_S3_min1": {
+        "median_us": 215.231999755,
+        "median_paired_ratio": 1.07024795132
+      },
+      "M128_S2_min1": {
+        "median_us": 223.647996783,
+        "median_paired_ratio": 1.112223775
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1811,
+      "epilogue": "residual",
+      "cache": "warm",
+      "baseline_M256S3_median_us": 210.687994957,
+      "M128_S3_min1": {
+        "median_us": 219.776004553,
+        "median_paired_ratio": 1.04437371803
+      },
+      "M128_S2_min1": {
+        "median_us": 226.047992706,
+        "median_paired_ratio": 1.07515847488
+      }
+    },
+    {
+      "device": 1,
+      "seed": 1811,
+      "epilogue": "residual",
+      "cache": "scrubbed_128MiB",
+      "baseline_M256S3_median_us": 228.448003531,
+      "M128_S3_min1": {
+        "median_us": 233.919993043,
+        "median_paired_ratio": 1.02242958933
+      },
+      "M128_S2_min1": {
+        "median_us": 246.17600441,
+        "median_paired_ratio": 1.07320500396
+      }
+    }
+  ],
+  "limits": [
+    "Kernel-only captured timing does not measure shipping eager prefill or total prompt throughput.",
+    "These min1 schedules all report one resident CTA per SM; lower shared memory alone did not increase occupancy.",
+    "Different launch-bound/register schedules remain unmeasured.",
+    "Linux not executed locally."
+  ]
+}

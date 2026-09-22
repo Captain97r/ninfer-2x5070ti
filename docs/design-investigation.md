@@ -410,6 +410,14 @@ changed by only 0.08% TG, comparable to run-to-run variation, with unchanged
 response observables and acceptance counts. The existing shared-staging route
 is retained. [Experiment and runtime evidence](../diagnostics/fp8-gdn-access-validation.json).
 
+For the PP down projection `[5120,8704]` at T1024, M128 token tiles with two or
+three pipeline stages were compared with production M256/S3, all at minimum
+one CTA/SM. Both alternatives passed the sampled independent FP64 oracle and
+full-output bit comparison, but were slower in every paired setting (0.9-7.0%
+for S3; 5.4-11.2% for S2). All still reported one resident CTA/SM. The existing
+M256/S3 schedule is retained. This is a kernel result, not a PP throughput gain.
+[Evidence and numerical scope](../diagnostics/nvfp4-down-tma-validation.json).
+
 ### 4. MTP windows require quality qualification
 
 The hidden-reduction count grows as `128 + 3K` in a normal K-draft round, and each

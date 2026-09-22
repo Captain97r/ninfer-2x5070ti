@@ -1050,3 +1050,69 @@ was 1.6-2.3% higher with the 40 KiB one-block candidate across both device order
 and skew settings, so **production remains at three blocks**. No inference speed
 claim or runtime change follows from this homogeneous exchange-chain benchmark.
 See [qualification and timings](../diagnostics/mailbox-geometry-validation.json).
+
+
+### TP2 prompt down-projection TMA token-tile experiment
+
+`ninfer_nvfp4_down_tp2_tma_bench` is a private schedule experiment for the NVFP4
+TP2 down projection `[N=5120,K=8704,T=1024]`. It compares the existing
+`M256,N128,K128,S3,min1` schedule against `M128,N128,K128,S3,min1` and
+`M128,N128,K128,S2,min1`; production dispatch is unchanged. The token-tile
+change increases the grid from 160 to 320 CTAs and changes shared/register
+requirements. These are candidate tradeoffs, not a demonstrated performance gain.
+
+```powershell
+cmake --build build/windows --target ninfer_nvfp4_down_tp2_tma_bench -j
+.\build\windows\bench\ninfer_nvfp4_down_tp2_tma_bench.exe --device 0 --qualify-only
+.\build\windows\bench\ninfer_nvfp4_down_tp2_tma_bench.exe --device 1 --qualify-only
+.\build\windows\bench\ninfer_nvfp4_down_tp2_tma_bench.exe --device 0 --samples 31 --warmup 10
+.\build\windows\bench\ninfer_nvfp4_down_tp2_tma_bench.exe --device 1 --samples 31 --warmup 10
+```
+
+All routes instantiate the existing TMA kernel, preserving the activation
+quantizer, K128 traversal, the two K64 MMA steps, FP32 accumulator, scale factor,
+and output conversion. The identity epilogue models the rank-one partial; the
+residual epilogue models rank zero's in-place `BF16(FP32_accumulator * alpha +
+FP32(BF16_residual))` before the unchanged TP reduction. Changing independent
+output grouping is expected to preserve the result, but exact identity is a test
+requirement rather than an assumed guarantee. This executable uses **non-RDC**
+compilation, matching `ninfer_nvfp4_tma`: compiling the M256 warp-specialized
+kernel under RDC discards its `setmaxnreg` register-allocation contract.
+
+For each of the two fixed seeds (1803 and 1811), every public BF16 activation is
+dense and mixed-sign. The public `linear` and `linear_add` AllowA4 outputs are
+qualified first against an independent FP64 oracle. The oracle directly decodes
+the signed packed weight and its stored scale and sums all 8704 products from the
+represented BF16 activation; residual is added from its represented BF16 value.
+It does not reproduce private A4 input quantization or intermediate accumulation
+rounding. The existing A4 criterion is unchanged: relative L2 <= 0.16 and maximum
+absolute error <= 1/256 + 0.16 * maximum absolute reference. Coverage is
+**2520 sampled complete dots of 5242880 outputs**, including every N128 tile seam
+and token/vector/warp/M128/M256 boundaries. This is not a full-output FP64 oracle.
+Every candidate and the header baseline must additionally match all public-route
+output BF16 bits, and all outputs must be finite. A production oracle failure
+aborts the experiment; it never selects another seed or relaxes the criterion.
+
+Qualification checks eager calls and graph replay, input/weight/prepared-code/
+scale/descriptor immutability, guards, and the public workspace's restored cursor
+and exact peak. Captured bindings remain fixture-owned until all graphs retire.
+Both residual and identity output reset occur before the measured event interval;
+residual never accumulates across repetitions. The numerical fixture also checks
+the final outputs left by timing before any fresh replay can overwrite them.
+
+Measurements rotate paired route order, with warmed inputs and a separate 128 MiB
+read/write scrub **outside** the event interval. Event latency includes only the
+TMA GEMM and its epilogue. Quantization, descriptor preparation, output reset,
+scrubbing and verification are excluded. Reported whole-graph wall time includes
+reset and, in the scrubbed condition, the scrub, so it is not an alternative GEMM
+latency. The graph is a timing fixture; shipping prompt processing remains eager.
+The output records schedule resources and paired ratios, plus raw samples. Run
+one device at a time on an otherwise idle host. A microbenchmark win would still
+require a scoped production experiment and complete prompt-processing measurement.
+Both local GPUs passed all stated eager/captured numerical, full-output identity,
+guard and input-preservation checks. Across seeds, epilogues and cache conditions,
+paired median kernel latency increased 0.9-7.0% for M128/S3/min1 and 5.4-11.2% for
+M128/S2/min1. All three schedules reported one resident CTA/SM; the smaller tile's
+shared-memory reduction did not produce higher occupancy. **Production retains
+M256/S3/min1.** These negative kernel results do not establish a prompt-throughput
+gain. [Qualification and measurements](../diagnostics/nvfp4-down-tma-validation.json).
