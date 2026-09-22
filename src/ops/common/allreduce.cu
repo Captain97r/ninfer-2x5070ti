@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -636,4 +637,86 @@ void allgather_columns(const std::array<Tensor, 2>& destination,
     }
 }
 
+
+std::size_t gather_columns_to_rank0_workspace_capacity_bytes(std::int32_t peer_rows,
+                                                              std::int32_t columns) {
+    return allgather_columns_workspace_capacity_bytes(peer_rows, columns);
+}
+
+void gather_columns_to_rank0(Tensor& destination, const std::array<Tensor, 2>& part,
+                             WorkspaceArena* rank0_workspace,
+                             const ExecutionContext& ec, const PeerTransfer& transfer) {
+    require_two_devices(ec, "gather_columns_to_rank0: two distinct devices are required");
+    require(transfer.matches(ec), "gather_columns_to_rank0: transfer belongs to another stream pair");
+    const int columns = part[0].ne[1];
+    const std::int64_t rows = static_cast<std::int64_t>(part[0].ne[0]) + part[1].ne[0];
+    require(columns > 0 && rows <= std::numeric_limits<std::int32_t>::max(),
+            "gather_columns_to_rank0: invalid columns or combined row count");
+    for (int rank = 0; rank < 2; ++rank) {
+        const Tensor& source = part[rank];
+        require(source.dtype == DType::BF16 && source.ne[0] > 0 && source.ne[1] == columns &&
+                    source.ne[2] == 1 && source.ne[3] == 1 && source.data && source.is_contiguous(),
+                "gather_columns_to_rank0: parts must be contiguous BF16 [Vr,T]");
+#ifndef NDEBUG
+        require_resident_on(source.data, ec.dev[rank]->device,
+                            "gather_columns_to_rank0: part is on the wrong device");
+#endif
+    }
+    require(destination.dtype == DType::BF16 && destination.ne[0] == rows &&
+                destination.ne[1] == columns && destination.ne[2] == 1 &&
+                destination.ne[3] == 1 && destination.data && destination.is_contiguous(),
+            "gather_columns_to_rank0: output must be contiguous BF16 [V0+V1,T]");
+#ifndef NDEBUG
+    require_resident_on(destination.data, ec.dev[0]->device,
+                        "gather_columns_to_rank0: output must belong to rank zero");
+    require_disjoint(destination.data, destination.bytes(), part[0].data, part[0].bytes(),
+                     "gather_columns_to_rank0: output overlaps local input");
+#endif
+    std::optional<WorkspaceArena::Scope> scope;
+    Tensor received;
+    if (columns > 1) {
+        require(rank0_workspace != nullptr, "gather_columns_to_rank0: rank-zero arena is required");
+        scope.emplace(rank0_workspace->scope());
+        const auto capacity = gather_columns_to_rank0_workspace_capacity_bytes(part[1].ne[0], columns);
+        const DeviceSpan backing = rank0_workspace->alloc_bytes(capacity, 256);
+        received = Tensor(backing.data, DType::BF16, {part[1].ne[0], columns});
+#ifndef NDEBUG
+        require_resident_on(backing.data, ec.dev[0]->device,
+                            "gather_columns_to_rank0: scratch must belong to rank zero");
+        require_disjoint(backing.data, backing.bytes, part[0].data, part[0].bytes(),
+                         "gather_columns_to_rank0: scratch overlaps local input");
+        require_disjoint(backing.data, backing.bytes, destination.data, destination.bytes(),
+                         "gather_columns_to_rank0: scratch overlaps output");
+#endif
+    } else {
+        received = Tensor(byte_offset(destination.data, part[0].bytes()), DType::BF16,
+                           {part[1].ne[0], 1});
+    }
+
+    const CurrentDeviceGuard guard;
+    const bool staged = transfer.uses_host_staging({0, part[1].bytes()});
+    const DeviceContext& source = *ec.dev[1];
+    const DeviceContext& target = *ec.dev[0];
+    CurrentDeviceGuard::set(source.device);
+    if (staged) {
+        CUDA_CHECK(cudaMemcpyAsync(transfer.host_buffer(1), part[1].data, part[1].bytes(),
+                                   cudaMemcpyDeviceToHost, source.stream));
+    }
+    CUDA_CHECK(cudaEventRecord(transfer.inputs_ready(1), source.stream));
+    CurrentDeviceGuard::set(target.device);
+    CUDA_CHECK(cudaStreamWaitEvent(target.stream, transfer.inputs_ready(1), 0));
+    if (columns == 1) {
+        CUDA_CHECK(cudaMemcpyAsync(destination.data, part[0].data, part[0].bytes(),
+                                   cudaMemcpyDeviceToDevice, target.stream));
+    }
+    CUDA_CHECK(cudaMemcpyAsync(received.data, staged ? transfer.host_buffer(1) : part[1].data,
+                               part[1].bytes(), staged ? cudaMemcpyHostToDevice : cudaMemcpyDeviceToDevice,
+                               target.stream));
+    CUDA_CHECK(cudaEventRecord(transfer.pull_done(0), target.stream));
+    if (columns > 1) { interleave_columns(destination, part[0], received, target.stream); }
+    // The peer source and its optional pinned image are no longer needed after the pull,
+    // even though rank zero's local interleave may still be running.
+    CurrentDeviceGuard::set(source.device);
+    CUDA_CHECK(cudaStreamWaitEvent(source.stream, transfer.pull_done(0), 0));
+}
 } // namespace ninfer::ops

@@ -177,4 +177,32 @@ void allgather_columns(const std::array<Tensor, 2>& destination,
                        const std::array<Tensor, 2>& part,
                        const std::array<WorkspaceArena*, 2>& workspace,
                        const ExecutionContext& ec, const PeerTransfer& transfer);
+
+// Rank-zero scratch bound for gather_columns_to_rank0. Rank one needs no scratch.
+// peer_rows is rank one's physical row count; T1 returns zero.
+[[nodiscard]] std::size_t gather_columns_to_rank0_workspace_capacity_bytes(
+    std::int32_t peer_rows, std::int32_t columns);
+
+/**
+ * Two-device BF16 column gather to rank zero, exact storage relocation:
+ *
+ *   destination[v,t] = part[0][v,t]       for v < V0,
+ *                      part[1][v-V0,t]   otherwise.
+ *
+ * Parts are contiguous BF16 [Vr,T] on ec.dev[r], Vr>0, T>0, V0+V1 fits int32.
+ * The one destination is contiguous BF16 [V0+V1,T] on ec.dev[0]. Every source bit,
+ * including NaN payloads and vocabulary padding, is preserved. Both parts are unchanged.
+ * Rank zero's input, output and scratch must be disjoint; no peer pointer is read by a kernel.
+ *
+ * rank0_workspace supplies the queried aligned capacity for T>1; its cursor is restored on
+ * return. It may be null at T1. There is no allocation, persistent state or host wait.
+ * transfer belongs to ec's stream pair. The peer source uses explicit eager staging when
+ * provisioned and eligible, otherwise a CUDA UVA copy. Work is enqueued on owning streams;
+ * rank one's stream is ordered after its source/pinned-buffer read before subsequent reuse.
+ * Rank zero's stream orders the final output and scratch use. Captured storage remains owned
+ * and address-stable until its graph users retire.
+ */
+void gather_columns_to_rank0(Tensor& destination, const std::array<Tensor, 2>& part,
+                             WorkspaceArena* rank0_workspace,
+                             const ExecutionContext& ec, const PeerTransfer& transfer);
 } // namespace ninfer::ops

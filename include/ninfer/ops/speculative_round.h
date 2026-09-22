@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/tensor.h"
+#include "ninfer/ops/allreduce.h"
 #include "ninfer/ops/sampling.h"
 
 #include <cuda_runtime.h>
@@ -121,4 +122,49 @@ void speculative_select_accepted_hidden(const Tensor& hidden, const Tensor& sele
 void proposal_remap_token_ids(Tensor& proposal_tokens, const std::int32_t* id_map,
                               std::int32_t count, cudaStream_t stream);
 
+
+// A complete acceptance result. Views are rank-local and non-owning; scalar fields are I32[B],
+// licensed_tokens is I32[K+1,B]. No pointer-bearing sampling config is part of this decision.
+struct SpeculativeDecisionView {
+    Tensor frontiers;
+    Tensor anchors;
+    Tensor licensed_tokens;
+    Tensor licensed_counts;
+    Tensor accepted_drafts;
+};
+
+// Per-rank aligned transient bound, including the compact record's transport padding.
+// The admitted decision capacity is 1<=K<=5 and 1<=B<=8.
+[[nodiscard]] std::size_t speculative_replicate_decision_workspace_capacity_bytes(
+    std::int32_t drafts, std::int32_t batch);
+
+/**
+ * Copy one completed acceptance decision from rank zero and apply its exact state on rank one.
+ * For each row, copies every licensed_tokens slot and the frontier, anchor, licensed count and
+ * accepted count. The rank-zero views are unchanged. The source is a valid acceptance result:
+ * A in [0,K], L=A+1, tokens[0:L] are valid token IDs, tokens[L:K+1] are zero, and its scalar
+ * fields already reflect acceptance. It is copied verbatim, not recomputed from rank one's state.
+ *
+ * For a peer config with temperature>0 and non-null token_counts, increment the local counter
+ * for each licensed token exactly once, including repeated tokens. Otherwise counters are
+ * unchanged. This is the same update as speculative_accept_greedy_drafts; the peer must not
+ * also run acceptance for this decision. Configs and all other counter entries are unchanged.
+ * No sampling, floating-point arithmetic, RNG or host transaction policy is performed.
+ *
+ * Both views are contiguous I32 with the shapes above on ec.dev[r]. Fields, local workspace,
+ * peer_configs and its counter allocations do not overlap. peer_configs is SamplingConfig[B]
+ * resident on rank one, and each non-null counter pointer names that rank's valid token domain.
+ * K and B fit the declared capacity. The caller supplies both queried arena bounds, the two
+ * streams, and their PeerTransfer. Arena cursors are restored; there is no hidden allocation.
+ *
+ * Captured calls may publish into the existing immutable-per-round mailbox slot; its owner
+ * must reset flags only after both streams retire and validate_completed_round before consuming
+ * output. Otherwise an event-ordered compact CUDA copy protects source scratch reuse. Kernel
+ * consumers access only local GPU storage or the supported mapped host mailbox. Eager and
+ * captured consecutive calls require no intervening host synchronization.
+ */
+void speculative_replicate_decision(
+    const std::array<SpeculativeDecisionView, 2>& decision, const SamplingConfig* peer_configs,
+    const std::array<WorkspaceArena*, 2>& workspace,
+    const ExecutionContext& execution, const PeerTransfer& transfer);
 } // namespace ninfer::ops

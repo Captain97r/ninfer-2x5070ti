@@ -1,0 +1,266 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows, CUDA peer access unavailable",
+  "scope": "Complete two-rank acceptance pipeline over resident represented BF16 target logits; no Engine/runtime integration",
+  "decision": "Qualify the rank-zero candidate for a subsequent captured-runtime A/B, including event-copy fallback. Retain replicated acceptance for eager execution: the measured eager candidate is slower.",
+  "runtime_enabled": false,
+  "method": {
+    "physical_rows": 248320,
+    "token_domain": 248077,
+    "drafts": 3,
+    "batch": 1,
+    "extent": 3,
+    "warmup": 10,
+    "paired_samples": 31,
+    "order": "Alternating route order in paired rounds",
+    "baseline": "Packed allgather to both ranks, argmax and unchanged speculative acceptance independently on both ranks",
+    "candidate": "One-way gather to rank zero, rank-zero argmax and unchanged speculative acceptance, then exact compact decision replication and peer counter updates",
+    "eager_gather": "Explicit portable pinned staging",
+    "graph_gather": "Captured CUDA UVA copy and exact local integer interleave",
+    "graph_decision": "Mapped mailbox, or event-ordered compact copy when mailbox disabled",
+    "timing": "Host enqueue, complete wall and joined-device CUDA event intervals cover both ranks. State/counter reset, output poisoning and mailbox reset are outside timing. These overlapping metrics must not be added.",
+    "commands": [
+      "ninfer_speculative_rank0_bench --sampling both --mode both",
+      "ninfer_speculative_rank0_bench --sampling both --mode graph --no-mailbox",
+      "ninfer_speculative_rank0_bench --sampling both --mode graph --reverse-devices"
+    ]
+  },
+  "storage": {
+    "decision_transfer_bytes_K3_B1": 32,
+    "rank0_gather_scratch_bytes_124160_rows_T4": 993280,
+    "rank1_gather_scratch_bytes": 0,
+    "decision_arena_capacity_bytes_per_rank_K3_B1": 256,
+    "decision_fields": "Four licensed token slots plus frontier, anchor, licensed count and accepted count",
+    "ownership": "Caller-owned rank-local scratch with restored arena cursors; event ordering protects consecutive reuse. Captured mailbox slots stay immutable until both streams retire.",
+    "scope": "These are primitive scratch bounds, not a total runtime memory saving."
+  },
+  "correctness": {
+    "exact_gather": "Independent raw BF16 concatenation on rank zero, preserving NaN payloads, signed zero and physical vocabulary padding; source logits unchanged",
+    "selection": "Independent logical-domain argmax; physical padding is excluded from token selection",
+    "decision": "All fields match the existing two-rank acceptance result exactly; source decision, sampler configs, drafts and extents remain unchanged",
+    "state": "Frontier advances by licensed count; accepted prefix, correction/bonus anchor, licensed count and zero unused slots are checked",
+    "counters": "Every licensed token including duplicates increments positive-temperature non-null counters exactly once; greedy rows and null counters remain unchanged; complete counter arrays are compared",
+    "sampling_math": "The production sampler, penalties, filtering and counter-based RNG are unchanged. Pipeline stochastic checks use complete baseline parity plus independent state/counter invariants; probability correctness remains covered separately by the existing FP64 speculative joint-distribution suite.",
+    "lifetimes": "Changed consecutive calls without host synchronization, guard checks, eager/captured replay and whole-graph update between two live owners",
+    "transports": "Actual pinned publication and mapped-mailbox flags checked; captured event-copy fallback checked"
+  },
+  "validation": {
+    "ninfer_speculative_rank0_test": "Passed both device orders, including zero/short extents, repeated tokens, mixed greedy/stochastic rows, null counters, asymmetric shards, guards and graph update",
+    "compute_sanitizer": "memcheck with --track-stream-ordered-races all: 0 errors",
+    "ninfer_allgather_columns_test": "Passed existing independent exact gather regressions",
+    "ninfer_speculative_round_test": "Passed existing independent FP64 speculative-distribution and state regressions"
+  },
+  "measurements": [
+    {
+      "run": "normal",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "eager",
+      "sampling": "greedy",
+      "decision_transport": "event-copy",
+      "baseline": {
+        "median_enqueue_us": 83.1,
+        "median_complete_wall_us": 321.9,
+        "median_joined_device_us": 323.615998,
+        "p95_complete_wall_us": 374.5,
+        "p95_joined_device_us": 379.711986
+      },
+      "candidate": {
+        "median_enqueue_us": 87.4,
+        "median_complete_wall_us": 391.2,
+        "median_joined_device_us": 396.735996,
+        "p95_complete_wall_us": 454.7,
+        "p95_joined_device_us": 457.695991
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 1.2152842497670084
+    },
+    {
+      "run": "normal",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "graph",
+      "sampling": "greedy",
+      "decision_transport": "mapped-mailbox",
+      "baseline": {
+        "median_enqueue_us": 68.6,
+        "median_complete_wall_us": 394.5,
+        "median_joined_device_us": 396.192014,
+        "p95_complete_wall_us": 429.5,
+        "p95_joined_device_us": 430.17599
+      },
+      "candidate": {
+        "median_enqueue_us": 42.9,
+        "median_complete_wall_us": 265.7,
+        "median_joined_device_us": 267.423987,
+        "p95_complete_wall_us": 280.8,
+        "p95_joined_device_us": 282.43199
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.673510773130545
+    },
+    {
+      "run": "normal",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "eager",
+      "sampling": "stochastic",
+      "decision_transport": "event-copy",
+      "baseline": {
+        "median_enqueue_us": 79.8,
+        "median_complete_wall_us": 318.2,
+        "median_joined_device_us": 321.056008,
+        "p95_complete_wall_us": 332.8,
+        "p95_joined_device_us": 335.904002
+      },
+      "candidate": {
+        "median_enqueue_us": 78.6,
+        "median_complete_wall_us": 395.4,
+        "median_joined_device_us": 398.591995,
+        "p95_complete_wall_us": 413.3,
+        "p95_joined_device_us": 414.175987
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 1.2426147077309868
+    },
+    {
+      "run": "normal",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "graph",
+      "sampling": "stochastic",
+      "decision_transport": "mapped-mailbox",
+      "baseline": {
+        "median_enqueue_us": 68.1,
+        "median_complete_wall_us": 439.3,
+        "median_joined_device_us": 440.831989,
+        "p95_complete_wall_us": 456.4,
+        "p95_joined_device_us": 458.27201
+      },
+      "candidate": {
+        "median_enqueue_us": 42.2,
+        "median_complete_wall_us": 306.6,
+        "median_joined_device_us": 309.280008,
+        "p95_complete_wall_us": 325.3,
+        "p95_joined_device_us": 336.511999
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.69792852264967
+    },
+    {
+      "run": "event_copy_fallback",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "graph",
+      "sampling": "greedy",
+      "decision_transport": "event-copy",
+      "baseline": {
+        "median_enqueue_us": 109,
+        "median_complete_wall_us": 409.7,
+        "median_joined_device_us": 398.431987,
+        "p95_complete_wall_us": 480.3,
+        "p95_joined_device_us": 464.928001
+      },
+      "candidate": {
+        "median_enqueue_us": 87.3,
+        "median_complete_wall_us": 307.2,
+        "median_joined_device_us": 301.600009,
+        "p95_complete_wall_us": 390,
+        "p95_joined_device_us": 374.208003
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.7498169392238223
+    },
+    {
+      "run": "event_copy_fallback",
+      "devices": [
+        0,
+        1
+      ],
+      "mode": "graph",
+      "sampling": "stochastic",
+      "decision_transport": "event-copy",
+      "baseline": {
+        "median_enqueue_us": 69.3,
+        "median_complete_wall_us": 445.4,
+        "median_joined_device_us": 446.943998,
+        "p95_complete_wall_us": 474.1,
+        "p95_joined_device_us": 473.663986
+      },
+      "candidate": {
+        "median_enqueue_us": 65.4,
+        "median_complete_wall_us": 358.4,
+        "median_joined_device_us": 359.647989,
+        "p95_complete_wall_us": 401.8,
+        "p95_joined_device_us": 402.240008
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.8046699595868881
+    },
+    {
+      "run": "reversed",
+      "devices": [
+        1,
+        0
+      ],
+      "mode": "graph",
+      "sampling": "greedy",
+      "decision_transport": "mapped-mailbox",
+      "baseline": {
+        "median_enqueue_us": 67.9,
+        "median_complete_wall_us": 403.3,
+        "median_joined_device_us": 405.75999,
+        "p95_complete_wall_us": 436.7,
+        "p95_joined_device_us": 438.239992
+      },
+      "candidate": {
+        "median_enqueue_us": 43.4,
+        "median_complete_wall_us": 286,
+        "median_joined_device_us": 287.200004,
+        "p95_complete_wall_us": 299.8,
+        "p95_joined_device_us": 301.472008
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.709149516488966
+    },
+    {
+      "run": "reversed",
+      "devices": [
+        1,
+        0
+      ],
+      "mode": "graph",
+      "sampling": "stochastic",
+      "decision_transport": "mapped-mailbox",
+      "baseline": {
+        "median_enqueue_us": 67.8,
+        "median_complete_wall_us": 437.9,
+        "median_joined_device_us": 439.392,
+        "p95_complete_wall_us": 457.1,
+        "p95_joined_device_us": 458.815992
+      },
+      "candidate": {
+        "median_enqueue_us": 42.8,
+        "median_complete_wall_us": 313.6,
+        "median_joined_device_us": 315.135986,
+        "p95_complete_wall_us": 324.9,
+        "p95_joined_device_us": 326.656014
+      },
+      "candidate_to_baseline_median_complete_wall_ratio": 0.7161452386389587
+    }
+  ],
+  "limits": [
+    "A faster isolated acceptance pipeline does not establish end-to-end committed-token throughput.",
+    "Eager candidate regresses in the measured configuration; no unconditional runtime replacement is recommended.",
+    "Measured pipeline is K3/B1 at the real padded vocabulary; correctness tests cover additional supported cases, not their performance.",
+    "Compact replication requires a valid acceptance decision and valid rank-local counter domains; it is not a malformed-token sanitizer.",
+    "Linux execution and direct-P2P performance were not tested locally."
+  ],
+  "local_measurement_sources": [
+    "build/optimization-research/stage9-pipeline.json",
+    "build/optimization-research/stage9-pipeline-fallback.json",
+    "build/optimization-research/stage9-pipeline-reversed.json"
+  ]
+}

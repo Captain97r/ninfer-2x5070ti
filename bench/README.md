@@ -978,3 +978,57 @@ TP2 fused projections. The default full split suite still reproduces an inherite
 TP1 BF16 gating T1024 failure: its 192-CTA cooperative launch exceeds the local
 shared-memory upper bound of 140 simultaneous CTAs. The explicit focused mode does not turn that
 default-suite failure into a pass.
+
+### Rank-zero speculative acceptance experiment
+
+`ninfer_speculative_rank0_bench` compares the complete existing packed allgather, argmax, and
+acceptance on both ranks with a one-destination gather, rank-zero argmax/unchanged acceptance,
+and exact decision replication. It uses the real padded vocabulary 248320 (248077 logical),
+K=3, B=1, extent=3, both device streams joined, and 31 rotating paired samples by default.
+Greedy and nondegenerate stochastic configurations run separately; the latter retains the
+original sampler, penalties, RNG key, and occurrence-counter effects. This is an isolated
+schedule experiment, not an end-to-end engine throughput claim.
+
+```powershell
+.\build\windows\bench\ninfer_speculative_rank0_bench.exe --sampling both --mode both
+.\build\windows\bench\ninfer_speculative_rank0_bench.exe --sampling both --mode graph --no-mailbox
+```
+
+The default eager gather uses explicit pinned staging; graphs use the captured copy path and,
+when enabled, a compact one-way mapped mailbox for the decision. The benchmark checks actual
+mailbox flags after both GPUs retire and reports enqueue, joined-device, and complete wall time.
+Logit shards stay resident. Frontier/counter reset, output poisoning, and mailbox reset occur
+outside each measured interval for both routes. Independent raw-bit gather/argmax checks and
+state/counter invariants run before timing, on each route's final timed state before reset, and
+after a fresh poisoned replay; complete decisions must match the baseline exactly. Probability
+qualification remains the existing FP64 sampler/speculative-round oracle suite.
+
+`ninfer_speculative_rank0_test [--reverse-devices]` adds changed no-sync calls, shortened extents
+including zero, duplicate licensed tokens, mixed greedy/stochastic rows, null counters, asymmetric
+shards, exact guards, and replay/whole-graph update between two live owners. The test
+passed in both device orders; Compute Sanitizer memcheck with stream-ordered race tracking
+reported zero errors. Existing exact-gather and independent FP64 speculative tests also passed.
+
+The K3/B1 decision transfers 32 bytes: four licensed tokens, frontier, anchor,
+licensed count and accepted count. Each rank's decision arena bound is 256 bytes;
+the one-way T4 logit gather needs 993280 bytes of rank-zero scratch and none on
+rank one. These are primitive bounds, not a measured reduction in total engine memory.
+
+Measured median complete-pipeline wall time on this Windows dual 5070 Ti host:
+
+| Execution / decision transport | Sampling | Both ranks (us) | Rank zero (us) |
+| --- | --- | ---: | ---: |
+| Eager / event copy | greedy | 321.9 | 391.2 |
+| Graph / mailbox | greedy | 394.5 | 265.7 |
+| Eager / event copy | stochastic | 318.2 | 395.4 |
+| Graph / mailbox | stochastic | 439.3 | 306.6 |
+| Graph / event-copy fallback | greedy | 409.7 | 307.2 |
+| Graph / event-copy fallback | stochastic | 445.4 | 358.4 |
+| Graph / mailbox, reversed devices | greedy | 403.3 | 286.0 |
+| Graph / mailbox, reversed devices | stochastic | 437.9 | 313.6 |
+
+Captured execution improves with the mailbox, its event-copy fallback and reversed
+device order. Eager execution is slower. The next runtime experiment should select
+rank-zero acceptance during CUDA capture and retain replicated acceptance eagerly.
+Runtime integration and end-to-end gains remain unproven; the measured benefit is
+for this acceptance pipeline. [Validation and timing record](../diagnostics/rank0-acceptance-op-validation.json).
