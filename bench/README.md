@@ -1028,10 +1028,12 @@ Measured median complete-pipeline wall time on this Windows dual 5070 Ti host:
 | Graph / mailbox, reversed devices | stochastic | 437.9 | 313.6 |
 
 Captured execution improves with the mailbox, its event-copy fallback and reversed
-device order. Eager execution is slower. The next runtime experiment should select
-rank-zero acceptance during CUDA capture and retain replicated acceptance eagerly.
-Runtime integration and end-to-end gains remain unproven; the measured benefit is
-for this acceptance pipeline. [Validation and timing record](../diagnostics/rank0-acceptance-op-validation.json).
+device order. Eager execution is slower. The qualified runtime now selects
+rank-zero acceptance during CUDA capture and retains replicated acceptance eagerly.
+These resident-logit timings remain acceptance-pipeline measurements; the separate
+[full-engine qualification](../diagnostics/rank0-acceptance-runtime-validation.json)
+records response parity and 8K/100K throughput.
+[Operator validation and timing record](../diagnostics/rank0-acceptance-op-validation.json).
 
 ## Local TP2 mailbox geometry experiment
 
