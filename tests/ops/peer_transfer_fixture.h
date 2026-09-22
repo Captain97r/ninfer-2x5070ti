@@ -6,6 +6,7 @@
 
 #include <array>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace ninfer::test {
@@ -68,6 +69,11 @@ public:
     }
 
     ~PeerTransferFixture() {
+        // The transfer may have auxiliary source-copy work after a partially enqueued Op.
+        // Retire its complete resource before freeing any input/staging allocation below.
+        {
+            ops::PeerTransfer retiring(std::move(transfer));
+        }
         for (int rank = 0; rank < 2; ++rank) {
             (void)cudaSetDevice(execution.dev[rank]->device);
             (void)cudaStreamSynchronize(execution.dev[rank]->stream);

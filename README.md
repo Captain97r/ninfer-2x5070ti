@@ -137,7 +137,8 @@ the [base fork records the same failure](https://github.com/ivanov84/ninfer-wind
 - Exact distributed MTP draft argmax with compact candidate transfer, preserving
   global tie/NaN handling, padding exclusion and token-ID mapping.
 - Explicit pinned-host staging for large eager TP2 prefill collectives, preserving
-  BF16 arithmetic and the captured transport path.
+  BF16 arithmetic and the captured transport path. Full 10 MiB reductions use
+  two copy tiles on the qualified Windows dual-5070-Ti profile.
 - Exact packed target-logit gathering with explicitly planned peer scratch;
   one-token gathering and optimized draft selection retain their existing paths.
 - Captured TP2 MTP acceptance on rank zero, with exact compact decision transfer
@@ -174,11 +175,19 @@ and [measurement details](docs/performance.md#local-dual-5070-ti-packed-target-l
 
 Captured rank-zero acceptance adds **0.73% / 0.59% TG** in a fresh matched comparison,
 reaching **206.61 / 177.92 tokens/s** at 8K / 100K on that synthetic corpus.
-The current focused runner with `-Model` passes **18/18** checks, and all **29**
+That build passed **18/18** focused checks, and all **29**
 short, stochastic and retrieval response observables match their saved references.
 Baseline task scores remain 16/18, 5/7 and 4/4; these checks do not claim perfect
 model accuracy. [Runtime evidence](diagnostics/rank0-acceptance-runtime-validation.json)
 and [measurement details](docs/performance.md#local-dual-5070-ti-captured-rank-zero-acceptance).
+
+The current two-tile prompt-transfer build passes **19/19** focused checks and
+preserves all **29** saved response observables. Against the preceding runtime,
+prompt processing increased from 3138.39 to **3206.52 tok/s at 8K** and from
+2289.11 to **2324.17 tok/s at 100K** (**2.17% / 1.53%**). Generation is unchanged
+at approximately **206.76 / 178.01 tok/s** on that synthetic corpus. No weight,
+activation or KV precision changes were made. [Runtime evidence](diagnostics/peer-transfer-pipeline-runtime-validation.json)
+and [measurement details](docs/performance.md#local-dual-5070-ti-two-tile-prompt-transfers).
 
 A separate short-prompt serving comparison against the original local engine
 measured **149.1 tok/s for Python, 117.3 for prose and 205.3 for structured output**,

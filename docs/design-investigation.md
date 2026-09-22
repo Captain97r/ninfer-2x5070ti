@@ -452,10 +452,10 @@ Across a 100K prompt this represents roughly 132 GB of logical hidden data in
 each direction, before counting the host-staging legs. This large volume explains
 why PCIe topology remains relevant even though the weights stay on the GPUs.
 
-The eager [bulk reduction](../src/ops/common/allreduce.cu#L292) issues event
-records, waits, two cross-device copies and two combine kernels. Prefill retires
-both streams at chunk boundaries. Determine how much time belongs to transfers,
-GPU work and host submission before choosing between these distinct changes:
+The eager [bulk reduction](../src/ops/common/allreduce.cu) stages both ranks'
+bytes through pinned host memory with event dependencies and two local combine
+kernels. Prefill retires both streams at chunk boundaries. The original candidate
+set separates transfer, GPU-compute and host-submission costs:
 
 - **Descriptor reuse:** both Windows TMA wrappers allocate/copy/free descriptors
   on each call. Preplanned per-Program, per-stream storage can remove allocation
@@ -476,13 +476,25 @@ GPU work and host submission before choosing between these distinct changes:
   approximation and is excluded from the quality-preserving implementation track.
   Finite evaluation cannot establish that additional lossy compression is lossless.
 
-A bounded 10 MiB eager allreduce experiment now qualifies two/four-tile host
-copies on separate owned D2H streams, retaining the exact full-buffer sum. Two
-tiles reduced complete collective latency by about 3% in both GPU orders, with
-higher CPU enqueue cost. Changing inputs, all outputs/publications, mixed routes,
-pending-owner teardown and sanitizer checks passed. This justifies a separate
-runtime trial; it is not yet a measured PP gain. Both cards report one asynchronous
-copy engine under WDDM. [Evidence](../diagnostics/peer-transfer-pipeline-validation.json).
+The bounded two/four-tile experiment selected two tiles, which now ship for exact
+10 MiB eager reductions on the qualified Windows WDDM dual-70-SM profile without
+CUDA peer access. Additional owned D2H streams reuse the existing pinned buffers;
+arithmetic and captured transport are unchanged. Public operator latency fell by
+about 3% in both rank orders, with higher CPU enqueue cost. Full-model PP increased
+by **2.17% at 8K and 1.53% at 100K**, with unchanged TG and speculative counts.
+All 19 focused tests, the lifetime sanitizer, and all 29 exact response comparisons
+passed; task scores remain 16/18, 5/7 and 4/4. Both cards report one asynchronous
+copy engine under WDDM, so no bidirectional DMA-overlap claim follows from these
+measurements. [Runtime evidence](../diagnostics/peer-transfer-pipeline-runtime-validation.json)
+and [method](performance.md#local-dual-5070-ti-two-tile-prompt-transfers).
+
+Keep chunk 1024 for the measured product configuration. Changing it to 512 or 2048
+also changes the fused NVFP4 SwiGLU arithmetic route, and 512 leaves the current
+linear/down TMA path. Such a change needs its own numerical and state qualification.
+Descriptor reuse is deferred: the trace gives limited evidence for its end-to-end
+benefit, and removing allocation alone does not remove descriptor upload/encoding.
+An immutable Program-owned binding design would be needed to remove those costs
+without introducing mutable descriptor or graph-lifetime hazards.
 
 An example occupancy question is the current down-projection grid at T1024:
 40 times four tiles gives 160 CTAs over 70 SMs. Different tile sizes or staging
@@ -583,16 +595,19 @@ engine. It retains eight capped outputs and one early Python response containing
 raw tool-like text. This extends response-parity evidence; it does not add nine
 successful tasks or establish 100K coding throughput.
 
-## Implementation order
+## Implementation status and remaining investigations
 
-1. Resolve the descriptor lifetime and strengthen same-state TP2/MTP and sampling
-   qualification. Establish a representative quality/performance panel.
-2. Implement exact distributed draft argmax and measure its direct effect, then
-   qualify greedy target selection or rank-0 stochastic acceptance if useful.
-   Restore supported CUDA timeline profiling for bottleneck attribution in parallel.
-3. Remove descriptor churn and tune prefill chunks, fusion and bulk transport
-   according to the timeline. Retune the important FP8/FP4 shard kernels on 70 SMs.
-4. Qualify broader prefix reuse, MTP-window/precision experiments and Linux.
+Descriptor ownership, exact draft selection, packed target gathering, captured
+rank-zero acceptance and staged/tiled bulk transfers are implemented and qualified.
+Supported CUDA timeline profiling identified the measured kernel and transport
+candidates. Tile/CTA alternatives that lost operator or full-model performance
+were rejected; their benchmark evidence remains reproducible without enabling
+them in the engine.
+
+Broader prefix reuse, different MTP windows, changed precision routes, descriptor
+reuse and Linux execution remain separate investigations. They are not enabled
+by this performance pass. The current defaults retain the qualified arithmetic,
+MTP3 and 1024-token chunk schedule.
 
 There is concrete room to investigate, but no measured basis yet for promising
 200/250/300 tok/s on real coding sessions or a fixed PP multiplier. A speedup is

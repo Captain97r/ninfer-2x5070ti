@@ -170,9 +170,51 @@ allocated. Overall workspace capacity/observed peak remain 202304000/117743616
 bytes. [Runtime evidence](../diagnostics/rank0-acceptance-runtime-validation.json),
 [operator qualification and eager comparison](../diagnostics/rank0-acceptance-op-validation.json).
 
+## Local dual-5070-Ti two-tile prompt transfers
+
+On the qualified native Windows WDDM pair (sm_120, 70 SMs each, no CUDA peer
+access), eager full-chunk 10 MiB hidden reductions now use two 5 MiB copy tiles
+per rank. Each `PeerTransfer` owns its additional D2H streams/events and reuses
+its existing pinned buffers. The full-buffer BF16 sum is unchanged. Other sizes,
+gathers and captured collectives retain their previous schedules; this is an
+internal hardware/payload choice, with no new user setting.
+
+The public-operator benchmark measured about 3% lower complete collective latency
+in both rank orders across 31 alternating paired samples per order. CPU enqueue
+cost increased; both devices report only one asynchronous copy engine, and this
+result does not establish actual bidirectional DMA overlap. It motivated the
+following full-model comparison against preserved pre-change binaries.
+
+Both binaries used the pinned Qwen3.8-27B v2 artifact, TP2, INT8-G64 KV, MTP3,
+optimized draft head, chunk 1024, CUDA Graphs and 102,400-token capacity. Sequential
+process blocks each ran one warmup and three measured repetitions on the same
+cycling corpus. Values are means +/- sample standard deviations.
+
+| Prompt / generated tokens | Before PP, tok/s | After PP, tok/s | PP gain | Before / after TG, tok/s |
+|---|---:|---:|---:|---:|
+| 8192 / 256 | 3138.39 +/- 2.13 | 3206.52 +/- 0.71 | 2.17% | 206.72 +/- 0.09 / 206.76 +/- 0.03 |
+| 100000 / 512 | 2289.11 +/- 0.68 | 2324.17 +/- 0.41 | 1.53% | 177.93 +/- 0.08 / 178.01 +/- 0.09 |
+
+TG is effectively unchanged; no generation gain is claimed for this change.
+Speculative counts match exactly and acceptance remains 97.95% / 93.55%, so these
+synthetic rates do not establish ordinary coding/chat throughput. Reported device
+workspace capacity/allocator peak remain 202304000/117743616 bytes; pinned-buffer
+capacity is unchanged. Stream/event resources increase, with no hot-path allocation.
+
+The focused Windows runner passed 19/19 checks. The new operator regression checks
+changing full-index inputs, exact independent sum/gather oracles, shared-buffer
+handoffs across mixed payloads, graph fallback and pending-owner move/destruction
+in both rank orders. Compute Sanitizer memcheck reported zero errors. All 29 frozen
+HTTP response observables match, including vision, tools, stochastic penalties and
+retrieval through 100K. Task scores remain 16/18, 5/7 and 4/4; existing failures are
+retained, and this is bounded regression evidence rather than broad model-quality
+equivalence. Linux was not executed locally and retains the prior transfer path.
+[Runtime evidence](../diagnostics/peer-transfer-pipeline-runtime-validation.json),
+[benchmark commands](../bench/README.md#local-eager-tp2-transfer-schedule-comparison).
+
 ## Local dual-5070-Ti short-prompt serving comparison
 
-The original local engine (`f07b80b2`) and the current runtime (`ca2b5991`)
+The original local engine (`f07b80b2`) and the rank-zero-acceptance runtime (`ca2b5991`)
 served the same three existing scenario fixtures with three fixed seeds each.
 Both used the pinned Qwen3.8-27B v2 artifact, TP2/MTP3, optimized draft head,
 INT8-G64 KV, chunk 1024, CUDA Graphs, vision enabled and 102,400-token capacity.
@@ -180,7 +222,7 @@ Thinking was disabled; registered stochastic defaults were retained (temperature
 0.7, top-p 0.8, top-k 20, presence penalty 1.5). Three same-cap warmups preceded
 nine measured requests per process. Prefix reuse stayed enabled.
 
-| Scenario | Original TG, tok/s | Current TG, tok/s | Mean TG gain |
+| Scenario | Original TG, tok/s | Optimized TG, tok/s | Mean TG gain |
 |---|---:|---:|---:|
 | Python package | 139.89 +/- 9.32 | 149.11 +/- 9.68 | 6.59% |
 | Mystery prose | 110.28 +/- 1.66 | 117.29 +/- 1.78 | 6.36% |

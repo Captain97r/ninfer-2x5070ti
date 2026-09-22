@@ -874,6 +874,10 @@ cross-device copies with explicit portable pinned staging on a pair without P2P.
 Defaults are 128 consecutive reductions per batch and five alternating-order pairs,
 after eight warmup reductions per route. Payloads are 64 KiB, 1 MiB, and the real
 10 MiB `[5120,1024]` BF16 prefill shape; allocation and input reset are outside timing.
+The explicit route uses the current `Automatic` policy: the qualified full 10 MiB
+reduction uses two tiles, while smaller payloads retain whole-buffer staging. For a
+public comparison of these schedules at the same size, use the
+[transfer schedule benchmark](#local-eager-tp2-transfer-schedule-comparison) below.
 
 Each JSON sample records host enqueue time, complete wall time, per-rank CUDA event
 time, and a device-0 event interval joined after device 1 completes. Cross-device
@@ -1223,13 +1227,20 @@ warps for four-warp CTAs versus 16 for eight-warp CTAs. These are theoretical
 resource limits. Four warps remains the production choice; no engine gain is
 claimed. [Evidence](../diagnostics/nvfp4-down-cta-validation.json).
 
-## Local eager TP2 transfer pipeline experiment
+## Local eager TP2 transfer schedule comparison
 
-`ninfer_peer_transfer_pipeline_bench` compares public pinned allreduce with private
-two/four-tile copies for exactly 10 MiB per rank. Each candidate owns one extra
-D2H stream per GPU, ordering events and guarded pinned buffers. Main streams pull
-peer tiles, join all source/host-buffer readers, then use the unchanged full-buffer
-BF16 sum. There is no captured or production routing change in this experiment.
+`ninfer_peer_transfer_pipeline_bench` compares the same public `allreduce_sum` Op
+using separately owned `PeerTransferSchedule::Automatic` and `WholeBuffer`
+resources for exactly 10 MiB per rank. `Automatic` uses two 5 MiB tiles only on
+Windows WDDM when both GPUs are sm_120 with 70 SMs, neither direction supports
+CUDA P2P, pinned capacity is sufficient, and neither stream is capturing.
+`WholeBuffer` is an internal reference policy, not a serving or benchmark CLI
+option. The benchmark checks actual route selection and skips an unqualified pair.
+
+The automatic resource owns one additional D2H stream and two tile-ready events
+per GPU. Main streams pull the peer tiles and join all source and pinned-buffer
+readers before the unchanged full-buffer BF16 sum. Other payload sizes, gathers,
+and captured transport retain their existing schedules.
 
 ```powershell
 .\tools\build_windows.ps1 -Action Build -Target ninfer_peer_transfer_pipeline_bench
@@ -1237,18 +1248,35 @@ BF16 sum. There is no captured or production routing change in this experiment.
 .\build\windows\bench\ninfer_peer_transfer_pipeline_bench.exe 32 31
 ```
 
-The reduced run still executes all numerical/lifetime checks. Full-coordinate
-changing inputs prevent repeated tile patterns from hiding wrong-offset copies.
-Every output and pinned publication is checked across consecutive calls, delayed
-producers, mixed routes, both GPU orders, and pending-owner destruction. Timings
-rotate 31 paired batches after eight warmups; all 32 sums in a batch are joined
-before elapsed time is recorded. Host enqueue, complete wall and joined device
-intervals are separate. Final timed outputs are checked before each reset.
+The two arguments are collectives per batch and paired samples; defaults are
+32 and 31. The reduced run still executes all numerical and lifetime checks.
+Full-coordinate changing inputs prevent repeated tile patterns from hiding
+wrong-offset copies. Every output and pinned publication is checked across
+consecutive calls, delayed producers, mixed owners, both GPU orders, and pending
+owner destruction. The separate `ninfer_peer_transfer_pipeline_test` also checks
+same-owner transitions through odd partial reductions, unequal exact gathers,
+captured fallback, and moves with queued work.
 
-Two tiles reduced median joined latency from 1566/1564 us to 1520/1518 us for
-normal/reversed GPU order (about 3% by paired ratio), while increasing host enqueue
-time. Four tiles was slightly slower than two and submitted more work. The full
-correctness matrix passed, including Compute Sanitizer with stream-ordered race
-tracking and zero reported errors. Both GPUs report one asynchronous copy engine
-under WDDM; the result does not claim simultaneous bidirectional DMA or an engine
-PP improvement. [Evidence](../diagnostics/peer-transfer-pipeline-validation.json).
+Each timing sample alternates the two public schedules after eight warmups per
+route. Input reset occurs outside timing; repeated sums use finite zeros, with
+changing nonzero qualification before and after timing. The completion event
+joins both GPUs after all 32 sums. Host enqueue, complete wall and joined-device
+intervals are reported separately and must not be summed. Each route's resident
+timed outputs, pinned publication and guards are checked before the next reset.
+
+The current public comparison measured median joined latency of 1565.9/1563.5 us
+for `WholeBuffer` and 1519.5/1519.3 us for `Automatic` in normal/reversed device
+order. All 62 matched pairs favored `Automatic`; paired median latency reductions
+were 3.00% and 2.90%, with higher host enqueue time. Numerical, ownership and
+stream-ordered sanitizer checks passed. Both GPUs report one asynchronous copy
+engine under WDDM; these timings establish a collective improvement without
+proving simultaneous bidirectional DMA. The separate
+[runtime validation](../diagnostics/peer-transfer-pipeline-runtime-validation.json)
+records the public schedule qualification, full-engine PP/TG comparison and
+response checks.
+
+The earlier [private schedule experiment](../diagnostics/peer-transfer-pipeline-validation.json)
+compared two and four tiles against the former whole-buffer route. Four tiles
+submitted more work and was slightly slower than two. That record preserves the
+historical selection evidence; the current executable measures only the two
+public policies described above.

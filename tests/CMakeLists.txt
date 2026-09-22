@@ -335,6 +335,10 @@ set_tests_properties(ninfer_allgather_columns_test PROPERTIES TIMEOUT 180)
 ninfer_add_op_test(ninfer_peer_transfer_test
   SOURCES ops/test_peer_transfer.cpp
   LIBRARIES ninfer_ops)
+ninfer_add_op_test(ninfer_peer_transfer_pipeline_test
+  SOURCES ops/test_peer_transfer_pipeline.cpp
+  LIBRARIES ninfer_ops)
+set_tests_properties(ninfer_peer_transfer_pipeline_test PROPERTIES TIMEOUT 300)
 ninfer_add_op_test(ninfer_argmax_row_parallel_test
   SOURCES ops/test_argmax_row_parallel.cpp
   LIBRARIES ninfer_ops)

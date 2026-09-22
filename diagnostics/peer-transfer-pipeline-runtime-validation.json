@@ -1,0 +1,359 @@
+{
+  "schema_version": 1,
+  "stage": 18,
+  "status": "accepted",
+  "change": "Enable the measured two-tile eager 10 MiB allreduce schedule for the qualified Windows dual-5070-Ti profile; preserve whole-buffer and captured fallback paths.",
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows WDDM, no CUDA P2P; CUDA runtime/driver 13.4.",
+  "artifact": "Pinned Qwen3.8-27B mixed NVFP4 NInfer v2 (registered qwen3_8_27b / nvfp4).",
+  "inference_math_changed": false,
+  "operator": {
+    "schedule": "Automatic (WholeBuffer retained as the public reference)",
+    "payload_bytes_per_rank": 10485760,
+    "tiles": 2,
+    "gate": "Windows WDDM; both devices sm_120, 70 SM; CUDA peer access denied both ways; sufficient provisioned pinned capacity; exact 10 MiB; neither main stream capturing.",
+    "owned_resources": "Reuse the per-rank portable pinned buffers; add one nonblocking D2H stream and two tile-ready events per rank. No new device scratch or Op-time allocation.",
+    "ordering": "Both current tile publications precede peer waits; main streams join their outgoing copy and the peer's inbound copy before combining or reusing storage. Owner teardown retires all four streams.",
+    "arithmetic": "The existing full-buffer residual_add is unchanged: BF16 inputs, FP32 sum, one BF16 store rounding.",
+    "fallback": "Other sizes/gathers retain existing transport; captured 10 MiB calls retain the previous fallback."
+  },
+  "operator_validation": {
+    "target": "ninfer_peer_transfer_pipeline_test",
+    "result": "passed",
+    "rank_orders": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "eager": "Three epochs per policy/order: 10 MiB sum -> 131078-byte sum -> 10 MiB sum -> unequal 65542/98314-byte gather -> 10 MiB sum, all on one pinned-buffer owner without intervening host synchronization.",
+    "oracle": "Full independent FP64 sums of bounded represented inputs and byte-exact gathers (including NaN payloads/signed zero); full-index/rank/call/epoch changing input.",
+    "reuse": "Every output/publication retained, including partial-transfer tails; device/pinned guards and alternating delayed producers.",
+    "capture_and_lifetime": "Two changed graph replays/order, untouched pinned buffers during capture, subsequent eager reuse; in-flight move, swap assignment and destructor retirement. Fixture owner retires before device storage is freed.",
+    "route_admission": "Automatic asserted active, WholeBuffer asserted inactive; actual pinned publications checked.",
+    "compute_sanitizer_errors": 0
+  },
+  "operator_performance": {
+    "comparison": "Public allreduce_sum, Automatic versus explicit WholeBuffer.",
+    "samples": 124,
+    "qualification_records": 20,
+    "owner_retirement_records": 4,
+    "failures": 0,
+    "method": "8 warmup collectives/route; 31 alternating paired samples/order, 32 zero-input in-place sums/sample. Full nonzero qualification before/after timing and resident checks after every sample.",
+    "timing_scope": "Joined CUDA event interval includes both ranks' completed sums. Host enqueue and complete-wall intervals are reported separately. Source setup and correctness checks are outside timing.",
+    "orders": [
+      {
+        "rank_order": [
+          0,
+          1
+        ],
+        "paired_samples": 31,
+        "collectives_per_sample": 32,
+        "joined_device": {
+          "median_us_per_collective": {
+            "whole-buffer": 1565.876959,
+            "automatic": 1519.536972
+          },
+          "median_paired_automatic_over_whole": 0.97003788
+        },
+        "host_enqueue": {
+          "median_us_per_collective": {
+            "whole-buffer": 57.78125,
+            "automatic": 97.321875
+          },
+          "median_paired_automatic_over_whole": 1.69825049
+        }
+      },
+      {
+        "rank_order": [
+          1,
+          0
+        ],
+        "paired_samples": 31,
+        "collectives_per_sample": 32,
+        "joined_device": {
+          "median_us_per_collective": {
+            "whole-buffer": 1563.542009,
+            "automatic": 1519.27805
+          },
+          "median_paired_automatic_over_whole": 0.97098326
+        },
+        "host_enqueue": {
+          "median_us_per_collective": {
+            "whole-buffer": 57.08125,
+            "automatic": 94.415625
+          },
+          "median_paired_automatic_over_whole": 1.65286019
+        }
+      }
+    ],
+    "tradeoff": "Joined completion improves about 3%; host enqueue cost rises about 65-70% by median paired ratio. Whole-engine measurements below decide adoption."
+  },
+  "focused_regression": {
+    "passed": 19,
+    "failed": 0,
+    "wall_seconds": 103.04,
+    "prefix": "Eager and graphs: four matched-schedule restore/replay controls have exact first logits, 16/16 continuation tokens and MTP counts; peer egress agrees in 75 rounds/mode.",
+    "existing_different_schedule_diagnostic": "11/16 initial tokens agree; first-logit max_abs 0.40625, RMS 0.0756257. This diagnostic is not the matched-schedule exactness contract."
+  },
+  "model_performance": {
+    "comparison": "Fresh preserved pre-change engine versus Automatic candidate, sequential run blocks.",
+    "config": {
+      "tp": 2,
+      "devices": [
+        0,
+        1
+      ],
+      "max_context": 102400,
+      "prefill_chunk": 1024,
+      "kv_cache": "int8-group64",
+      "mtp_draft_tokens": 3,
+      "proposal_head": "optimized",
+      "use_cuda_graph": true,
+      "decode_path": "mtp_cuda_graph",
+      "repetitions": 3,
+      "warmup": 1,
+      "corpus_path": "build/bench_corpus_100000.ids"
+    },
+    "command_template": "ninfer_bench --weights <pinned-v2.ninfer> --tp 2 --devices 0,1 --corpus build/bench_corpus_100000.ids -pg 8192,256 -pg 100000,512 --max-ctx 102400 --prefill-chunk 1024 --kv-dtype int8 --mtp-draft-tokens 3 --lm-head-draft --warmup 1 -r 3 -o json --output-file <report.json>",
+    "configuration_equal": true,
+    "workloads": [
+      {
+        "workload": "pp8192+tg256",
+        "prompt_tokens": 8192,
+        "decode_tokens": 256,
+        "before": {
+          "prefill_tok_s_mean": 3138.390814,
+          "prefill_tok_s_stddev": 2.127795276,
+          "decode_output_tok_s_mean": 206.7224101,
+          "decode_output_tok_s_stddev": 0.08656575658
+        },
+        "automatic": {
+          "prefill_tok_s_mean": 3206.52237,
+          "prefill_tok_s_stddev": 0.705039444,
+          "decode_output_tok_s_mean": 206.7586303,
+          "decode_output_tok_s_stddev": 0.03059401921
+        },
+        "prefill_gain_percent": 2.170907,
+        "decode_change_percent": 0.017521,
+        "speculative_counts_equal_in_aggregate_and_each_repetition": true,
+        "speculative": {
+          "enabled": true,
+          "draft_window": 3,
+          "rounds": 195,
+          "drafted_tokens": 585,
+          "accepted_tokens": 573,
+          "fallback_steps": 0,
+          "acceptance_rate": 0.9794871795,
+          "acceptance_length": 3.938461538,
+          "accepted_per_position": [
+            195,
+            192,
+            186
+          ]
+        }
+      },
+      {
+        "workload": "pp100000+tg512",
+        "prompt_tokens": 100000,
+        "decode_tokens": 512,
+        "before": {
+          "prefill_tok_s_mean": 2289.113528,
+          "prefill_tok_s_stddev": 0.6805208677,
+          "decode_output_tok_s_mean": 177.9347176,
+          "decode_output_tok_s_stddev": 0.08291502789
+        },
+        "automatic": {
+          "prefill_tok_s_mean": 2324.173382,
+          "prefill_tok_s_stddev": 0.4086411167,
+          "decode_output_tok_s_mean": 178.010293,
+          "decode_output_tok_s_stddev": 0.09021127669
+        },
+        "prefill_gain_percent": 1.531591,
+        "decode_change_percent": 0.042474,
+        "speculative_counts_equal_in_aggregate_and_each_repetition": true,
+        "speculative": {
+          "enabled": true,
+          "draft_window": 3,
+          "rounds": 405,
+          "drafted_tokens": 1209,
+          "accepted_tokens": 1131,
+          "fallback_steps": 0,
+          "acceptance_rate": 0.935483871,
+          "acceptance_length": 3.792592593,
+          "accepted_per_position": [
+            387,
+            375,
+            369
+          ]
+        }
+      }
+    ],
+    "interpretation": "Prefill throughput increases 2.17% at 8K and 1.53% at 100K. Decode throughput is effectively unchanged in these runs.",
+    "device_workspace": {
+      "reported_planned_peak_bytes_before_and_after": 202304000,
+      "reported_allocator_peak_bytes_before_and_after": 117743616,
+      "scope": "These are the reported device-workspace fields for both workloads, not total process or CUDA Graph memory."
+    }
+  },
+  "quality": {
+    "result": "Exact observable regression passed; task accuracy remains 25/29.",
+    "complete": true,
+    "all_observables_equal": true,
+    "observable_matches": 29,
+    "new_task_failures": 0,
+    "all_tasks_passed": false,
+    "task_passes": 25,
+    "task_failures": 4,
+    "observable_fields": [
+      "content",
+      "reasoning_content",
+      "reasoning",
+      "tool_calls",
+      "finish_reason",
+      "completion_tokens"
+    ],
+    "runtime_options": [
+      "--tp",
+      "2",
+      "--devices",
+      "0,1",
+      "--max-context",
+      "102400",
+      "--kv-capacity",
+      "102400",
+      "--kv-dtype",
+      "int8",
+      "--prefill-chunk",
+      "1024",
+      "--vision",
+      "--image-max-tokens",
+      "2048",
+      "--max-concurrency",
+      "1",
+      "--default-max-tokens",
+      "102400",
+      "--spec",
+      "mtp",
+      "--draft-tokens",
+      "3",
+      "--lm-head-draft"
+    ],
+    "command_template": "python3.11 tools/run_quality_windows.py --label <new-label> --fixtures <panel.json> --baseline <saved-compatible-reference.json>",
+    "panels": [
+      {
+        "name": "short",
+        "fixture": "tests/data/quality-panel.json",
+        "cases": 18,
+        "task_passes": 16,
+        "all_observables_equal": true,
+        "case_ids": [
+          "provided-fact",
+          "missing-fact",
+          "typed-json-extraction",
+          "filter-negated-records",
+          "english-format-instruction",
+          "russian-format-instruction",
+          "chinese-json-instruction",
+          "integer-inventory-arithmetic",
+          "code-repair-as-json",
+          "tool-record-arguments",
+          "tool-typed-unicode-arguments",
+          "history-initial",
+          "history-append",
+          "history-rewind-branch",
+          "bounded-thinking-arithmetic",
+          "quoted-data-is-not-instruction",
+          "vision-red-circles-left",
+          "vision-red-circles-right"
+        ],
+        "report": "build/quality/stage18-pipeline-short.json",
+        "baseline": "diagnostics/quality-reference.json"
+      },
+      {
+        "name": "stochastic",
+        "fixture": "tests/data/stochastic-panel.json",
+        "cases": 7,
+        "task_passes": 5,
+        "all_observables_equal": true,
+        "case_ids": [
+          "stochastic-typed-json-extraction",
+          "stochastic-tool-typed-unicode-arguments",
+          "stochastic-history-initial",
+          "stochastic-history-append",
+          "stochastic-history-rewind-branch",
+          "stochastic-bounded-thinking-arithmetic",
+          "stochastic-repeated-json"
+        ],
+        "report": "build/quality/stage18-pipeline-stochastic.json",
+        "baseline": "diagnostics/stochastic-reference.json"
+      },
+      {
+        "name": "retrieval",
+        "fixture": "tests/data/retrieval-panel.json",
+        "cases": 4,
+        "task_passes": 4,
+        "all_observables_equal": true,
+        "case_ids": [
+          "retrieve-4k",
+          "retrieve-32k",
+          "retrieve-100k",
+          "absent-100k"
+        ],
+        "report": "build/quality/stage18-pipeline-retrieval.json",
+        "baseline": "diagnostics/retrieval-reference.json",
+        "prompt_tokens": [
+          4068,
+          32758,
+          99985,
+          99966
+        ]
+      }
+    ],
+    "existing_failures": [
+      {
+        "id": "integer-inventory-arithmetic",
+        "status": "unchanged baseline task failure",
+        "rule_detail": "JSON value comparison",
+        "detail": "Returns remaining=41 where the fixture requires 37."
+      },
+      {
+        "id": "code-repair-as-json",
+        "status": "unchanged baseline task failure",
+        "rule_detail": "JSON value comparison",
+        "detail": "Correct expression retains four leading spaces where the fixture requires an unindented replacement."
+      },
+      {
+        "id": "stochastic-history-initial",
+        "status": "unchanged baseline task failure",
+        "rule_detail": "visible answer is not a complete JSON value",
+        "detail": "Wraps otherwise valid JSON in Markdown fences, rejected by whole-content JSON scoring."
+      },
+      {
+        "id": "stochastic-repeated-json",
+        "status": "unchanged baseline task failure",
+        "rule_detail": "visible answer is not a complete JSON value",
+        "detail": "Wraps the JSON array in Markdown fences, rejected by whole-content JSON scoring."
+      }
+    ]
+  },
+  "limits": [
+    "One fixed synthetic corpus; three measured repetitions after one warmup in sequential run blocks. Performance gains are workload-specific.",
+    "Exact arithmetic/state/public-response checks qualify this transport change, not broad model quality or token-ID/distribution equivalence. Existing NVFP4/INT8/sampler limitations remain.",
+    "The hardware/size gate is narrow; other systems/shapes retain existing paths.",
+    "Streams/events are added. Reported device-workspace equality does not establish unchanged CPU, graph or total process memory.",
+    "No achieved-bandwidth or measured DMA-overlap claim."
+  ],
+  "evidence": {
+    "operator_integration": "build/optimization-research/stage18-integration.log",
+    "operator_memcheck": "build/optimization-research/stage18-memcheck.log",
+    "operator_timing": "build/optimization-research/stage18-public-timing.json",
+    "focused_regression": "build/optimization-research/stage18-focused.log",
+    "model_before": "build/optimization-research/stage18-before.json",
+    "model_automatic": "build/optimization-research/stage18-pipeline.json"
+  },
+  "application_build": "ninfer, ninfer-serve and ninfer_bench rebuilt successfully; ninfer --help exits 0."
+}
