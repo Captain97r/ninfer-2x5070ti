@@ -418,6 +418,10 @@ for S3; 5.4-11.2% for S2). All still reported one resident CTA/SM. The existing
 M256/S3 schedule is retained. This is a kernel result, not a PP throughput gain.
 [Evidence and numerical scope](../diagnostics/nvfp4-down-tma-validation.json).
 
+The register-limited M128/S2/min2 followup did reach two resident CTAs at 96
+registers/thread and preserved all checked output bits, but was 10.7-20.3% slower.
+Higher occupancy therefore does not justify replacing the existing kernel.
+
 ### 4. MTP windows require quality qualification
 
 The hidden-reduction count grows as `128 + 3K` in a normal K-draft round, and each

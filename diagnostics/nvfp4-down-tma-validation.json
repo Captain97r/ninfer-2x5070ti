@@ -317,7 +317,200 @@
   "limits": [
     "Kernel-only captured timing does not measure shipping eager prefill or total prompt throughput.",
     "These min1 schedules all report one resident CTA per SM; lower shared memory alone did not increase occupancy.",
-    "Different launch-bound/register schedules remain unmeasured.",
-    "Linux not executed locally."
-  ]
+    "Linux not executed locally.",
+    "The min2 followup settles the measured occupancy hypothesis; it is not an exhaustive search of possible new kernel designs."
+  ],
+  "launch_bound_followup": {
+    "candidate": "M128/S2/min2, unchanged per-output arithmetic",
+    "decision": "Reject: achieved higher occupancy but is slower in every setting; retain M256/S3/min1",
+    "compilation": "Same non-RDC target, ptxas verbose enabled for this benchmark only",
+    "resources": {
+      "threads_per_cta": 288,
+      "dynamic_shared_bytes": 39040,
+      "compiled_registers_per_thread": 96,
+      "occupancy_api_ctas_per_sm": 2,
+      "identity": {
+        "local_bytes_per_thread": 8,
+        "ptxas_stack_frame_bytes": 8,
+        "ptxas_spill_store_bytes": 4,
+        "ptxas_spill_load_bytes": 4
+      },
+      "residual": {
+        "local_bytes_per_thread": 0,
+        "ptxas_stack_frame_bytes": 0,
+        "ptxas_spill_store_bytes": 0,
+        "ptxas_spill_load_bytes": 0
+      },
+      "note": "Compiler resource counts do not measure executed spill traffic."
+    },
+    "method": {
+      "samples": 31,
+      "warmup": 10,
+      "route_order": "Four-route rotating/reversed paired order",
+      "seeds": [
+        1803,
+        1811
+      ],
+      "epilogues": [
+        "identity",
+        "residual"
+      ],
+      "cache": [
+        "warm",
+        "scrubbed_128MiB"
+      ],
+      "both_device_qualifications_passed": true,
+      "numerical_and_lifetime_criteria": "Same sampled FP64/public full-bit/residual/guard/input-preservation/final-timed-output gates as the original experiment"
+    },
+    "paired_latency_increase_percent": {
+      "minimum": 10.657218429000004,
+      "maximum": 20.326390272000005
+    },
+    "measurements": [
+      {
+        "device": 0,
+        "seed": 1803,
+        "epilogue": "identity",
+        "cache": "warm",
+        "median_us": 236.640006304,
+        "median_paired_ratio_to_M256S3": 1.20110548943,
+        "baseline_M256S3_median_us": 197.088003159
+      },
+      {
+        "device": 0,
+        "seed": 1803,
+        "epilogue": "identity",
+        "cache": "scrubbed_128MiB",
+        "median_us": 240.096002817,
+        "median_paired_ratio_to_M256S3": 1.2031424707,
+        "baseline_M256S3_median_us": 199.487999082
+      },
+      {
+        "device": 0,
+        "seed": 1803,
+        "epilogue": "residual",
+        "cache": "warm",
+        "median_us": 245.984002948,
+        "median_paired_ratio_to_M256S3": 1.17186067039,
+        "baseline_M256S3_median_us": 209.567993879
+      },
+      {
+        "device": 0,
+        "seed": 1803,
+        "epilogue": "residual",
+        "cache": "scrubbed_128MiB",
+        "median_us": 255.295991898,
+        "median_paired_ratio_to_M256S3": 1.12489487699,
+        "baseline_M256S3_median_us": 228.031992912
+      },
+      {
+        "device": 0,
+        "seed": 1811,
+        "epilogue": "identity",
+        "cache": "warm",
+        "median_us": 236.320003867,
+        "median_paired_ratio_to_M256S3": 1.20326390272,
+        "baseline_M256S3_median_us": 196.863994002
+      },
+      {
+        "device": 0,
+        "seed": 1811,
+        "epilogue": "identity",
+        "cache": "scrubbed_128MiB",
+        "median_us": 240.063995123,
+        "median_paired_ratio_to_M256S3": 1.19682383744,
+        "baseline_M256S3_median_us": 199.711993337
+      },
+      {
+        "device": 0,
+        "seed": 1811,
+        "epilogue": "residual",
+        "cache": "warm",
+        "median_us": 245.184004307,
+        "median_paired_ratio_to_M256S3": 1.17807588269,
+        "baseline_M256S3_median_us": 208.639994264
+      },
+      {
+        "device": 0,
+        "seed": 1811,
+        "epilogue": "residual",
+        "cache": "scrubbed_128MiB",
+        "median_us": 256.54399395,
+        "median_paired_ratio_to_M256S3": 1.12514014376,
+        "baseline_M256S3_median_us": 228.128001094
+      },
+      {
+        "device": 1,
+        "seed": 1803,
+        "epilogue": "identity",
+        "cache": "warm",
+        "median_us": 235.615998507,
+        "median_paired_ratio_to_M256S3": 1.18519713358,
+        "baseline_M256S3_median_us": 198.816001415
+      },
+      {
+        "device": 1,
+        "seed": 1803,
+        "epilogue": "identity",
+        "cache": "scrubbed_128MiB",
+        "median_us": 236.831992865,
+        "median_paired_ratio_to_M256S3": 1.17719713784,
+        "baseline_M256S3_median_us": 201.184004545
+      },
+      {
+        "device": 1,
+        "seed": 1803,
+        "epilogue": "residual",
+        "cache": "warm",
+        "median_us": 242.336004972,
+        "median_paired_ratio_to_M256S3": 1.14945821317,
+        "baseline_M256S3_median_us": 211.23200655
+      },
+      {
+        "device": 1,
+        "seed": 1803,
+        "epilogue": "residual",
+        "cache": "scrubbed_128MiB",
+        "median_us": 252.831995487,
+        "median_paired_ratio_to_M256S3": 1.10794900718,
+        "baseline_M256S3_median_us": 228.415995836
+      },
+      {
+        "device": 1,
+        "seed": 1811,
+        "epilogue": "identity",
+        "cache": "warm",
+        "median_us": 234.431996942,
+        "median_paired_ratio_to_M256S3": 1.1877022622,
+        "baseline_M256S3_median_us": 197.280004621
+      },
+      {
+        "device": 1,
+        "seed": 1811,
+        "epilogue": "identity",
+        "cache": "scrubbed_128MiB",
+        "median_us": 236.35199666,
+        "median_paired_ratio_to_M256S3": 1.17273737282,
+        "baseline_M256S3_median_us": 201.151996851
+      },
+      {
+        "device": 1,
+        "seed": 1811,
+        "epilogue": "residual",
+        "cache": "warm",
+        "median_us": 242.336004972,
+        "median_paired_ratio_to_M256S3": 1.15132086687,
+        "baseline_M256S3_median_us": 211.32799983
+      },
+      {
+        "device": 1,
+        "seed": 1811,
+        "epilogue": "residual",
+        "cache": "scrubbed_128MiB",
+        "median_us": 254.17599082,
+        "median_paired_ratio_to_M256S3": 1.10657218429,
+        "baseline_M256S3_median_us": 229.535996914
+      }
+    ]
+  }
 }

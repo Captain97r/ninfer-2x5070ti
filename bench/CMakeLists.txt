@@ -60,6 +60,9 @@ set_target_properties(ninfer_nvfp4_swiglu_tp2_cta_bench PROPERTIES CUDA_SEPARABL
 ninfer_add_op_bench(ninfer_nvfp4_down_tp2_tma_bench SOURCES ops/nvfp4_down_tp2_tma_bench.cu)
 target_include_directories(ninfer_nvfp4_down_tp2_tma_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(ninfer_nvfp4_down_tp2_tma_bench PRIVATE CUDA::cuda_driver)
+# Record registers, stack frame, and spill stores/loads for this experiment only.
+target_compile_options(ninfer_nvfp4_down_tp2_tma_bench PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 set_target_properties(ninfer_nvfp4_down_tp2_tma_bench PROPERTIES
   CUDA_SEPARABLE_COMPILATION OFF CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
 if(WIN32)

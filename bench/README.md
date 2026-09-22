@@ -1058,8 +1058,8 @@ See [qualification and timings](../diagnostics/mailbox-geometry-validation.json)
 
 `ninfer_nvfp4_down_tp2_tma_bench` is a private schedule experiment for the NVFP4
 TP2 down projection `[N=5120,K=8704,T=1024]`. It compares the existing
-`M256,N128,K128,S3,min1` schedule against `M128,N128,K128,S3,min1` and
-`M128,N128,K128,S2,min1`; production dispatch is unchanged. The token-tile
+`M256,N128,K128,S3,min1` schedule against `M128,N128,K128,S3,min1`,
+`M128,N128,K128,S2,min1` and `M128,N128,K128,S2,min2`; production dispatch is unchanged. The token-tile
 change increases the grid from 160 to 320 CTAs and changes shared/register
 requirements. These are candidate tradeoffs, not a demonstrated performance gain.
 
@@ -1112,9 +1112,31 @@ The output records schedule resources and paired ratios, plus raw samples. Run
 one device at a time on an otherwise idle host. A microbenchmark win would still
 require a scoped production experiment and complete prompt-processing measurement.
 Both local GPUs passed all stated eager/captured numerical, full-output identity,
-guard and input-preservation checks. Across seeds, epilogues and cache conditions,
+guard and input-preservation checks for the original three min1 schedules. Across seeds, epilogues and cache conditions,
 paired median kernel latency increased 0.9-7.0% for M128/S3/min1 and 5.4-11.2% for
 M128/S2/min1. All three schedules reported one resident CTA/SM; the smaller tile's
 shared-memory reduction did not produce higher occupancy. **Production retains
 M256/S3/min1.** These negative kernel results do not establish a prompt-throughput
 gain. [Qualification and measurements](../diagnostics/nvfp4-down-tma-validation.json).
+
+
+The fourth route changes only M128/S2's minimum-CTA launch bound from one to two.
+Its 288-thread CTA has one producer warp, so the M256-only `setmaxnreg` branches
+are absent. Two CTAs fit the shared-memory budget, but the observed min1 register
+count (139-141) permits only one resident CTA. The CUDA occupancy model predicts
+that this nine-warp block needs at most 96 registers/thread to reach two CTAs on
+these GPUs; 112 or 128 registers is insufficient because of register-partition
+allocation. This is a compiler-pressure experiment, not an occupancy guarantee.
+
+The benchmark reports compiled registers, local bytes per thread, requested
+minimum CTAs and occupancy-API CTAs. Target-local ptxas verbose output records the
+stack frame and spill stores/loads during compilation; local bytes alone do not
+measure executed spill traffic. Four-route rotation retains the same fixed seeds,
+numerical criterion, full-output equality, residual resets, guards and final-timed
+output checks. On both local GPUs the min2 route compiled to 96 registers and
+achieved two resident CTAs/SM. Identity used an 8-byte local frame with four bytes
+each of reported spill stores/loads; residual reported no spills. All numerical,
+full-bit and guard checks passed, but paired kernel latency increased 10.7-20.3%
+across the 16 seed/epilogue/cache/device settings. **The min2 route is rejected;
+production still uses M256/S3/min1.** The linked evidence records this followup
+separately from the original three-route measurements.

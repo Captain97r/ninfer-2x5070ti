@@ -35,19 +35,27 @@ using Geometry = detail::Nvfp4Residual17408Tp2RowGeometry;
 using M256S3 = detail::Nvfp4W4a4TmaSchedule<256, 3, 1>;
 using M128S3 = detail::Nvfp4W4a4TmaSchedule<128, 3, 1>;
 using M128S2 = detail::Nvfp4W4a4TmaSchedule<128, 2, 1>;
+// M128 has a single producer warp and no setmaxnreg redistribution. This changes
+// only the compiler launch bound; actual two-CTA residency and spills are measured.
+using M128S2Min2 = detail::Nvfp4W4a4TmaSchedule<128, 2, 2>;
 static_assert(Geometry::kOutputRows == kN && Geometry::kInputRows == kK);
-enum class Route { M256S3, M128S3, M128S2 };
-constexpr std::array<Route, 3> kRoutes{Route::M256S3, Route::M128S3, Route::M128S2};
+enum class Route { M256S3, M128S3, M128S2, M128S2Min2 };
+constexpr std::array kRoutes{Route::M256S3, Route::M128S3, Route::M128S2, Route::M128S2Min2};
+constexpr int kRouteCount = static_cast<int>(kRoutes.size());
 const char* name(Route route) {
     switch (route) {
     case Route::M256S3: return "M256_S3_min1";
     case Route::M128S3: return "M128_S3_min1";
     case Route::M128S2: return "M128_S2_min1";
+    case Route::M128S2Min2: return "M128_S2_min2";
     }
     throw std::logic_error("unknown route");
 }
 int token_tile(Route route) { return route == Route::M256S3 ? 256 : 128; }
-int stages(Route route) { return route == Route::M128S2 ? 2 : 3; }
+int stages(Route route) {
+    return route == Route::M128S2 || route == Route::M128S2Min2 ? 2 : 3;
+}
+int min_ctas(Route route) { return route == Route::M128S2Min2 ? 2 : 1; }
 struct Options { int device = 0, samples = 31, warmup = 10; bool qualify_only = false; };
 Options parse(int argc, char** argv) {
     Options out;
@@ -177,15 +185,15 @@ struct Fixture {
     detail::Nvfp4W4a4Workspace prepared;
     Weight weight;
     Tensor input;
-    std::array<std::unique_ptr<GuardedDeviceBuffer>, 3> outputs;
+    std::array<std::unique_ptr<GuardedDeviceBuffer>, kRouteCount> outputs;
     // All descriptor bindings stay live through every eager/captured invocation.
     // This isolates scheduling from descriptor allocation/upload overhead.
-    std::array<detail::Nvfp4W4a4TmaDescriptors, 3> host_descriptors{};
+    std::array<detail::Nvfp4W4a4TmaDescriptors, kRouteCount> host_descriptors{};
 #ifdef _WIN32
-    std::array<std::unique_ptr<GuardedDeviceBuffer>, 3> device_descriptors;
+    std::array<std::unique_ptr<GuardedDeviceBuffer>, kRouteCount> device_descriptors;
 #endif
-    std::array<std::size_t, 3> shared_bytes{};
-    std::array<int, 3> registers{}, resident_ctas{};
+    std::array<std::size_t, kRouteCount> shared_bytes{}, local_bytes{};
+    std::array<int, kRouteCount> registers{}, resident_ctas{};
     std::vector<std::uint16_t> baseline;
     std::vector<std::uint8_t> prepared_image;
 
@@ -217,6 +225,7 @@ struct Fixture {
         prepare<M256S3>(Route::M256S3);
         prepare<M128S3>(Route::M128S3);
         prepare<M128S2>(Route::M128S2);
+        prepare<M128S2Min2>(Route::M128S2Min2);
         CUDA_CHECK(cudaDeviceSynchronize());
         if (prepared_arena.used() != prepared_storage.bytes() ||
             prepared_arena.peak_used() != prepared_storage.bytes()) {
@@ -238,6 +247,7 @@ struct Fixture {
             &resident_ctas[index], kernel, Schedule::kThreads, bytes));
         shared_bytes[index] = bytes;
         registers[index] = attributes.numRegs;
+        local_bytes[index] = attributes.localSizeBytes;
         if (resident_ctas[index] < 1) { throw std::runtime_error("schedule is not resident"); }
     }
     template<class Schedule>
@@ -281,6 +291,7 @@ struct Fixture {
         case Route::M256S3: launch_epilogue<M256S3>(route, stream); break;
         case Route::M128S3: launch_epilogue<M128S3>(route, stream); break;
         case Route::M128S2: launch_epilogue<M128S2>(route, stream); break;
+        case Route::M128S2Min2: launch_epilogue<M128S2Min2>(route, stream); break;
         }
     }
     void reset(Route route, cudaStream_t stream) {
@@ -445,7 +456,7 @@ void run_fixture(const Options& options, std::uint32_t seed, bool residual, cuda
     CUDA_CHECK(cudaStreamSynchronize(stream));
     for (const bool cold : {false, true}) {
         const char* condition = cold ? "scrubbed_128MiB" : "warm";
-        std::array<std::unique_ptr<Captured>, 3> graphs;
+        std::array<std::unique_ptr<Captured>, kRouteCount> graphs;
         for (Route route : kRoutes) {
             graphs[static_cast<std::size_t>(route)] =
                 std::make_unique<Captured>(fixture, route, cold ? &scrub : nullptr, stream);
@@ -458,15 +469,16 @@ void run_fixture(const Options& options, std::uint32_t seed, bool residual, cuda
             fixture.verify_inputs(phase);
         };
         qualify("captured-before");
-        std::array<std::vector<Measurement>, 3> samples;
+        std::array<std::vector<Measurement>, kRouteCount> samples;
         if (!options.qualify_only) {
-            // Rotate all three positions; reverse each complete three-round cycle.
+            // Rotate all four positions; reverse each complete four-round cycle.
             // Every route runs once in each round, against the same baseline round.
             for (int round = -options.warmup; round < options.samples; ++round) {
                 const int index = round + options.warmup;
-                for (int position = 0; position < 3; ++position) {
-                    const int offset = ((index / 3) & 1) ? 2 - position : position;
-                    const int route = (index + offset) % 3;
+                for (int position = 0; position < kRouteCount; ++position) {
+                    const int offset = ((index / kRouteCount) & 1)
+                                           ? kRouteCount - 1 - position : position;
+                    const int route = (index + offset) % kRouteCount;
                     const Measurement sample = graphs[static_cast<std::size_t>(route)]->run();
                     if (round >= 0) {
                         samples[static_cast<std::size_t>(route)].push_back(sample);
@@ -509,9 +521,11 @@ void run_fixture(const Options& options, std::uint32_t seed, bool residual, cuda
                       << "\",\"route\":\"" << name(kRoutes[route])
                       << "\",\"token_tile\":" << token_tile(kRoutes[route])
                       << ",\"stages\":" << stages(kRoutes[route])
+                      << ",\"launch_bound_min_ctas\":" << min_ctas(kRoutes[route])
                       << ",\"ctas\":" << (kN / 128) * (kT / token_tile(kRoutes[route]))
                       << ",\"dynamic_shared_bytes\":" << fixture.shared_bytes[route]
                       << ",\"static_registers\":" << fixture.registers[route]
+                      << ",\"local_bytes_per_thread\":" << fixture.local_bytes[route]
                       << ",\"occupancy_api_ctas_per_sm\":" << fixture.resident_ctas[route]
                       << ",\"samples\":" << times.size()
                       << ",\"median_us\":" << percentile(times, 0.5)
