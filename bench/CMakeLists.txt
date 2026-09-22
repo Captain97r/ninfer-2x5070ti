@@ -47,6 +47,12 @@ ninfer_add_op_bench(ninfer_gdn_input_proj_conv_snapshot_bench
 ninfer_add_op_bench(ninfer_attn_input_proj_bench SOURCES ops/attn_input_proj_bench.cu)
 ninfer_add_op_bench(ninfer_w8_linear_swiglu_bench SOURCES ops/w8_linear_swiglu_bench.cu)
 ninfer_add_op_bench(ninfer_nvfp4_linear_swiglu_bench SOURCES ops/nvfp4_linear_swiglu_bench.cu)
+# Isolated T4 TP2 CTA-grouping experiment; production dispatch remains unchanged.
+ninfer_add_op_bench(ninfer_nvfp4_swiglu_tp2_cta_bench
+  SOURCES ops/nvfp4_swiglu_tp2_cta_bench.cu
+          ${PROJECT_SOURCE_DIR}/tests/ops/linear_swiglu/linear_swiglu_test_common.cpp)
+target_include_directories(ninfer_nvfp4_swiglu_tp2_cta_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_nvfp4_swiglu_tp2_cta_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 ninfer_add_op_bench(ninfer_fp8_linear_swiglu_bench SOURCES ops/fp8_linear_swiglu_bench.cu)
 ninfer_add_op_bench(ninfer_q4_linear_swiglu_bench SOURCES ops/q4_linear_swiglu_bench.cu)
 ninfer_add_op_bench(ninfer_w8_linear_add_bench SOURCES ops/w8_linear_add_bench.cu)

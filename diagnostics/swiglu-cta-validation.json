@@ -1,0 +1,195 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB / 70 SM, native Windows, CUDA 13.3 compiler, RDC enabled",
+  "scope": "NVFP4 fused SwiGLU TP2 [17408,5120], T4 BF16 activations; grouping independent output rows only",
+  "decision": "Keep existing eight-warps-per-CTA production schedule. Four and sixteen warps were slower on both GPUs and both cache conditions.",
+  "production_schedule_changed": false,
+  "production_refactor": "Unchanged kernel body moved to a private header shared with the isolated benchmark; shape admission, precision crossover and default schedule unchanged.",
+  "method": {
+    "seeds": [
+      1803,
+      1811
+    ],
+    "warmup": 10,
+    "paired_samples": 31,
+    "routes": [
+      "production8",
+      "header8",
+      "header4",
+      "header16"
+    ],
+    "cache_scrub_bytes": 134217728,
+    "timing": "CUDA Graph replay external events around kernel only, cache scrub outside interval; complete graph wall and host enqueue recorded separately",
+    "order": "Rotating four-way paired rounds, reversed each four-round cycle"
+  },
+  "numerical_qualification": {
+    "oracle": "Independent FP64 dot/SiLU/product from represented BF16 inputs and independently decoded packed weight codes/scales",
+    "criterion": {
+      "relative_l2": 0.0033,
+      "gross_absolute": 0.005,
+      "gross_relative_to_max_reference": 0.0063
+    },
+    "all_outputs_baseline_bf16_bits_equal": true,
+    "all_outputs_fp64_passed": true,
+    "guards_and_inputs_unchanged": true,
+    "modes": [
+      "eager",
+      "captured before timing",
+      "resident final timed outputs",
+      "captured after timing"
+    ]
+  },
+  "measurements": [
+    {
+      "gpu": 0,
+      "seed": 1803,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production8": 65.7280012965,
+        "header8": 65.7280012965,
+        "header4": 75.0399976969,
+        "header16": 90.1760011911
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 1,
+        "header4": 1.14167472335,
+        "header16": 1.37095201118
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1803,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production8": 82.4640020728,
+        "header8": 82.4000015855,
+        "header4": 95.1360017061,
+        "header16": 107.008002698
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 0.998835846811,
+        "header4": 1.15268063687,
+        "header16": 1.29778123907
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1811,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production8": 66.8160021305,
+        "header8": 66.5920004249,
+        "header4": 75.7120028138,
+        "header16": 91.2320017815
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 0.998078755803,
+        "header4": 1.137517896,
+        "header16": 1.36512522162
+      }
+    },
+    {
+      "gpu": 0,
+      "seed": 1811,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production8": 82.8159973025,
+        "header8": 82.8159973025,
+        "header4": 95.2000021935,
+        "header16": 107.231996953
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 0.999228091364,
+        "header4": 1.15057922243,
+        "header16": 1.29591050752
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1803,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production8": 67.1679973602,
+        "header8": 67.0080035925,
+        "header4": 76.8959969282,
+        "header16": 88.9279991388
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 0.999043512605,
+        "header4": 1.1450165335,
+        "header16": 1.32603527634
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1803,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production8": 84.7359970212,
+        "header8": 84.7999975085,
+        "header4": 97.5359976292,
+        "header16": 109.856002033
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 1.00075443805,
+        "header4": 1.1658968528,
+        "header16": 1.30003770224
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1811,
+      "cache": "warm",
+      "median_kernel_us": {
+        "production8": 68.5760006309,
+        "header8": 68.0959969759,
+        "header4": 77.7280032635,
+        "header16": 89.4080027938
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 0.998134314176,
+        "header4": 1.13754642818,
+        "header16": 1.31126769185
+      }
+    },
+    {
+      "gpu": 1,
+      "seed": 1811,
+      "cache": "scrubbed_128MiB",
+      "median_kernel_us": {
+        "production8": 84.4480022788,
+        "header8": 84.4800025225,
+        "header4": 98.4639972448,
+        "header16": 110.720001161
+      },
+      "median_paired_ratio_to_production8": {
+        "production8": 1,
+        "header8": 1,
+        "header4": 1.16451858779,
+        "header16": 1.31047475608
+      }
+    }
+  ],
+  "affected_regressions": {
+    "ninfer_linear_swiglu_nvfp4_test": "Passed separately on both physical GPUs; A16 T1/4/8/16, A4 T5/48/49/128/1024",
+    "ninfer_linear_swiglu_split_test": "Passed TP2 shapes, tails and composed gate/up/down pipelines"
+  },
+  "limits": [
+    "No production schedule gain and no end-to-end gain claimed.",
+    "Post-extraction production8/header8 parity is not an old-binary comparison.",
+    "Linux execution not tested locally."
+  ],
+  "response_panel": {
+    "reference": "diagnostics/quality-reference.json",
+    "cases": 18,
+    "exact_observable_matches": 18,
+    "task_passes": 16,
+    "new_failures": 0
+  }
+}

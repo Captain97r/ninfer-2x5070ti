@@ -364,6 +364,13 @@ confined to nominally FP4 matrices would miss substantial work. Further attentio
 retuning should follow its measured fraction of full inference; isolated kernel
 speedups cannot be added together into a TG forecast.
 
+The profiled T4 NVFP4 SwiGLU shard was tested at 4, 8 and 16 warps per CTA
+with unchanged per-row arithmetic. Eight warps remains fastest on both cards;
+the alternatives were about 14-17% and 30-37% slower across warm/scrubbed cases.
+All outputs passed the independent FP64 oracle and exact BF16 comparison. This
+rejects a simple CTA-size substitution, without claiming that all kernel tuning
+is exhausted. [Experiment evidence](../diagnostics/swiglu-cta-validation.json).
+
 ### 4. MTP windows require quality qualification
 
 The hidden-reduction count grows as `128 + 3K` in a normal K-draft round, and each

@@ -895,3 +895,40 @@ The separate runtime comparison measured 2.83% and 2.58% generation gains at 8K 
 reported allocator peak stayed at 202304000 and 117743616 bytes; the 993280-byte
 peer shard is explicitly planned even though another stage determines the peak.
 [End-to-end method and results](../docs/performance.md#local-dual-5070-ti-packed-target-logit-gather).
+
+### TP2 T4 NVFP4 fused SwiGLU CTA grouping
+
+`ninfer_nvfp4_swiglu_tp2_cta_bench --device 0` (then `--device 1`) measures
+only the [17408,5120] TP2 gate/up shard with four BF16 activation columns. It
+compares the normal production private shard launcher (8 warps/CTA) with separate
+benchmark instantiations at 8, 4 and 16 warps. The single-device public operator
+does not admit this shard shape. Production dispatch and shape admission remain
+unchanged; sharing the unchanged private kernel body is the only production refactor.
+
+Both fixed seeds use dense, mixed-sign, O(1)-RMS represented BF16 activations on
+all four tokens and coordinate-decorrelated NVFP4 weights. Every output is checked
+against the independent represented-weight FP64 dot/SiLU/product oracle with the
+existing A16 criterion, and every candidate must match production BF16 bits exactly.
+Eager calls and captured replays are qualified; guards and input bytes are checked
+before/after timing. `--qualify-only` performs these checks without the timing loops.
+
+Default timing uses ten warmup rounds and 31 paired sample rounds, rotating route
+order and reversing each four-round cycle. Each graph contains one measured kernel
+between external timing-event nodes. A separate condition reads/writes 128 MiB
+before the timed interval to perturb caches; both warm and scrubbed results are
+reported. Allocation, oracle computation and graph capture are excluded. JSON
+lines contain every paired sample and median/p95 summaries. The event interval
+excludes the cache scrub; complete graph wall time includes it and host overhead.
+Neither cache condition establishes model throughput or physical memory bandwidth.
+
+`--samples N` and `--warmup N` change measurement counts. Run each physical GPU
+separately; do not overlap with inference. A candidate needs existing normal/tail
+shape regressions plus model response parity and unprofiled end-to-end gains before
+changing the production default. Library-versus-benchmark 8-warp parity checks
+post-extraction code generation; it is not a pre-extraction binary comparison.
+
+Both local GPUs retained the eight-warp winner. Across the two fixed seeds, warm
+and cache-scrubbed paired kernel times made four warps about 14-17% slower and
+sixteen about 30-37% slower. All four routes passed the FP64 and exact-bit checks.
+No production schedule change or inference gain follows from this experiment.
+[Measurement record](../diagnostics/swiglu-cta-validation.json).
