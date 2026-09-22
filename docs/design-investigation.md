@@ -120,8 +120,21 @@ host-staging legs. Descriptor allocation, upload and free total only 19.5 ms of
 host API time. These observations prioritize explicit pinned bulk staging over
 descriptor caching. They are overlapping measurements, not additive critical-path
 fractions or a predicted speedup. Software-trace copy durations imply impossible
-PCIe bandwidth, so they cannot establish physical transfer bandwidth. Graph-level
-TG tracing also cannot attribute individual decode kernels.
+PCIe bandwidth, so they cannot establish physical transfer bandwidth.
+
+A subsequent software trace with `--cuda-graph-trace=node:host-only` successfully
+records individual generation kernels. All 16 measured launches contain the same
+948/941 kernel nodes on ranks 0/1, respectively; every recorded node repeats 16 times.
+There is no live decode NVTX range, so attribution uses graph-launch correlations
+and the prefill endpoint. The profiler still warns that some events may be missing.
+Its timings include instrumentation and are not production throughput.
+
+The leading compute family is the NVFP4 fused SwiGLU TP2 shard `[17408,5120]` at T4:
+896 calls per rank averaging 70.2/71.7 us, with grid 1088, block 256, 72 registers/thread
+and 4176 shared bytes. This motivates a bounded CTA-grouping experiment preserving
+per-output arithmetic. FP8 GDN-input T4 follows; it is a different route from the
+large-prefill tensor-core GEMM. No measured occupancy, bandwidth ceiling or expected
+speedup follows from these observations. [Profile evidence](../diagnostics/decode-profile.json).
 
 ## Correctness work that must precede tuning
 

@@ -1,0 +1,158 @@
+{
+  "engine_revision": "f4e1cd18",
+  "method": "Nsight Systems 2026.5.1 software CUDA node:host-only; warmup and graph priming before cudaProfilerStart; one measured 8192 PP / 64 TG run",
+  "coverage": {
+    "host_graph_launches": 16,
+    "graph_ids": [
+      10
+    ],
+    "graph_kernel_counts_by_device": {
+      "0": 15168,
+      "1": 15056
+    },
+    "distinct_graph_kernel_nodes_by_device": {
+      "0": 948,
+      "1": 941
+    },
+    "node_repetition_histogram": {
+      "16": 1889
+    },
+    "live_prefill_chunks": 8,
+    "live_decode_nvtx_ranges": 0,
+    "interpretation": "Every recorded graph kernel node appears exactly 16 times; each launch correlates to the same 948 rank0 / 941 rank1 nodes. This is consistent coverage, not proof that profiler omitted nothing.",
+    "expected_repetition_checks": [
+      "NVFP4 fused T4: 56 layers * 16 rounds = 896 calls/rank.",
+      "FP8 GDN input T4: 48 layers * 16 rounds = 768 calls/rank.",
+      "FP8 target head T4: 16 calls/rank.",
+      "Q4 optimized draft head: three T1 proposals * 16 rounds = 48 calls/rank."
+    ]
+  },
+  "decode_span_ms": 351.818284,
+  "kernel_families": [
+    {
+      "family": "NVFP4 fused SwiGLU T4 [17408,5120]",
+      "ranks": [
+        {
+          "device": 0,
+          "count": 896,
+          "sum_ms": 62.91198799999998,
+          "union_ms": 62.911988,
+          "mean_us": 70.21427232142857,
+          "median_us": 69.762,
+          "p95_us": 71.97
+        },
+        {
+          "device": 1,
+          "count": 896,
+          "sum_ms": 64.25823499999991,
+          "union_ms": 64.258235,
+          "mean_us": 71.71678013392857,
+          "median_us": 71.235,
+          "p95_us": 73.666
+        }
+      ],
+      "union_either_gpu_ms": 66.617653
+    },
+    {
+      "family": "mailbox BF16 sum with peer wait",
+      "ranks": [
+        {
+          "device": 0,
+          "count": 2192,
+          "sum_ms": 51.55602000000003,
+          "union_ms": 51.55602,
+          "mean_us": 23.52008211678832,
+          "median_us": 16.16,
+          "p95_us": 17.569
+        },
+        {
+          "device": 1,
+          "count": 2192,
+          "sum_ms": 36.21249499999994,
+          "union_ms": 36.212495,
+          "mean_us": 16.520298813868614,
+          "median_us": 16.769,
+          "p95_us": 18.273
+        }
+      ],
+      "union_either_gpu_ms": 57.134023
+    },
+    {
+      "family": "FP8 GDN input T4 [8192,5120]",
+      "ranks": [
+        {
+          "device": 0,
+          "count": 768,
+          "sum_ms": 39.27432799999991,
+          "union_ms": 39.274328,
+          "mean_us": 51.138447916666664,
+          "median_us": 51.042,
+          "p95_us": 51.617
+        },
+        {
+          "device": 1,
+          "count": 768,
+          "sum_ms": 39.893329000000065,
+          "union_ms": 39.893329,
+          "mean_us": 51.94443880208333,
+          "median_us": 51.842,
+          "p95_us": 52.418
+        }
+      ],
+      "union_either_gpu_ms": 42.906254
+    },
+    {
+      "family": "NVFP4 down T4 [5120,8704]",
+      "ranks": [
+        {
+          "device": 0,
+          "count": 896,
+          "sum_ms": 33.81512299999998,
+          "union_ms": 33.815123,
+          "mean_us": 37.74009263392857,
+          "median_us": 37.697,
+          "p95_us": 38.465
+        },
+        {
+          "device": 1,
+          "count": 896,
+          "sum_ms": 31.632835000000014,
+          "union_ms": 31.632835,
+          "mean_us": 35.30450334821428,
+          "median_us": 35.265,
+          "p95_us": 35.905
+        }
+      ],
+      "union_either_gpu_ms": 35.340927
+    }
+  ],
+  "next_candidate": {
+    "operator": "NVFP4 fused SwiGLU TP2 shard [17408,5120], T=4, existing A16 activation route",
+    "evidence": "Largest non-wait compute family: 896 calls/rank, 62.912/64.258ms summed; either-GPU interval union 66.618ms within 351.818ms measured CUDA decode span.",
+    "current_schedule": {
+      "warps_per_cta": 8,
+      "threads_per_cta": 256,
+      "ctas": 1088,
+      "registers_per_thread": 72,
+      "static_shared_bytes": 4176,
+      "dynamic_shared_bytes": 0,
+      "activation_access": "SharedPhase",
+      "accumulator_chains": 1
+    },
+    "bounded_followup": "Benchmark only 4/8/16-warps-per-CTA TP2 T4 alternatives while retaining rows-per-warp, one warp per row, K traversal, accumulator chains, A16 precision and SwiGLU math. Changing CTA grouping changes scheduling without intentionally changing each row reduction. Require independent FP64 operator qualification and exact candidate/baseline BF16 comparison before model quality/TG acceptance.",
+    "secondary": "FP8 GDN input T4 [8192,5120] follows at 39.274/39.893ms; it is a small-T SIMT path distinct from the prior bulk FP8 tensor-core result.",
+    "not_claimed": "No demonstrated speedup, bandwidth ceiling, occupancy or optimization headroom. Mailbox duration includes peer waiting and instrumentation skew."
+  },
+  "limits": [
+    "No live decode NVTX span is present. TG is bounded by first measured cudaGraphLaunch and final recorded CUDA activity, consistent within 0.501ms of benchmark TG time. PP uses eight live prefill.chunk spans.",
+    "Captured graph construction metadata has negative timestamps because graph priming predates capture. It is excluded from timing attribution.",
+    "Profiler warns not all NVTX/CUDA events may have been collected; both device kernel node sets repeat consistently across every round.",
+    "Kernel sums, interval unions, API time and cross-device overlap are distinct and nonadditive. No dependency-DAG critical path was reconstructed.",
+    "Uncovered timeline time is not proven GPU idle; kernel durations include stalls and mailbox spin/wait.",
+    "CUDA host graph launch APIs consume 41.377ms in aggregate, overlapping GPU work. They are not all critical-path launch overhead.",
+    "Node software tracing perturbs short-kernel timing/scheduling; profiled throughput is not production latency.",
+    "Metadata reports launch geometry and resource declarations, not measured achieved occupancy or utilization.",
+    "Copy timings do not establish physical PCIe bandwidth.",
+    "This is 8K context and 100% draft acceptance; it does not characterize the specialized 100K attention route or rejected-draft workloads."
+  ]
+}
