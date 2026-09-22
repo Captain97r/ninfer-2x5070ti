@@ -33,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--model", default="qwen3.8-27b")
-    parser.add_argument("--context", type=int, default=102400)
+    parser.add_argument("--context", type=int, default=199680)
     parser.add_argument("--report", type=Path, default=ROOT / "diagnostics" / "vision-validation.json")
     args = parser.parse_args()
     base = args.url.rstrip("/")

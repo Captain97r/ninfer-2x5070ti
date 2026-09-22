@@ -85,20 +85,20 @@ model-accuracy result. [Evidence](../diagnostics/tp2-workspace-validation.json).
 ## Local RTX 5070 Ti attention tuning
 
 The 70-SM `sm_120` profile automatically selects 70 active splits per KV head for INT8-G64
-attention at 81,920..131,077 visible keys, with one request, 12 query heads, two KV heads, and
-T=1, 4, or 5. These are the local TP2 shard shapes for ordinary decode and MTP3/MTP4 verification.
-Other widths, devices, cache formats and context windows retain their existing split policies.
+attention at **81,920..200,709 visible keys**, with one request, 12 query heads, two KV heads,
+and T=1, 4, or 5. These are the local TP2 shard shapes for ordinary decode and MTP3/MTP4
+verification. Other widths, devices, cache formats and context windows retain their existing
+split policies. The upper gate includes the five-token verification allowance above 200,704.
 
 Broad CUDA Graph envelopes keep the 170-split launch/workspace upper bound; kernels choose the
 active count from device positions on each replay. Page-ID staging conservatively supports the
-lower split count over the full declared context domain. This avoids changing short-context
-behavior or underallocating staging when a graph is reused.
+lower split count over the full declared context domain. The same graph is tested inside and
+outside the gate, including short-window replay and 200,710 visible keys.
 
-Measured on each local RTX 5070 Ti separately under Windows, CUDA 13.3 and MSVC 19.44, with
-relocatable device code enabled. The workload has 100,000 cached tokens, fragmented pages, BF16
-queries/output, ten warmup replays and 31 interleaved timing samples per policy. A 128 MiB cache
-flush precedes each sample outside the CUDA event interval. Medians include the partial kernel
-and reducer:
+Historical 100K measurements on each local RTX 5070 Ti separately used Windows, CUDA 13.3,
+MSVC 19.44 and relocatable device code. The workload had fragmented pages, BF16 queries/output,
+ten warmup replays and 31 interleaved samples per policy. A 128 MiB cache flush preceded each
+sample outside the CUDA event interval. Medians include the partial kernel and reducer:
 
 | GPU | Query tokens | Original 170 splits, us | Tuned broad graph, us | Latency reduction |
 |---|---:|---:|---:|---:|
@@ -109,16 +109,148 @@ and reducer:
 | 1 | 4 | 195.49 | 156.38 | 20.0% |
 | 1 | 5 | 203.17 | 158.14 | 22.2% |
 
-Every measured output passes the independent FP64 attention oracle over all query heads and
-tokens. Tuned relative L2 error is approximately 0.0029 against limits of 0.00407..0.00410 derived
-from the existing long-window BF16 storage-floor criterion. These are operator latency reductions;
-they do not establish an end-to-end token-throughput gain. The compact local record is
-[diagnostics/gqa-tuning.json](../diagnostics/gqa-tuning.json).
+Every historical measured output passed the independent FP64 attention oracle over all query
+heads and tokens. Tuned relative L2 error was approximately 0.0029 against limits of
+0.00407..0.00410 from the existing long-window BF16 storage-floor criterion.
+[Historical record](../diagnostics/gqa-tuning.json).
 
-The public-Op regression `ninfer_gqa_tp2_sm70_test` checks exact and broad graph envelopes,
-append/cached attention, masked MTP output, short-window replay, and workspace/cache guards.
-Append rows are deliberately poisoned before each call so a missing cache write cannot pass.
-See [benchmark commands](../bench/README.md#local-tp2-attention-split-experiment).
+The extension was measured at **200,704 cached tokens**, with the same fragmented INT8-G64
+cache and BF16 interfaces, ten warmups and 31 paired rounds per GPU. Route order alternated;
+128 MiB cache scrubbing stayed outside the event interval. This benchmark privately instantiates
+the production broad geometry; public dispatch is qualified separately below.
+
+| GPU | Query tokens | Fixed 170 control, us | Extended broad graph, us | Latency reduction |
+|---|---:|---:|---:|---:|
+| 0 | 1 | 309.70 | 277.25 | 10.5% |
+| 0 | 4 | 332.42 | 285.15 | 14.2% |
+| 0 | 5 | 340.19 | 287.10 | 15.6% |
+| 1 | 1 | 316.29 | 283.39 | 10.4% |
+| 1 | 4 | 340.38 | 289.66 | 14.9% |
+| 1 | 5 | 346.91 | 293.28 | 15.5% |
+
+These are isolated attention latency reductions, excluding TP communication, and do not establish
+an end-to-end generation gain. The public `ninfer_gqa_tp2_sm70_test` passed 65 full-output FP64
+comparisons on each GPU across 100K and 200,704 contexts, using the unchanged numeric criteria.
+It covers exact/broad graphs, cached attention, poisoned fused-append rows, masked MTP tails,
+short/long replay transitions, and output/workspace/cache guards.
+[Current evidence](../diagnostics/gqa-long-window-validation.json) and
+[benchmark commands](../bench/README.md#local-tp2-attention-split-experiment).
+
+With the final engine at 196,608 configured context, all 29 fixed response observations matched
+saved references exactly: 18 short/vision, four retrieval, and seven stochastic cases. The short
+and stochastic panels retain their two prior task failures each; this is regression evidence,
+not a claim that all answers were correct. At 199,680 context, the three-value retrieval,
+absent-key null and post-session health answers passed and matched the workspace-only reference.
+The boundary request reached `context_capacity` with 197,632 prompt plus 2,049 completion tokens
+(`prompt + completion - 1 = 199,680`). Its ungraded free-form continuation changed, so strict
+whole-panel output parity failed.
+
+Changing attention split count changes floating-point reduction association. The independent
+oracle and these bounded task results support the adopted gate; they do not establish general
+model-quality or bitwise-output equivalence. All six real code/document requests at 8K, 100K and
+180K completed, but those answers are ungraded and the 180K wording changed. Their measured
+throughput and limitations are recorded separately in
+[long-context validation](../diagnostics/long-context-validation.json).
+
+## Local dual-5070-Ti long-context profile
+
+The Windows launcher now defaults to **199,680 tokens** for one Qwen3.8-27B v2
+mixed-NVFP4 session. TP2, INT8-G64 KV, MTP3, optimized draft selection, CUDA Graphs,
+chunk 1024, native RoPE and the 2,048-token image budget are retained. Tests ran on
+the same two 70-SM RTX 5070 Ti cards with the display moved to the motherboard,
+Windows WDDM driver 616.92, nvcc 13.3.73 and MSVC 19.44. Pinned-host transport is
+still required: direct CUDA peer access remains unavailable.
+
+**Capacity and memory.** Explicit KV capacity equals the session context. The
+qualified load uses 14,930 MiB per card; sampled cold-prefill peaks reach 14,962 MiB
+(about 14.6 GiB). Primary-rank CUDA startup headroom is 303 MiB. Conservatively
+charging the full observed 32 MiB prefill increase against that budget leaves
+271 MiB, above a selected 256 MiB engineering reserve. NVML's roughly 1 GiB free
+per card is not the CUDA allocation budget. The next 1,024-token capacity step
+projects only 253.5 MiB after that allowance, so it was not adopted. This is the
+highest qualified operating profile with this reserve, not a mathematical maximum
+or a guarantee under other GPU loads/drivers. Native 262,144-token capacity does
+not fit this complete profile; the 229,376-token baseline was rejected cleanly by
+memory admission.
+
+**Real long prompts.** Code and document-review requests use distinct repository
+excerpts rather than cyclic padding, cold prefill with prefix reuse disabled, and
+the registered non-thinking sampling defaults (temperature 0.7, top-p 0.8, top-k
+20, presence penalty 1.5) with seed 7632647173703958409. Each has a 16,384-token
+output allowance; natural EOS is respected. There is one measured request per
+case after a 2K-prompt/256-output warmup for each workload. PP is computed prompt
+tokens over server prefill time; TG counts committed decode tokens over decode
+time, excluding the first token produced during prefill.
+
+| Workload | Prompt tokens | PP tok/s | TG tok/s | Generated tokens | Early / middle / late TG |
+|---|---:|---:|---:|---:|---:|
+| code | 8,192 | 3139.4 | 145.4 | 5,695 | 137.8 / 149.7 / 147.4 |
+| docs | 8,192 | 3136.0 | 165.3 | 7,146 | 158.9 / 172.0 / 168.8 |
+| code | 100,000 | 2324.5 | 130.0 | 5,535 | 131.1 / 125.2 / 133.8 |
+| docs | 100,000 | 2323.5 | 149.0 | 6,118 | 146.3 / 154.8 / 145.4 |
+| code | 180,000 | 1873.5 | 117.6 | 3,975 | 116.0 / 117.3 / 120.0 |
+| docs | 180,000 | 1873.5 | 133.7 | 5,199 | 133.7 / 133.8 / 136.5 |
+
+All six replies stopped naturally. Time to first token was about 2.63 seconds at
+8K, 43.25 seconds at 100K and 96.4 seconds at 180K. The sustained bins use actual
+committed-token counters and consecutive steady-clock intervals; initial mixed
+prefill/decode and final partial intervals are excluded. Zero-token stalls remain
+included. These are observed workload rates, not averages over many seeds or task
+accuracy scores.
+
+The pre-change baseline used the identical six request payloads at 196,608-token
+allocated capacity; the final engine allocates 199,680. For the first four requests, response
+observables and all their MTP counters match exactly; throughput is effectively unchanged.
+At 180K, code TG rises from 113.58 to 117.63 and document TG from 130.94 to 133.69
+(3.56% / 2.10%), but both continuations and their lengths change. Those differences
+cannot isolate attention's speed contribution. The independent attention timing
+above establishes the operator-level improvement. The baseline preserves the first
+four cases from one owned server and the last two from another, each warmed up.
+Two reporting-accounting errors were corrected from saved responses/counters;
+no failed model answer was replaced or discarded. Final measurements use one
+continuous owned server.
+
+**Long generation.** The unchanged `examples/cli/messages/long_decode_aime26_15.json`
+reasoning prompt produced **32,768 completion tokens** at **124.15 tok/s** over
+263.92 seconds of decode. Early/middle/late bins measured **117.64 / 120.83 /
+133.17 tok/s**, with 47.26% MTP acceptance. This was a cold request with thinking
+on, its registered sampling defaults and the same seed. It reached the output cap
+before a final answer, so math accuracy is unscored. Its 335-token prompt grows to
+an actual cached frontier of 33,102, despite allocating 199,680; it is a sustained
+generation test, not a near-200K decode test. Sampled usage stayed at 14,930 MiB per
+card, and before/after per-process dedicated/shared counters were unchanged.
+
+**Correctness and stability.** All 29 saved response observables remain exact,
+with inherited task scores 16/18, 5/7 and 4/4. At the new limit, synthetic ledger
+retrieval at about 5%, 50% and 95% depth, absent-key rejection and post-session
+recovery all pass with exact reference answers. A 197,632-token document prompt
+generates 2,049 tokens before `context_capacity`: the cached frontier is
+`prompt + completion - 1 = 199680`, as required. Its freeform wording differs from
+the prior attention schedule; strict output parity fails for that unscored answer,
+while the capacity and recovery checks pass. Independent FP64 attention checks
+support the numerical change, not universal output identity or broad accuracy
+equivalence. Eight image/text cases also pass, including the full image-token
+budget; a full 199K multimodal history was not tested.
+
+GPU-wide sampled memory and per-process after-request counters show no progressive
+growth after warmup across the six long requests. Shared WDDM usage includes the
+pinned-host transport baseline and does not itself prove or disprove VRAM spill.
+The ordinary launcher was also tested on port 8000: it advertises 199,680 tokens
+and image input and returns the expected short answer. All owned test servers were
+stopped. Linux execution was not tested locally.
+
+The compact [profile evidence](../diagnostics/long-context-validation.json) records
+request metrics, reserve selection and validation scope. Reproduce the six-case
+sweep with a fresh label (requires the built server and configured local artifact):
+
+```powershell
+py -3.11 tools/bench/context_sweep_windows.py --binary build/windows/apps/ninfer-serve.exe --label local-long-check --context 199680 --prompt-tokens 8192 100000 180000 --completion-tokens 16384 --workloads code docs --repetitions 1
+py -3.11 tools/bench/qualify_context_windows.py --binary build/windows/apps/ninfer-serve.exe --label local-limit-check --context 199680
+```
+
+The sweep stores its exact workload for `--replay-from` comparisons. A freshly
+generated corpus can change when repository content changes; replay the saved
+workload for a controlled follow-up.
 
 ## Local dual-5070-Ti exact draft selection
 

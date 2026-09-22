@@ -41,13 +41,13 @@ using Gqa35Geometry = GqaGeometry<16, 2, 2>;
 using Gqa27Tp2Geometry = GqaGeometry<12, 2, 2>;
 
 // Measured INT8 T=1/4/5 profile for a single TP2 shard on a 70-SM sm_120 GPU.
-// Keep the ordinary policy outside the qualified 80K..128K visible-key interval.
+// Keep the ordinary policy outside the qualified 81920..200709 visible-key interval.
 // Broad replay envelopes still need the 170-split launch/workspace upper bound;
 // the kernels select 70 active splits from the current device-side positions.
 struct Gqa27Tp2Sm70Geometry : Gqa27Tp2Geometry {
     static constexpr int LongWindowSplits = 70;
     static constexpr int LongWindowBegin = 81920;
-    static constexpr int LongWindowEnd = 131077; // 128K context plus five verify tokens
+    static constexpr int LongWindowEnd = 200709; // 200704-token context plus five verify tokens
     // Conservative full-domain staging even when a replay chooses fewer active splits.
     static constexpr int DecodePageSplitFloor = LongWindowSplits;
 };

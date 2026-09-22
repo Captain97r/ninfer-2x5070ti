@@ -1,0 +1,322 @@
+{
+  "artifact_type": "ninfer_gqa_long_window_validation",
+  "schema_version": 1,
+  "status": "adopted_with_qualified_operator_and_bounded_model_evidence",
+  "adopted": true,
+  "hardware": {
+    "platform": "native Windows WDDM",
+    "devices": [
+      0,
+      1
+    ],
+    "gpu": "2x NVIDIA GeForce RTX 5070 Ti 16 GB",
+    "sm_count_each": 70,
+    "compute": "sm_120a",
+    "cuda_compile_version": "13.3",
+    "cuda_runtime_driver_version": "13.4"
+  },
+  "change": {
+    "qualified_visible_keys_inclusive": [
+      81920,
+      200709
+    ],
+    "previous_visible_key_end": 131077,
+    "upper_context_tokens": 200704,
+    "verify_frontier_allowance_tokens": 5,
+    "eligible_shape": {
+      "query_heads": 12,
+      "kv_heads": 2,
+      "head_dimension": 256,
+      "batch": 1,
+      "query_tokens": [
+        1,
+        4,
+        5
+      ],
+      "kv_storage": "INT8 group64 with FP16 scales",
+      "query_and_output_storage": "BF16"
+    },
+    "broad_graph": {
+      "launch_split_capacity": 170,
+      "active_splits_inside_gate": 70,
+      "partial_ctas_launched": 340,
+      "device_positions_select_active_splits": true
+    },
+    "outside_gate": "Existing split policy retained; same broad graph tested at 200710 visible keys.",
+    "numerical_scope": "The logical attention formula and public formats are unchanged. Changing split count changes floating-point reduction association; bitwise output/model parity is not implied."
+  },
+  "oracle": {
+    "formula": "For every output dimension and query head, independently decode represented K/V signed INT8 codes with stored FP16 group scales, then evaluate causal scaled QK, stable softmax and weighted V using naive FP64 arithmetic. All 12 query heads and all admitted query columns are checked; grouped heads map qh//6.",
+    "represented_inputs": "BF16 Q; cached or appended INT8-G64 K/V after the public codec boundary; fragmented paged KV mapping. The oracle does not reuse production partial buffers or reduction order.",
+    "criteria": {
+      "relative_l2": "<=2.5 times the exact case's BF16 output-storage relative-L2 floor (existing fixture casts FP64 reference through FP32 to BF16)",
+      "maximum_absolute_error": "<=0.0011+0.0022*max(abs(FP64 reference))",
+      "non_finite_outputs_allowed": 0,
+      "criteria_changed": false
+    },
+    "exact_checks": [
+      "INT8 cache codes and FP16 scale bytes after fused append",
+      "rejected MTP suffix produces exact BF16 zero",
+      "output/workspace/cache guards",
+      "workspace cursor retires and peak matches queried capacity"
+    ]
+  },
+  "production_dispatch_qualification": {
+    "all_passed": true,
+    "contexts": [
+      100000,
+      200704
+    ],
+    "query_tokens": [
+      1,
+      4,
+      5
+    ],
+    "paths": [
+      "eager exact envelope",
+      "captured exact envelope",
+      "captured broad envelope",
+      "cached attention",
+      "fused KV append with deliberately poisoned prior rows",
+      "masked T5 MTP replay",
+      "short-window replay and restored long window"
+    ],
+    "same_upper_T5_graph_visible_key_sequence": [
+      200709,
+      133,
+      131077,
+      131078,
+      200710,
+      200709
+    ],
+    "broad_envelope": [
+      1,
+      200710
+    ],
+    "cache_capacity_covers_outside_gate": true,
+    "per_device": [
+      {
+        "device": 0,
+        "full_output_fp64_checks_passed": 65,
+        "max_relative_l2_ratio": 0.7206656708166846,
+        "max_gross_error_ratio": 0.49940269123057823
+      },
+      {
+        "device": 1,
+        "full_output_fp64_checks_passed": 65,
+        "max_relative_l2_ratio": 0.7206656708166846,
+        "max_gross_error_ratio": 0.49940269123057823
+      }
+    ],
+    "scope": "Tests invoke public Op dispatch on both physical GPUs; 65 independent full-output FP64 comparisons per GPU."
+  },
+  "operator_timing": {
+    "context_tokens": 200704,
+    "cache": "INT8-G64 fragmented pages",
+    "samples_per_route": 31,
+    "warmup_replays_per_route": 10,
+    "l2_scrub_bytes": 134217728,
+    "scrub_outside_event_interval": true,
+    "order": "Caps interleaved, order reversed on alternate rounds",
+    "measured_scope": "CUDA-event time for captured attention partial and output-reduction kernels on one GPU at a time. Broad route privately instantiates the production geometry with 170 launch capacity; public dispatch is separately qualified above.",
+    "qualified_cases_per_gpu": 18,
+    "comparison": "Same-run fixed 170 control versus extended production broad geometry; fixed 70 shown to quantify launch-envelope overhead.",
+    "rows": [
+      {
+        "device": 0,
+        "tokens": 1,
+        "fixed170_median_us": 309.696,
+        "production_broad_median_us": 277.248,
+        "fixed70_median_us": 277.472,
+        "latency_reduction_vs_fixed170_percent": 10.477,
+        "broad_over_fixed70": 0.999193
+      },
+      {
+        "device": 0,
+        "tokens": 4,
+        "fixed170_median_us": 332.416,
+        "production_broad_median_us": 285.152,
+        "fixed70_median_us": 285.184,
+        "latency_reduction_vs_fixed170_percent": 14.218,
+        "broad_over_fixed70": 0.999888
+      },
+      {
+        "device": 0,
+        "tokens": 5,
+        "fixed170_median_us": 340.192,
+        "production_broad_median_us": 287.104,
+        "fixed70_median_us": 287.584,
+        "latency_reduction_vs_fixed170_percent": 15.605,
+        "broad_over_fixed70": 0.998331
+      },
+      {
+        "device": 1,
+        "tokens": 1,
+        "fixed170_median_us": 316.288,
+        "production_broad_median_us": 283.392,
+        "fixed70_median_us": 281.856,
+        "latency_reduction_vs_fixed170_percent": 10.401,
+        "broad_over_fixed70": 1.00545
+      },
+      {
+        "device": 1,
+        "tokens": 4,
+        "fixed170_median_us": 340.384,
+        "production_broad_median_us": 289.664,
+        "fixed70_median_us": 291.232,
+        "latency_reduction_vs_fixed170_percent": 14.901,
+        "broad_over_fixed70": 0.994616
+      },
+      {
+        "device": 1,
+        "tokens": 5,
+        "fixed170_median_us": 346.912,
+        "production_broad_median_us": 293.28,
+        "fixed70_median_us": 291.872,
+        "latency_reduction_vs_fixed170_percent": 15.46,
+        "broad_over_fixed70": 1.004824
+      }
+    ],
+    "limitations": [
+      "Operator timings do not measure transport or whole-engine throughput.",
+      "One 31-sample paired sweep per GPU; no model-quality claim follows from kernel timing.",
+      "The printed broad split count 170 is launch capacity, not its active split count inside the gate."
+    ]
+  },
+  "full_model_validation": {
+    "runtime": "Pinned Qwen3.8-27B NInfer v2 NVFP4 artifact; TP2, MTP3, optimized draft head, INT8-G64 KV, native RoPE, vision token budget 2048, prefill chunk 1024.",
+    "fixed_quality_panels": {
+      "context": 196608,
+      "observations": 29,
+      "exact_observable_matches": 29,
+      "no_new_task_failures": true,
+      "panels": [
+        {
+          "panel": "short",
+          "source": "build/quality/final192k-short.json",
+          "context": 196608,
+          "observations": 18,
+          "exact_observable_matches": 18,
+          "tasks_passed": 16,
+          "inherited_task_failures": [
+            "integer-inventory-arithmetic",
+            "code-repair-as-json"
+          ],
+          "no_new_task_failures": true,
+          "regression_passed": true
+        },
+        {
+          "panel": "retrieval",
+          "source": "build/quality/final192k-retrieval.json",
+          "context": 196608,
+          "observations": 4,
+          "exact_observable_matches": 4,
+          "tasks_passed": 4,
+          "inherited_task_failures": [],
+          "no_new_task_failures": true,
+          "regression_passed": true
+        },
+        {
+          "panel": "stochastic",
+          "source": "build/quality/final192k-stochastic.json",
+          "context": 196608,
+          "observations": 7,
+          "exact_observable_matches": 7,
+          "tasks_passed": 5,
+          "inherited_task_failures": [
+            "stochastic-history-initial",
+            "stochastic-repeated-json"
+          ],
+          "no_new_task_failures": true,
+          "regression_passed": true
+        }
+      ],
+      "limitation": "Exact matches on these finite fixtures do not establish general output or quality equivalence; four inherited task failures remain explicit."
+    },
+    "near_limit": {
+      "source": "build/context-qualification/attention-195k-limit/report.json",
+      "context": 199680,
+      "reference_label": "workspace-195k-limit",
+      "all_observations_validated": true,
+      "scored_tasks_passed": 3,
+      "scored_task_observables_exact": 3,
+      "boundary_status": "passed",
+      "strict_all_observable_parity": false,
+      "cases": [
+        {
+          "name": "retrieve-three",
+          "prompt_tokens": 199107,
+          "completion_tokens": 130,
+          "engine_finish_reason": "stop_token",
+          "observation_validated": true,
+          "task_passed": true,
+          "exact_observable_match": true
+        },
+        {
+          "name": "absent-key",
+          "prompt_tokens": 199120,
+          "completion_tokens": 21,
+          "engine_finish_reason": "stop_token",
+          "observation_validated": true,
+          "task_passed": true,
+          "exact_observable_match": true
+        },
+        {
+          "name": "context-boundary",
+          "prompt_tokens": 197632,
+          "completion_tokens": 2049,
+          "engine_finish_reason": "context_capacity",
+          "observation_validated": true,
+          "task_passed": null,
+          "exact_observable_match": false,
+          "boundary": {
+            "cached_token_frontier": 199680,
+            "prompt_plus_completion": 199681,
+            "expected_cached_frontier": 199680,
+            "contract": "prompt_tokens + completion_tokens -1 == context at context_capacity",
+            "status": "passed"
+          }
+        },
+        {
+          "name": "post-session-health",
+          "prompt_tokens": 40,
+          "completion_tokens": 10,
+          "engine_finish_reason": "stop_token",
+          "observation_validated": true,
+          "task_passed": true,
+          "exact_observable_match": true
+        }
+      ],
+      "limitation": "The ungraded free-form document continuation changed, so strict whole-panel text parity failed. Retrieval, absent-key null, health JSON, and the context-capacity accounting passed. This is not blanket model-quality equivalence."
+    },
+    "real_workload_observations": {
+      "source": "build/context-sweep/final-195k-real/report.json",
+      "context": 199680,
+      "completed_requests": 6,
+      "prompt_tokens": [
+        8192,
+        8192,
+        100000,
+        100000,
+        180000,
+        180000
+      ],
+      "completion_tokens": [
+        5695,
+        7146,
+        5535,
+        6118,
+        3975,
+        5199
+      ],
+      "task_quality_scored": false,
+      "long_180k_outputs_changed": true,
+      "throughput_evidence": "diagnostics/long-context-validation.json",
+      "limitation": "Real code/document answers are ungraded; changed 180K output wording prevents exact-output parity claims and limits attribution from per-request throughput comparisons."
+    },
+    "numerical_interpretation": "The active split-count change preserves the attention formula/public formats but changes floating-point reduction association. Independent FP64 tolerance qualification and bounded task outcomes support adoption; bitwise model equivalence or universal quality preservation is not claimed."
+  },
+  "source_summary": "build/post-display/attention-qualification/operator-summary.json",
+  "date": "2026-09-23",
+  "historical_100k_evidence": "diagnostics/gqa-tuning.json"
+}

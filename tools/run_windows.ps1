@@ -4,7 +4,7 @@ param(
     [ValidateSet('Cli', 'Server')][string]$Mode = 'Cli',
     [string]$Prompt = 'Explain how tensor parallel inference works in three sentences.',
     [string]$MessagesFile,
-    [ValidateRange(512, 262144)][int]$Context = 102400,
+    [ValidateRange(512, 262144)][int]$Context = 199680,
     [ValidateRange(1, 32768)][int]$MaxNew = 256,
     [ValidateRange(0, 5)][int]$DraftTokens = 3,
     [ValidateRange(1, 65535)][int]$Port = 8000,

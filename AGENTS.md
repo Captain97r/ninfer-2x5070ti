@@ -104,7 +104,7 @@ intermediate artifacts are excluded unless requested or themselves the deliverab
 
 ## Current product contract
 
-This branch targets one Qwen3.8-27B session around 100K context on two RTX 5070 Ti
+This branch targets one Qwen3.8-27B session with a qualified 199,680-token context on two RTX 5070 Ti
 16 GB GPUs, using tensor parallelism, mixed NVFP4 weights and MTP. Native Windows
 is primary; retain Linux portability. Both cards have 70 SMs (sm_120a). Direct
 CUDA peer access is unavailable on the measured Windows system, so mapped pinned

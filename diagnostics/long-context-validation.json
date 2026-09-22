@@ -1,0 +1,986 @@
+{
+  "artifact_type": "ninfer_long_context_validation",
+  "schema_version": 1,
+  "status": "qualified_and_selected",
+  "sources": {
+    "baseline": "build/post-display/long-baseline-combined.json",
+    "baseline_sessions": [
+      "build\\post-display\\recovered-baseline.json",
+      "build\\context-sweep\\baseline-192k-remaining\\report.json"
+    ],
+    "final": "build/context-sweep/final-195k-real/report.json"
+  },
+  "pair_order": [
+    "baseline",
+    "final"
+  ],
+  "hardware_and_model": {
+    "platform": "Native Windows WDDM; two RTX 5070 Ti 16GB, 70 SM each; displays moved to motherboard before these runs",
+    "artifact": "NInfer v2 Qwen3.8-27B mixed NVFP4",
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "direct_cuda_peer_access": false,
+    "environment": {
+      "cuda_compile_version": "13.3",
+      "cuda_driver_version": "13.4",
+      "cuda_runtime_version": "13.4"
+    }
+  },
+  "workload_contract": {
+    "contexts": [
+      196608,
+      199680
+    ],
+    "engine_setting_differences": {
+      "kv_capacity": [
+        196608,
+        199680
+      ],
+      "kv_capacity_max_page_groups": [
+        3072,
+        3120
+      ],
+      "kv_capacity_page_groups": [
+        3072,
+        3120
+      ],
+      "max_context": [
+        196608,
+        199680
+      ]
+    },
+    "other_logged_engine_settings_equal": true,
+    "prompt_targets": [
+      8192,
+      100000,
+      180000
+    ],
+    "completion_cap": 16384,
+    "repetitions_per_case": 1,
+    "all_request_payloads_equal": true,
+    "same_two_warmup_request_payloads_each_session": true,
+    "sampling": {
+      "frequency_penalty": 0.0,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "temperature": 0.699999988079071,
+      "top_k": 20,
+      "top_p": 0.800000011920929
+    },
+    "seed": 7632647173703958409,
+    "thinking": false,
+    "kv_cache": "INT8 group64",
+    "prefill_chunk": 1024,
+    "speculative_backend": "MTP",
+    "draft_tokens": 3,
+    "proposal_head": "optimized",
+    "cuda_graph": true,
+    "vision_enabled": true,
+    "image_max_tokens": 2048,
+    "prefix_reuse": false,
+    "rope": "native",
+    "native_rope_ceiling": 262144,
+    "baseline_recovery": "Same six frozen requests; first four recovered from preserved HTTP/log data after a timestamp-accounting error; final two completed in a second owned process with the same warmups. No rejected model answer or performance sample was replaced."
+  },
+  "comparison": {
+    "request_payloads_equal_count": 6,
+    "observable_equal_count": 4,
+    "case_count": 6,
+    "observable_fields_compared": [
+      "content",
+      "reasoning_content",
+      "reasoning",
+      "tool_calls",
+      "finish_reason",
+      "completion_tokens"
+    ],
+    "changed_cases": [
+      "code-180000-r1",
+      "docs-180000-r1"
+    ],
+    "all_prompt_counts_equal": true,
+    "all_prefill_counts_are_full_prompt": true,
+    "all_finished_naturally_before_cap": true,
+    "unchanged_response_cases_decode_rate_change_percent_range": [
+      -0.008604,
+      0.027211
+    ],
+    "all_cases_prefill_rate_change_percent_range": [
+      0.010615,
+      0.251683
+    ],
+    "interpretation": "8K/100K outputs and MTP counters match; TG changes there are within 0.03%. Both 180K outputs and generated lengths differ, so their 2.10%/3.56% higher measured TG is not a same-output speedup or evidence of quality equivalence.",
+    "answers_scored_for_quality": false,
+    "mtp_fallback_steps_all_zero": true
+  },
+  "decode_window_method": "full 1s log intervals after the first decode-positive interval; final partial interval excluded; zero-token stalls included; durations/counter deltas are consecutive steady-clock snapshots, logged wall timestamps are delayed estimates",
+  "cases": [
+    {
+      "id": "code-8192-r1",
+      "request_equal": true,
+      "observable_equal": true,
+      "prompt_tokens": 8192,
+      "completion_tokens": [
+        5695,
+        5695
+      ],
+      "prefill_tokens_per_second": [
+        3136.665335728104,
+        3139.355018898212
+      ],
+      "prefill_rate_change_percent": 0.08575,
+      "decode_tokens_per_second": [
+        145.38587589441903,
+        145.40023447179541
+      ],
+      "decode_rate_change_percent": 0.009876,
+      "decode_seconds": [
+        39.16473979999991,
+        39.1608721999999
+      ],
+      "server_ttft_ms": [
+        2631.8505999999998,
+        2629.9183
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            138.120291900065,
+            149.36575166384387,
+            147.56264227119186
+          ],
+          [
+            137.84345506958994,
+            149.65045863212828,
+            147.352681638335
+          ]
+        ],
+        "covered_seconds": [
+          38.25161920000001,
+          38.27232079999999
+        ],
+        "covered_tokens": [
+          5554,
+          5555
+        ],
+        "final_late_vs_early_rate_change_percent": 6.89857
+      },
+      "mtp": {
+        "counters_equal": true,
+        "rounds_drafted_accepted": [
+          [
+            2029,
+            6087,
+            3666
+          ],
+          [
+            2029,
+            6087,
+            3666
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            1612,
+            1199,
+            855
+          ],
+          [
+            1612,
+            1199,
+            855
+          ]
+        ],
+        "acceptance_fraction": [
+          0.602267126663381,
+          0.602267126663381
+        ]
+      }
+    },
+    {
+      "id": "docs-8192-r1",
+      "request_equal": true,
+      "observable_equal": true,
+      "prompt_tokens": 8192,
+      "completion_tokens": [
+        7146,
+        7146
+      ],
+      "prefill_tokens_per_second": [
+        3128.118882875126,
+        3135.991834171263
+      ],
+      "prefill_rate_change_percent": 0.251683,
+      "decode_tokens_per_second": [
+        165.3357420965313,
+        165.32771196590753
+      ],
+      "decode_rate_change_percent": -0.004857,
+      "decode_seconds": [
+        43.21509620000006,
+        43.21719519999999
+      ],
+      "server_ttft_ms": [
+        2633.9795,
+        2629.5993
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            160.70638755054563,
+            169.78060678116205,
+            167.28304661890263
+          ],
+          [
+            158.94733745853438,
+            171.95358157346834,
+            168.806677532941
+          ]
+        ],
+        "covered_seconds": [
+          42.34413979999999,
+          41.3615168
+        ],
+        "covered_tokens": [
+          7026,
+          6897
+        ],
+        "final_late_vs_early_rate_change_percent": 6.202897
+      },
+      "mtp": {
+        "counters_equal": true,
+        "rounds_drafted_accepted": [
+          [
+            2235,
+            6705,
+            4910
+          ],
+          [
+            2235,
+            6705,
+            4910
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            1925,
+            1627,
+            1358
+          ],
+          [
+            1925,
+            1627,
+            1358
+          ]
+        ],
+        "acceptance_fraction": [
+          0.732289336316182,
+          0.732289336316182
+        ]
+      }
+    },
+    {
+      "id": "code-100000-r1",
+      "request_equal": true,
+      "observable_equal": true,
+      "prompt_tokens": 100000,
+      "completion_tokens": [
+        5535,
+        5535
+      ],
+      "prefill_tokens_per_second": [
+        2323.1072429145333,
+        2324.4813534685063
+      ],
+      "prefill_rate_change_percent": 0.05915,
+      "decode_tokens_per_second": [
+        130.05155068155588,
+        130.0403614122895
+      ],
+      "decode_rate_change_percent": -0.008604,
+      "decode_seconds": [
+        42.552356899999964,
+        42.55601829999995
+      ],
+      "server_ttft_ms": [
+        43306.464499999995,
+        43250.918
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            129.23741573988144,
+            125.67559854209499,
+            134.62636429471877
+          ],
+          [
+            131.05533655736545,
+            125.22625769684376,
+            133.81653698797754
+          ]
+        ],
+        "covered_seconds": [
+          41.2896366,
+          42.30561110000001
+        ],
+        "covered_tokens": [
+          5362,
+          5501
+        ],
+        "final_late_vs_early_rate_change_percent": 2.106897
+      },
+      "mtp": {
+        "counters_equal": true,
+        "rounds_drafted_accepted": [
+          [
+            1986,
+            5958,
+            3551
+          ],
+          [
+            1986,
+            5958,
+            3551
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            1579,
+            1156,
+            816
+          ],
+          [
+            1579,
+            1156,
+            816
+          ]
+        ],
+        "acceptance_fraction": [
+          0.5960053709298422,
+          0.5960053709298422
+        ]
+      }
+    },
+    {
+      "id": "docs-100000-r1",
+      "request_equal": true,
+      "observable_equal": true,
+      "prompt_tokens": 100000,
+      "completion_tokens": [
+        6118,
+        6118
+      ],
+      "prefill_tokens_per_second": [
+        2323.2100732158483,
+        2323.45669146547
+      ],
+      "prefill_rate_change_percent": 0.010615,
+      "decode_tokens_per_second": [
+        148.93009213440646,
+        148.97061705448823
+      ],
+      "decode_rate_change_percent": 0.027211,
+      "decode_seconds": [
+        41.07296190000022,
+        41.061788699999916
+      ],
+      "server_ttft_ms": [
+        43255.6583,
+        43254.832
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            146.44735543053238,
+            155.25993154938627,
+            144.57417559240508
+          ],
+          [
+            146.28898610064618,
+            154.80968831016816,
+            145.4209900401526
+          ]
+        ],
+        "covered_seconds": [
+          40.27367479999999,
+          40.2619822
+        ],
+        "covered_tokens": [
+          5987,
+          5989
+        ],
+        "final_late_vs_early_rate_change_percent": -0.593343
+      },
+      "mtp": {
+        "counters_equal": true,
+        "rounds_drafted_accepted": [
+          [
+            1915,
+            5745,
+            4202
+          ],
+          [
+            1915,
+            5745,
+            4202
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            1641,
+            1394,
+            1167
+          ],
+          [
+            1641,
+            1394,
+            1167
+          ]
+        ],
+        "acceptance_fraction": [
+          0.7314186248912098,
+          0.7314186248912098
+        ]
+      }
+    },
+    {
+      "id": "code-180000-r1",
+      "request_equal": true,
+      "observable_equal": false,
+      "changed_observable_fields": [
+        "completion_tokens",
+        "content"
+      ],
+      "first_content_difference_character": 36,
+      "prompt_tokens": 180000,
+      "completion_tokens": [
+        3420,
+        3975
+      ],
+      "prefill_tokens_per_second": [
+        1872.6949134860574,
+        1873.4724291273035
+      ],
+      "prefill_rate_change_percent": 0.041519,
+      "decode_tokens_per_second": [
+        113.57875470957767,
+        117.62644259478543
+      ],
+      "decode_rate_change_percent": 3.563772,
+      "decode_seconds": [
+        30.102460699999988,
+        33.78492040000004
+      ],
+      "server_ttft_ms": [
+        96523.9261,
+        96461.14
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            113.30285765678227,
+            114.09617799829229,
+            113.74910412663402
+          ],
+          [
+            116.04544274566912,
+            117.27625650871957,
+            120.01251450797902
+          ]
+        ],
+        "covered_seconds": [
+          29.2358397,
+          33.257507800000006
+        ],
+        "covered_tokens": [
+          3325,
+          3917
+        ],
+        "final_late_vs_early_rate_change_percent": 3.41855
+      },
+      "mtp": {
+        "counters_equal": false,
+        "rounds_drafted_accepted": [
+          [
+            1241,
+            3723,
+            2179
+          ],
+          [
+            1448,
+            4344,
+            2527
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            977,
+            696,
+            506
+          ],
+          [
+            1130,
+            813,
+            584
+          ]
+        ],
+        "acceptance_fraction": [
+          0.5852806876175127,
+          0.5817219152854513
+        ]
+      }
+    },
+    {
+      "id": "docs-180000-r1",
+      "request_equal": true,
+      "observable_equal": false,
+      "changed_observable_fields": [
+        "completion_tokens",
+        "content"
+      ],
+      "first_content_difference_character": 338,
+      "prompt_tokens": 180000,
+      "completion_tokens": [
+        6455,
+        5199
+      ],
+      "prefill_tokens_per_second": [
+        1872.2156272675559,
+        1873.4895517408033
+      ],
+      "prefill_rate_change_percent": 0.068044,
+      "decode_tokens_per_second": [
+        130.94342471254922,
+        133.69056164696056
+      ],
+      "decode_rate_change_percent": 2.097957,
+      "decode_seconds": [
+        49.2884619,
+        38.880830000000046
+      ],
+      "server_ttft_ms": [
+        96503.6231,
+        96419.3573
+      ],
+      "decode_windows": {
+        "early_middle_late_tokens_per_second": [
+          [
+            130.0861851091766,
+            133.7391362020163,
+            129.77589549706153
+          ],
+          [
+            133.68601274980486,
+            133.7866171839422,
+            136.54908997319268
+          ]
+        ],
+        "covered_seconds": [
+          48.3461969,
+          37.247448399999996
+        ],
+        "covered_tokens": [
+          6343,
+          5018
+        ],
+        "final_late_vs_early_rate_change_percent": 2.141643
+      },
+      "mtp": {
+        "counters_equal": false,
+        "rounds_drafted_accepted": [
+          [
+            2028,
+            6084,
+            4428
+          ],
+          [
+            1665,
+            4995,
+            3535
+          ]
+        ],
+        "accepted_per_position": [
+          [
+            1748,
+            1472,
+            1208
+          ],
+          [
+            1432,
+            1178,
+            925
+          ]
+        ],
+        "acceptance_fraction": [
+          0.727810650887574,
+          0.7077077077077077
+        ]
+      }
+    }
+  ],
+  "memory": {
+    "nvml": {
+      "scope": "sampled GPU-wide dedicated memory, MiB; 2s polling, not an instantaneous peak or Windows per-process shared-memory measurement",
+      "gpus": [
+        {
+          "gpu": 0,
+          "peak_dedicated_mib": [
+            14970.0,
+            14962.0
+          ],
+          "minimum_reported_free_mib": [
+            1026.0,
+            1034.0
+          ],
+          "final_samples": 265
+        },
+        {
+          "gpu": 1,
+          "peak_dedicated_mib": [
+            14970.0,
+            14962.0
+          ],
+          "minimum_reported_free_mib": [
+            1026.0,
+            1034.0
+          ],
+          "final_samples": 265
+        }
+      ],
+      "final_query_errors": 0,
+      "observed_ready_to_peak_growth_mib": 32,
+      "interpretation": "Sampled peak fell 8 MiB per GPU while configured capacity grew 3072 tokens. GPU-wide reported free memory is not CUDA allocatable headroom."
+    },
+    "startup_cuda_and_plan": {
+      "scope": "Engine startup primary-device CUDA free-memory report; not measured minimum during inference",
+      "available_after_startup_bytes": [
+        309329920,
+        317718528
+      ],
+      "workspace_capacity_bytes": [
+        202320384,
+        138741504
+      ],
+      "sequence_capacity_bytes": [
+        3701726464,
+        3756875520
+      ],
+      "graph_allowance_bytes": [
+        85983232,
+        85983232
+      ],
+      "request_transient_capacity_bytes": [
+        20971520,
+        20971520
+      ],
+      "engineering_reserve_floor_mib": 256,
+      "final_startup_free_mib": 303.0,
+      "conservative_startup_minus_observed_growth_mib": 271.0,
+      "reserve_note": "271 MiB is an estimate from 303 MiB startup CUDA free minus a sampled 32 MiB dedicated-memory increase, not a measured CUDA-free low watermark or universal Windows safety guarantee."
+    },
+    "cim": {
+      "scope": "Per-process WDDM dedicated/shared/committed bytes sampled at readiness, after warmup and after completed requests; adapter LUIDs are not asserted to be CUDA ordinals",
+      "all_post_warmup_sampled_drift_bytes_zero": true,
+      "interpretation": "Shared usage rose 2 MiB during warmup, then stayed at 264 MiB per adapter in all sampled sessions. No retained growth is observed; these snapshots cannot exclude transient host-memory migration or paging.",
+      "after_warmup_usage_bytes": [
+        {
+          "adapter_luid": "luid_0x00000000_0x00011C49_phys_0",
+          "dedicated": [
+            15663636480,
+            15655247872
+          ],
+          "shared": [
+            276824064,
+            276824064
+          ],
+          "total_committed": [
+            15940460544,
+            15932071936
+          ]
+        },
+        {
+          "adapter_luid": "luid_0x00000000_0x0001302C_phys_0",
+          "dedicated": [
+            15663628288,
+            15655239680
+          ],
+          "shared": [
+            276824064,
+            276824064
+          ],
+          "total_committed": [
+            15940452352,
+            15932063744
+          ]
+        }
+      ],
+      "session_sampling": [
+        {
+          "session": "baseline-first-four",
+          "snapshots": 5,
+          "post_warmup_span_seconds": 174.28,
+          "post_warmup_dedicated_shared_committed_range_bytes": 0
+        },
+        {
+          "session": "baseline-final-two",
+          "snapshots": 4,
+          "post_warmup_span_seconds": 272.93,
+          "post_warmup_dedicated_shared_committed_range_bytes": 0
+        },
+        {
+          "session": "final-all-six",
+          "snapshots": 8,
+          "post_warmup_span_seconds": 524.831,
+          "post_warmup_dedicated_shared_committed_range_bytes": 0
+        }
+      ],
+      "baseline_sessions_same_usage": true,
+      "warmup_change_per_adapter_bytes": {
+        "dedicated": 4096,
+        "shared": 2097152
+      }
+    }
+  },
+  "limitations": [
+    "One request per corpus/context; no repeated-run variance or confidence interval.",
+    "Baseline first four requests were recovered from preserved output/log data, and the final two ran in another owned server lifetime with the same warmups.",
+    "Baseline allocated 196608 tokens; final allocated 199680. This compares final configurations, not a single isolated kernel change.",
+    "All six stopped naturally after 3420-7146 baseline and 3975-7146 final output tokens; the 16384 cap was not exercised.",
+    "Final decode phases lasted about 34-43 seconds; this panel alone does not establish multi-minute sustained generation behavior.",
+    "Both 180K continuations differ under stochastic sampling. Their output quality is unscored here, and performance differences are confounded by changed output and MTP acceptance.",
+    "GPU-wide 2s memory polling and post-request CIM snapshots can miss brief peaks; flat shared-memory counters do not prove absence of transient WDDM paging.",
+    "Sustained reasoning and near-limit/task qualification are separate runs summarized in this artifact; their scopes do not establish general accuracy equivalence.",
+    "Sustained thinking was capped and unscored; its actual context reached33102, separate from long-prompt/near-capacity validation. Linux execution was not tested locally."
+  ],
+  "date": "2026-09-23",
+  "selected_default": {
+    "context_tokens": 199680,
+    "previous_context_tokens": 102400,
+    "port": 8000,
+    "concurrency": 1,
+    "retained_features": "TP2 devices0,1, INT8-G64 KV, MTP3, optimized draft head, CUDA Graphs, prefill1024, native RoPE, vision2048",
+    "memory_used_mib_per_card": 14930,
+    "observed_prefill_peak_mib_per_card": 14962,
+    "cuda_startup_free_mib_primary_rank": 303,
+    "conservative_prefill_allowance_mib": 32,
+    "projected_prefill_free_mib": 271,
+    "selected_engineering_reserve_mib": 256,
+    "next_1024token_step": {
+      "context": 200704,
+      "projected_prefill_free_mib": 253.4686,
+      "adopted": false
+    },
+    "scope": "Highest qualified operating profile under the selected reserve, not mathematical maximum. CUDA headroom is primary-rank startup; NVML growth is conservatively charged against it, not a measured CUDA low-watermark. Other GPU loads/drivers can reduce it.",
+    "workspace_evidence": "diagnostics/tp2-workspace-validation.json",
+    "native_262144": "Does not fit this full profile; baseline229376 safely rejected at admission."
+  },
+  "sustained_generation": {
+    "source": "build/post-display/sustained-reasoning/final-195k-aime15-32k/report.json",
+    "fixture": "examples/cli/messages/long_decode_aime26_15.json",
+    "thinking": true,
+    "sampling": {
+      "frequency_penalty": 0.0,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "temperature": 1.0,
+      "top_k": 20,
+      "top_p": 0.949999988079071
+    },
+    "seed": 7632647173703958409,
+    "warmup": false,
+    "ignore_eos": false,
+    "allocated_context": 199680,
+    "actual_cached_frontier": 33102,
+    "metrics": {
+      "prompt_tokens": 335,
+      "completion_tokens": 32768,
+      "decode_tokens": 32767,
+      "finish_reason": "length",
+      "prepare_seconds": 0.0007767,
+      "vision_seconds": 0.0,
+      "prefill_seconds": 0.1831901,
+      "decode_seconds": 263.922093499999,
+      "total_seconds": 264.3036947,
+      "prefill_tok_s": 1828.7014418355577,
+      "server_ttft_ms": 184.0089,
+      "decode_tok_s": 124.15406215319418,
+      "speculative_rounds": 13552,
+      "drafted_tokens": 40654,
+      "accepted_tokens": 19215,
+      "speculative_acceptance": 0.47264721798593007,
+      "speculative_tokens_per_round": 2.417871900826446,
+      "fallback_steps": 0,
+      "server_finish_reason": "output_limit",
+      "accepted_per_position": [
+        9169,
+        6104,
+        3942
+      ],
+      "completion_cap": 32768,
+      "reached_cap": true
+    },
+    "decode_windows": {
+      "scope": "full 1s log intervals after the first decode-positive interval; final partial interval excluded; zero-token stalls included; durations/counter deltas are consecutive steady-clock snapshots, logged wall timestamps are delayed estimates",
+      "available": true,
+      "covered_seconds": 262.01837070000005,
+      "covered_tokens": 32464,
+      "early": {
+        "intervals": 86,
+        "seconds": 86.69692030000004,
+        "committed_decode_tokens": 10199,
+        "tokens_per_second": 117.63970351781913
+      },
+      "middle": {
+        "intervals": 87,
+        "seconds": 87.67852890000002,
+        "committed_decode_tokens": 10594,
+        "tokens_per_second": 120.82775718195242
+      },
+      "late": {
+        "intervals": 87,
+        "seconds": 87.64292150000001,
+        "committed_decode_tokens": 11671,
+        "tokens_per_second": 133.1653463879567
+      }
+    },
+    "boxed_score": {
+      "scored": false,
+      "passed": null,
+      "reason": "capped/unfinished reasoning is not a final answer"
+    },
+    "gpu_memory": {
+      "scope": "sampled GPU-wide dedicated memory, MiB; 2s polling, not an instantaneous peak or Windows per-process shared-memory measurement",
+      "gpus": [
+        {
+          "index": 0,
+          "samples": 138,
+          "max_used_mib": 14930.0,
+          "min_free_mib": 1066.0,
+          "max_utilization_percent": 100.0,
+          "max_power_w": 264.06
+        },
+        {
+          "index": 1,
+          "samples": 138,
+          "max_used_mib": 14930.0,
+          "min_free_mib": 1066.0,
+          "max_utilization_percent": 98.0,
+          "max_power_w": 232.55
+        }
+      ],
+      "errors": 0
+    },
+    "cim_delta_bytes_per_adapter": [
+      {
+        "DedicatedUsage": 0,
+        "SharedUsage": 0,
+        "TotalCommitted": 0
+      },
+      {
+        "DedicatedUsage": 0,
+        "SharedUsage": 0,
+        "TotalCommitted": 0
+      }
+    ],
+    "scope": "335 prompt tokens plus32768 capped completion tokens, actual cached frontier33102. Completed transport/decode stress, unfinished math reasoning unscored. Not a near-200K decode test and not a before/after speedup comparison."
+  },
+  "quality_and_capacity": {
+    "near_limit": {
+      "source": "build/context-qualification/attention-195k-limit/report.json",
+      "summary": {
+        "complete": true,
+        "all_observations_validated": true,
+        "all_tasks_passed": true,
+        "boundary_status": "passed",
+        "qualification_passed": true
+      },
+      "comparison": {
+        "reference_label": "workspace-195k-limit",
+        "cases": [
+          {
+            "fixture": "retrieve-three",
+            "observable_equal": true,
+            "prompt_count_equal": true,
+            "new_task_failure": false
+          },
+          {
+            "fixture": "absent-key",
+            "observable_equal": true,
+            "prompt_count_equal": true,
+            "new_task_failure": false
+          },
+          {
+            "fixture": "context-boundary",
+            "observable_equal": false,
+            "prompt_count_equal": true,
+            "new_task_failure": false
+          },
+          {
+            "fixture": "post-session-health",
+            "observable_equal": true,
+            "prompt_count_equal": true,
+            "new_task_failure": false
+          }
+        ],
+        "all_observables_equal": false,
+        "no_new_task_failures": true
+      },
+      "boundary_contract": "197632 prompt +2049 completion -1 =199680 cached tokens; context_capacity, followed by exact healthy short response. Freeform boundary answer differs; task/capacity qualification passes, strict full-response parity does not."
+    },
+    "saved_response_panels": [
+      {
+        "panel": "short",
+        "source": "build/quality/final192k-short.json",
+        "context": 196608,
+        "cases": 18,
+        "task_passed": 16,
+        "all_observables_equal": true,
+        "no_new_task_failures": true
+      },
+      {
+        "panel": "stochastic",
+        "source": "build/quality/final192k-stochastic.json",
+        "context": 196608,
+        "cases": 7,
+        "task_passed": 5,
+        "all_observables_equal": true,
+        "no_new_task_failures": true
+      },
+      {
+        "panel": "retrieval",
+        "source": "build/quality/final192k-retrieval.json",
+        "context": 196608,
+        "cases": 4,
+        "task_passed": 4,
+        "all_observables_equal": true,
+        "no_new_task_failures": true
+      }
+    ],
+    "vision": {
+      "source": "diagnostics/tp2-workspace-validation.json",
+      "passed": 8,
+      "failed": 0,
+      "context": 199680,
+      "max_image_tokens": 2048,
+      "scope": "Short image histories at the larger allocation; not a199K multimodal history."
+    },
+    "numerical_evidence": "diagnostics/gqa-long-window-validation.json",
+    "accuracy_scope": "Bounded tests; inherited task failures retained. Ungraded freeform long requests do not establish general accuracy equivalence."
+  },
+  "launcher": {
+    "source": "build/post-display/default-launcher/report.json",
+    "passed": true,
+    "context_length": 199680,
+    "max_model_len": 199680,
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "port": 8000,
+    "short_answer": "4",
+    "owned_server_stopped": true
+  }
+}

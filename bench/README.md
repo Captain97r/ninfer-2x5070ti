@@ -790,20 +790,23 @@ effects are measured through the public Engine benchmark or the target round ben
 `ninfer_gqa_tp2_split_bench` isolates the production INT8 partial/reduce kernels for a 12-query,
 2-KV-head TP2 shard (head dimension 256). It compares fixed split caps with the production 70-SM
 broad-graph policy at T=1, 4 and 5. The `sm70_broad_graph` row launches the original 170 splits per
-KV head and selects 70 active splits from device positions in the qualified 81,920..131,077
+KV head and selects 70 active splits from device positions in the qualified 81,920..200,709
 visible-key interval. Outside that interval the production policy keeps its original split count.
 
 ```bash
 cmake --build build --parallel --target ninfer_gqa_tp2_split_bench ninfer_gqa_tp2_sm70_test
 ./build/bench/ninfer_gqa_tp2_split_bench --device 0 --context 100000 --repeat 31
 ./build/bench/ninfer_gqa_tp2_split_bench --device 1 --context 100000 --repeat 31
+./build/bench/ninfer_gqa_tp2_split_bench --device 0 --context 200704 --repeat 31
+./build/bench/ninfer_gqa_tp2_split_bench --device 1 --context 200704 --repeat 31
 ./build/tests/ninfer_gqa_tp2_sm70_test 0
 ./build/tests/ninfer_gqa_tp2_sm70_test 1
 ```
 
 Configure with `NINFER_BUILD_BENCHMARKS=ON` and `BUILD_TESTING=ON`. Native Windows uses the
 corresponding `.exe` paths under the selected build directory. The experiment links only core
-helpers; the public-Op regression links the production launchers.
+helpers; the public-Op regression links the production launchers and checks both
+100,000- and 200,704-token contexts, including same-graph boundary transitions.
 
 Every candidate is checked against the existing independent FP64 oracle using represented BF16
 queries and decoded INT8-G64 cache, across all 12 heads and query tokens. It then times cold-cache
@@ -812,7 +815,8 @@ CUDA event interval. CSV reports minimum, median, p90, relative L2 error and its
 production compiler's relocatable-device-code mode is enabled for this benchmark.
 
 The tuning applies to one active request on a 70-SM `sm_120` GPU, INT8 cache and T=1/4/5. The local
-100K measurements reduce attention latency by 13-22%; this isolated Op result does not measure
+100K measurements reduce attention latency by 13-22%; the extended 200,704-token
+profile measured 10-16%. These isolated Op results do not measure
 TP communication, prefill throughput, model accuracy or an end-to-end inference speedup. See
 [the local measurements](../docs/performance.md#local-rtx-5070-ti-attention-tuning).
 

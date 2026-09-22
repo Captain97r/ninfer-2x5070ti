@@ -10,7 +10,7 @@ Clone this fork and follow the build steps below. The native CLI and server are
 built in `build/windows/apps/`. From the repository root:
 
 ```powershell
-# One prompt; defaults to TP2, INT8 KV, MTP3, vision and 102,400-token capacity.
+# One prompt; defaults to TP2, INT8 KV, MTP3, vision and 199,680-token capacity.
 .\tools\run_windows.ps1 -Prompt 'Explain tensor parallel inference.'
 
 # OpenAI/Anthropic-compatible server with image input, localhost:8000, one active request.
@@ -24,7 +24,8 @@ reproduces the short smoke-run settings. Server requests control their own sampl
 
 The model-discovery endpoints publish the configured context window as `max_model_len`
 and `context_length`, so clients such as oh-my-pi can budget the session correctly.
-The default is 102,400 tokens; changing `-Context` changes the advertised limit too.
+The default is **199,680 tokens**, shared by prompt, image and generated tokens;
+changing `-Context` changes the advertised limit too.
 When a client omits its output limit, the Windows server launcher allows generation
 up to the remaining context instead of cutting replies at 8,192 tokens. Explicit
 client output limits still apply. OMP treats a `length` finish as an incomplete
@@ -79,7 +80,10 @@ py -3.11 .\tools\test_vision.py
 counting and position, streamed answers, changed images, two-image history, thinking,
 large-image downscaling, and text after image requests. A real OMP attachment also
 returned the correct answer. These were short image prompts at 102,400-token server
-capacity with TP2, MTP3 and CUDA Graphs; a full 100K multimodal history was not tested.
+capacity with TP2, MTP3 and CUDA Graphs. The later
+[workspace validation](diagnostics/tp2-workspace-validation.json) passed eight
+image/text checks at 199,680-token capacity, including the full 2,048-image-token
+budget. A full 199K multimodal history has not been tested.
 
 ## Build and validate
 
@@ -131,7 +135,7 @@ the [base fork records the same failure](https://github.com/ivanov84/ninfer-wind
 - Mailbox failure detection at round completion, before consuming output, including
   the final decode round.
 - A 70-SM SM120 INT8 attention schedule for one TP2 shard, 1/4/5 token queries and
-  approximately 80K-128K visible keys. Graphs retain safe workspace/page bounds.
+  81,920..200,709 visible keys. Graphs retain safe workspace/page bounds.
 - Windows NVFP4 TMA descriptor lifetime and visibility fixes, including release
   on the owning stream and host descriptors retained by captured graphs.
 - Exact distributed MTP draft argmax with compact candidate transfer, preserving
@@ -145,6 +149,10 @@ the [base fork records the same failure](https://github.com/ivanov84/ninfer-wind
   and peer-local penalty-counter updates; eager acceptance remains replicated.
 - Fixed HTTP quality and long-context retrieval fixtures, with prompt-count checks
   and exact response comparison separate from task scoring.
+- TP2 workspace sized from shard dimensions and actual phase lifetimes, saving
+  60.63 MiB per GPU with the default vision budget.
+- Cold long-code/document sweeps, sustained generation measurements, and exact
+  near-limit retrieval and context-exhaustion qualification.
 - Actual TP2 options and both device identities in the end-to-end benchmark.
 - Reproducible Windows build, model download, launch and focused test scripts.
 
@@ -155,6 +163,29 @@ schedules exactly, plus reproducible retained decode history and both-rank egres
 it does not promise arbitrary cached/cold greedy output identity.
 
 ## Validation and measurements
+
+The current Windows default is **199,680 tokens** with MTP3 and the 2,048-token
+vision budget retained. Measured memory use is approximately **14.6 GiB per GPU**.
+Moving the display to the motherboard changed same-configuration throughput by
+less than 0.2%; the useful changes are tighter workspace allocation and attention
+tuning for the enlarged context.
+
+Cold code/document requests measured approximately **3,140 / 2,324 / 1,873 prompt
+tokens/s** at 8K / 100K / 180K prompts. Generation measured **145-165 / 130-149 /
+118-134 tokens/s**, with natural replies of about 4K-7K tokens. These are single
+requests per workload, not guaranteed rates. The 180K replies changed with the
+attention reduction schedule, so their before/after throughput is not an isolated
+same-output speedup. [Long-context results and limits](docs/performance.md#local-dual-5070-ti-long-context-profile).
+
+A separate sustained run generated **32,768 tokens at 124.15 tok/s**, with stable
+measured memory. It reached the output cap while reasoning, so its math answer is
+unscored; its actual context reached 33K.
+
+All **29 saved response observables** still match exactly; inherited task scores
+remain 16/18, 5/7 and 4/4. Near-limit retrieval, exact context exhaustion and recovery
+pass. Attention passes independent FP64 checks on both GPUs, including the new
+context boundary. These are bounded correctness and regression results, not a
+claim of unchanged answers for every long conversation.
 
 The initial [focused test run](diagnostics/validation.json) passed **11/11 checks**,
 including the real-model prefix regression, before the additional operator tests
@@ -181,8 +212,8 @@ Baseline task scores remain 16/18, 5/7 and 4/4; these checks do not claim perfec
 model accuracy. [Runtime evidence](diagnostics/rank0-acceptance-runtime-validation.json)
 and [measurement details](docs/performance.md#local-dual-5070-ti-captured-rank-zero-acceptance).
 
-The current two-tile prompt-transfer build passes **19/19** focused checks and
-preserves all **29** saved response observables. Against the preceding runtime,
+The two-tile prompt-transfer stage passed **19/19** focused checks and
+preserved all **29** saved response observables. Against the preceding runtime,
 prompt processing increased from 3138.39 to **3206.52 tok/s at 8K** and from
 2289.11 to **2324.17 tok/s at 100K** (**2.17% / 1.53%**). Generation is unchanged
 at approximately **206.76 / 178.01 tok/s** on that synthetic corpus. No weight,

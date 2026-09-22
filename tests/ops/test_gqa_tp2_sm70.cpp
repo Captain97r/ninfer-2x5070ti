@@ -1,7 +1,8 @@
 // Production dispatch qualification for the measured 70-SM, 12Q/2KV INT8 route.
 // Exact eager windows and the broad CUDA Graph envelope used by MTP must both
-// evaluate the independent FP64 oracle. A graph also replays at short positions,
-// where the original split policy must remain valid. No model artifact is needed.
+// evaluate the independent FP64 oracle at 100K and 200704 tokens. A single broad graph
+// crosses the former and current long-window boundaries, including positions
+// outside the tuned interval. No model artifact is needed.
 #include "ninfer/ops/gqa_attention.h"
 #include "ops/gqa_attention_fixture.h"
 #include <cuda_runtime.h>
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace ninfer;
@@ -17,8 +19,12 @@ using namespace ninfer::test::gqa;
 
 namespace {
 constexpr Geometry kGeometry{"tp2-sm70", 12, 2};
-constexpr int kContext = 100000;
-constexpr int kEnvelopeEnd = 131077;
+constexpr std::array<int, 2> kContexts{100000, 200704};
+constexpr int kOldWindowEnd = 131077;
+constexpr int kLongWindowEnd = 200709;
+// One key beyond the tuning gate is a supported replay of the same broad graph.
+// Both the envelope and physical/logical KV capacity include that key.
+constexpr int kEnvelopeEnd = kLongWindowEnd + 1;
 
 struct Stream {
     cudaStream_t value = nullptr;
@@ -43,7 +49,7 @@ int check_output(GuardedDeviceBuffer& output, const std::vector<double>& referen
     return verify_reduction(label, actual, reference, criterion) + output.verify_guards(label);
 }
 
-int run(int device) {
+int run_context(int device, int context) {
     cuda_check(cudaSetDevice(device), "select device");
     cudaDeviceProp properties{};
     cuda_check(cudaGetDeviceProperties(&properties, device), "device properties");
@@ -57,9 +63,9 @@ int run(int device) {
     const auto k = make_bf16_values(2 * 256 * 5, 17036, -0.25f, 0.25f);
     const auto v = make_bf16_values(2 * 256 * 5, 17037, -1.0f, 1.0f);
     std::vector<std::int32_t> positions(5);
-    for (int t = 0; t < 5; ++t) positions[t] = kContext + t;
+    for (int t = 0; t < 5; ++t) positions[t] = context + t;
     append_cache(expected, k, v, positions);
-    std::fprintf(stderr, "GPU%d: computing full FP64 100K oracle...\n", device);
+    std::fprintf(stderr, "GPU%d: computing full FP64 context=%d oracle...\n", device, context);
     const auto full_reference = ideal_attention(q, expected, positions);
     DeviceCache cache(expected, MappingPattern::Fragmented);
     auto dq = to_device_bf16(q), dk = to_device_bf16(k), dv = to_device_bf16(v);
@@ -85,7 +91,7 @@ int run(int device) {
         valid.copy_from_host(&tokens, sizeof(tokens));
         dp.copy_from_host(positions.data(), positions.size() * sizeof(std::int32_t));
         const std::array<ops::GqaExecutionEnvelope, 2> envelopes{{
-            {static_cast<std::uint32_t>(kContext + tokens), static_cast<std::uint32_t>(kContext + tokens)},
+            {static_cast<std::uint32_t>(context + tokens), static_cast<std::uint32_t>(context + tokens)},
             {1, kEnvelopeEnd}}};
         for (const auto envelope : envelopes) {
             const auto bytes = ops::gqa_attention_workspace_capacity_bytes(
@@ -154,7 +160,33 @@ int run(int device) {
                     cuda_check(cudaGraphLaunch(graph.executable, stream.value), "short-window replay");
                     cuda_synchronize();
                     failures += check_output(output, short_reference, "broad graph short-window replay");
+                    // The upper-context T=5 graph was captured at visible end 200709.
+                    // Move that SAME graph to both sides of the old cutoff, then beyond
+                    // the new gate. T=1/4 retain full eager/exact/broad qualification at
+                    // both contexts; this five-column replay additionally exercises the
+                    // gate transition and the broad launch/workspace upper bound.
+                    if (context == kContexts.back() && tokens == 5) {
+                        for (const int visible_end :
+                             {kOldWindowEnd, kOldWindowEnd + 1, kLongWindowEnd + 1}) {
+                            std::vector<std::int32_t> boundary_positions(tokens);
+                            for (int t = 0; t < tokens; ++t)
+                                boundary_positions[t] = visible_end - tokens + t;
+                            const auto boundary_reference =
+                                ideal_attention(q, expected, boundary_positions);
+                            dp.copy_from_host(boundary_positions.data(),
+                                              boundary_positions.size() * sizeof(std::int32_t));
+                            cuda_check(cudaGraphLaunch(graph.executable, stream.value),
+                                       "boundary replay");
+                            cuda_synchronize();
+                            const auto label = std::string("broad graph visible-end=") +
+                                               std::to_string(visible_end);
+                            failures += check_output(output, boundary_reference, label.c_str());
+                        }
+                    }
                     dp.copy_from_host(positions.data(), positions.size() * sizeof(std::int32_t));
+                    cuda_check(cudaGraphLaunch(graph.executable, stream.value), "restore long-window replay");
+                    cuda_synchronize();
+                    failures += check_output(output, reference, "broad graph restored long window");
                 }
             }
             failures += scratch.verify_guards("exact queried workspace capacity");
@@ -164,8 +196,8 @@ int run(int device) {
     }
     failures += verify_cache("append graph persistent KV codec", cache.snapshot(), expected);
     failures += cache.verify_guards("production TP2 GQA cache");
-    std::printf("GPU%d: production TP2 GQA exact/broad/masked graph checks: %s\n", device,
-                failures == 0 ? "PASS" : "FAIL");
+    std::printf("GPU%d context=%d: production TP2 GQA exact/broad/masked graph checks: %s\n",
+                device, context, failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;
 }
 } // namespace
@@ -174,7 +206,14 @@ int main(int argc, char** argv) {
     try {
         if (cuda_unavailable()) return 77;
         if (argc > 2) throw std::invalid_argument("usage: ninfer_gqa_tp2_sm70_test [device]");
-        return run(argc == 2 ? std::stoi(argv[1]) : 0);
+        const int device = argc == 2 ? std::stoi(argv[1]) : 0;
+        int failures = 0;
+        for (const int context : kContexts) {
+            const int result = run_context(device, context);
+            if (result == 77) return 77;
+            failures += result;
+        }
+        return failures == 0 ? 0 : 1;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "TP2 GQA production test failed: %s\n", error.what());
         return 1;

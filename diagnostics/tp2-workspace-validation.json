@@ -182,8 +182,8 @@
         "meets_256mib_projection": false
       }
     ],
-    "pending_decision": "199680 leaves projected271MiB;200704 leaves approximately253.5MiB and misses the floor. Final selection awaits candidate long/near-limit/vision qualification.",
-    "windows_limit": "NVML GPU-wide free is not the CUDA process budget. WDDM SharedUsage includes pinned/driver allocations; it cannot by itself prove spill or absence of spill. Other GPU workloads and driver changes can reduce the reserve."
+    "windows_limit": "NVML GPU-wide free is not the CUDA process budget. WDDM SharedUsage includes pinned/driver allocations; it cannot by itself prove spill or absence of spill. Other GPU workloads and driver changes can reduce the reserve.",
+    "decision": "199680 selected after long, near-limit, vision and sustained-generation qualification; see diagnostics/long-context-validation.json. The next1024-token step misses the chosen reserve."
   },
   "artifact_type": "ninfer_tp2_workspace_validation",
   "scope": "TP2 shard/lifetime workspace sizing only; inference arithmetic, weight/KV precision, kernels and sampling are unchanged. The measured199680 capacity is qualified by the bounded checks below; final long-workload/default selection is recorded separately.",
@@ -337,11 +337,11 @@
         "exact_capacity_image",
         "text_after_images"
       ],
-      "largest_source_dimensions": [
+      "largest_image_tokens": 2048,
+      "exact_capacity_source_dimensions": [
         2048,
         1024
-      ],
-      "largest_image_tokens": 2048
+      ]
     }
   },
   "limits": "Saved task scores remain16/18,5/7 and4/4; exact response parity is bounded regression evidence, not broad accuracy equivalence. Image checks are short histories at the larger allocation. Linux was not executed locally. CUDA startup-free reporting is primary-rank, while both-rank NVML usage is captured in the capacity reports."
