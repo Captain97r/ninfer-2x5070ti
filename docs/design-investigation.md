@@ -277,11 +277,13 @@ python tools/run_quality_windows.py --label stochastic-candidate --fixtures test
 ```
 
 The documented sampler keeps at most 20 candidates. Normal Qwen3.8 presets use
-20, and uncustomized OMP omits sampling overrides. Explicit top_k=0 or values
-above 20 nevertheless get accepted by the HTTP layer and capped internally;
-greedy also ignores penalties. Preserve the default baseline, and either reject
-unsupported overrides clearly or implement their advertised semantics before
-comparing those settings with another engine. See
+20, and uncustomized OMP omits sampling overrides. Serving admits `top_k=0..20`
+and rejects larger overrides before prompt preparation; unsupported process flags
+fail at startup. Omitted fields retain the registered defaults. Explicit `0`
+preserves the documented engine cap of 20, rather than unrestricted sampling.
+Greedy remains exact argmax and ignores filters and penalties. These admission
+checks leave sampler mathematics and default output behavior unchanged; account
+for these semantics when comparing settings with another engine. See
 [sampler contract](../include/ninfer/ops/sampling.h),
 [Qwen presets](../src/targets/qwen3_6_27b/impl/package.cpp) and
 [OMP's parameter omission behavior](https://github.com/can1357/oh-my-pi/blob/v18.2.8/docs/settings.md#sampling).

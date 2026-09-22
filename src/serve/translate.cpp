@@ -67,6 +67,9 @@ ninfer::SamplingOverrides resolve_sampling_overrides(const SamplingParams& reque
     if (sampling.top_k && *sampling.top_k < 0) {
         invalid_sampling("top_k must be nonnegative", "top_k");
     }
+    if (sampling.top_k && *sampling.top_k > 20) {
+        invalid_sampling("top_k must be in [0,20]; 0 selects the 20-candidate cap", "top_k");
+    }
     if (sampling.min_p && (*sampling.min_p < 0.0F || *sampling.min_p > 1.0F)) {
         invalid_sampling("min_p must be in [0,1]", "min_p");
     }

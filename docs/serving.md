@@ -145,7 +145,7 @@ The endpoint supports:
 - `system`, `developer`, `user`, `assistant`, and `tool` history;
 - string content and ordered text, `image_url`, and `video_url` parts;
 - `max_completion_tokens` and the legacy `max_tokens` spelling;
-- `temperature`, `top_p`, `top_k`, presence/frequency penalties, and a nonnegative `seed`;
+- `temperature`, `top_p`, `top_k` in `0..20`, presence/frequency penalties, and a nonnegative `seed`;
 - one stop string or an array of stop strings;
 - non-streaming responses and server-sent event streams;
 - `stream_options.include_usage`;
@@ -569,7 +569,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--cors` | permissive browser CORS headers | off |
 | `--temperature F` | process-level temperature override | unset |
 | `--top-p F` | process-level top-p override | unset |
-| `--top-k N` | process-level top-k override | unset |
+| `--top-k N` | process-level top-k override, `0..20` | unset |
 | `--min-p F` | process-level min-p override | unset |
 | `--presence-penalty F` | process-level presence-penalty override | unset |
 | `--frequency-penalty F` | process-level frequency-penalty override | unset |
@@ -582,6 +582,14 @@ temperature/top-p/top-k/min-p/presence penalty in thinking mode and `0.7/0.80/20
 non-thinking mode. Qwen3.6-35B-A3B differs only in its thinking presence penalty, which is `1.5`.
 Frequency penalty is `0` for all registered presets. Process flags override registered values,
 request fields override process flags, and `--greedy` finally forces temperature `0`.
+
+Chat Completions and Anthropic Messages accept `top_k` values `0..20`. Omitted or `null`
+leaves the process/model default in place. Explicit `0` retains the engine's existing meaning:
+it selects the 20-candidate cap; it does not disable top-k truncation or enable unrestricted
+sampling. Values outside `0..20` return HTTP 400 before prompt preparation, including when
+`temperature` is `0` or the server uses `--greedy`. Unsupported `--top-k` process values fail
+at startup. These limits apply to serving admission; the internal sampler mathematics is unchanged.
+With temperature `0`, generation is exact argmax and ignores sampling filters and penalties.
 
 Run `./build/apps/ninfer-serve --help` for the exact option contract.
 

@@ -152,6 +152,7 @@ std::string serve_usage_text(const char* argv0) {
            "       --preserve-thinking retains closed-turn assistant reasoning in later prompts\n"
            "       sampler defaults come from the loaded model and resolved thinking mode; "
            "server flags and request fields override individual values.\n"
+           "       --top-k accepts 0..20; 0 selects the 20-candidate cap, not unrestricted sampling.\n"
            "       --greedy forces temperature 0 (exact argmax).\n"
            "       --tp selects the tensor-parallel degree (default 1); --tp 2 splits the model "
            "across two GPUs and requires --devices; it supports --spec mtp but not --spec "
@@ -346,6 +347,10 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--top-k") {
             options.sampling_overrides.top_k =
                 parse_nonnegative_int(require_value("--top-k"), "top-k");
+            if (*options.sampling_overrides.top_k > 20) {
+                throw std::invalid_argument(
+                    "--top-k must be in [0,20]; 0 selects the 20-candidate cap");
+            }
         } else if (arg == "--min-p") {
             options.sampling_overrides.min_p =
                 parse_float_in(require_value("--min-p"), "min-p", 0.0f, 1.0f);

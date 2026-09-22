@@ -475,7 +475,7 @@ int test_thinking_and_sampling() {
                                    {"max_tokens", 8},
                                    {"temperature", 0.3},
                                    {"top_p", 0.8},
-                                   {"top_k", 40},
+                                   {"top_k", 20},
                                    {"stop_sequences", Json::array({"STOP", "END"})},
                                    {"thinking", Json{{"type", "enabled"}, {"budget_tokens", 1024}}},
                                    {"messages", Json::array({Json{{"role", "user"}, {"content", "hi"}}})}};
@@ -483,7 +483,7 @@ int test_thinking_and_sampling() {
     failures += check(req.sampling.temperature.has_value() && *req.sampling.temperature == 0.3,
                       "temperature parsed");
     failures += check(req.sampling.top_p.has_value() && *req.sampling.top_p == 0.8, "top_p parsed");
-    failures += check(req.sampling.top_k.has_value() && *req.sampling.top_k == 40, "top_k parsed");
+    failures += check(req.sampling.top_k.has_value() && *req.sampling.top_k == 20, "top_k parsed");
     failures += check(req.stop_strings.size() == 2 && req.stop_strings[0] == "STOP",
                       "stop_sequences parsed");
     failures += check(req.enable_thinking.has_value() && *req.enable_thinking, "thinking enabled");
@@ -494,7 +494,7 @@ int test_thinking_and_sampling() {
         check(options.execution.requested_output_tokens == 8, "max_tokens reaches Engine options");
     failures += check(options.execution.sampling.temperature == 0.3F &&
                           options.execution.sampling.top_p == 0.8F &&
-                          options.execution.sampling.top_k == 40 &&
+                          options.execution.sampling.top_k == 20 &&
                           !options.execution.sampling.presence_penalty,
                       "sampling reaches Engine overrides without inventing omitted fields");
     failures += check(options.stop.strings.size() == 2 && options.stop.strings[0].text == "STOP" &&
@@ -525,6 +525,58 @@ int test_thinking_and_sampling() {
     invalid["preserve_thinking"] = "yes";
     failures += check(throws_api([&] { (void)parse_messages_request(invalid, default_limits()); }),
                       "Anthropic accepted non-boolean preserve_thinking");
+    return failures;
+}
+
+int test_top_k_admission() {
+    int failures = 0;
+    const Json base = {{"model", "m"}, {"max_tokens", 8},
+                       {"messages", Json::array({Json{{"role", "user"}, {"content", "hi"}}})}};
+    ServeOptions server = default_server();
+    // Both absent and null retain the registered default, or an explicit process override.
+    for (bool explicit_null : {false, true}) {
+        Json body = base;
+        if (explicit_null) { body["top_k"] = nullptr; }
+        const GenerationRequest request = parse_messages_request(body, default_limits());
+        failures += check(!request.sampling.top_k, "omitted/null top_k became a request override");
+        failures += check(!to_request_options(request, server).execution.sampling.top_k,
+                          "omitted/null top_k replaced the model default");
+        ServeOptions configured = server;
+        configured.sampling_overrides.top_k = 8;
+        failures += check(to_request_options(request, configured).execution.sampling.top_k == 8,
+                          "omitted/null top_k discarded the process override");
+    }
+    server.sampling_overrides.top_k = 8;
+    for (int value : {0, 1, 20}) {
+        Json body = base;
+        body["top_k"] = value;
+        const GenerationRequest request = parse_messages_request(body, default_limits());
+        failures += check(to_request_options(request, server).execution.sampling.top_k == value,
+                          "admitted top_k, including explicit zero, did not override the process");
+    }
+    // Validate supplied filters even in exact-argmax mode; changing temperature must not
+    // silently turn an unsupported request into a different admitted parameter contract.
+    for (double temperature : {0.0, 0.7}) {
+        for (int value : {-1, 21, 40}) {
+            Json body = base;
+            body["temperature"] = temperature;
+            body["top_k"] = value;
+            const GenerationRequest request = parse_messages_request(body, default_limits());
+            bool rejected = false;
+            try {
+                (void)to_request_options(request, server);
+            } catch (const ApiException& error) {
+                rejected = error.error().status == 400 && error.error().param == "top_k" &&
+                           error.error().type == "invalid_request_error";
+                const Json wire = Json::parse(make_messages_error_body(error.error()));
+                failures += check(wire.at("error").at("type") == "invalid_request_error" &&
+                                      wire.at("error").at("message").get<std::string>().find("top_k") !=
+                                          std::string::npos,
+                                  "top_k rejection lost its protocol error detail");
+            }
+            failures += check(rejected, "unsupported top_k did not produce HTTP 400 for top_k");
+        }
+    }
     return failures;
 }
 
@@ -759,6 +811,7 @@ int main() {
     failures += test_tools_and_choice();
     failures += test_tool_use_result_roundtrip();
     failures += test_thinking_and_sampling();
+    failures += test_top_k_admission();
     failures += test_reasoning_effort();
     failures += test_stop_reason_mapping();
     failures += test_response_serialization();

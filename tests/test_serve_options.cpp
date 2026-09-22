@@ -148,16 +148,32 @@ int main() {
 
     const ServeOptions sampling =
         parse({"ninfer-serve", "model.ninfer", "--temperature", "0", "--top-p", "0.9", "--top-k",
-               "40", "--min-p", "0.1", "--presence-penalty", "1.25", "--frequency-penalty", "-0.5",
+               "20", "--min-p", "0.1", "--presence-penalty", "1.25", "--frequency-penalty", "-0.5",
                "--seed", "0"});
     failures += check(sampling.sampling_overrides.temperature == 0.0F &&
                           sampling.sampling_overrides.top_p == 0.9F &&
-                          sampling.sampling_overrides.top_k == 40 &&
+                          sampling.sampling_overrides.top_k == 20 &&
                           sampling.sampling_overrides.min_p == 0.1F &&
                           sampling.sampling_overrides.presence_penalty == 1.25F &&
                           sampling.sampling_overrides.frequency_penalty == -0.5F &&
                           sampling.sampling_overrides.seed == 0,
                       "server sampling flags did not preserve explicit values and zeros");
+
+    for (int value : {0, 1, 20}) {
+        const ServeOptions bounded =
+            parse({"ninfer-serve", "model.ninfer", "--top-k", std::to_string(value)});
+        failures += check(bounded.sampling_overrides.top_k == value,
+                          "server --top-k did not retain an admitted value");
+    }
+    for (const char* value : {"-1", "21", "40", "2147483647"}) {
+        bool rejected = false;
+        try {
+            (void)parse({"ninfer-serve", "model.ninfer", "--top-k", value, "--greedy"});
+        } catch (const std::invalid_argument& error) {
+            rejected = std::string(error.what()).find("top-k") != std::string::npos;
+        }
+        failures += check(rejected, "unsupported process --top-k was accepted at startup");
+    }
 
     GenerationRequest request;
     request.max_tokens = 1;
@@ -170,8 +186,23 @@ int main() {
     const ninfer::RequestOptions inherited_sampling = to_request_options(request, sampling);
     failures += check(inherited_sampling.execution.sampling.temperature == 0.0F &&
                           inherited_sampling.execution.sampling.top_p == 0.9F &&
+                          inherited_sampling.execution.sampling.top_k == 20 &&
                           inherited_sampling.execution.sampling.seed == 0,
                       "server sampling overrides did not reach Engine options");
+    request.sampling.top_k = 0;
+    failures += check(to_request_options(request, sampling).execution.sampling.top_k == 0,
+                      "explicit request top_k=0 did not override the process value");
+    ServeOptions greedy = defaults;
+    greedy.greedy = true;
+    request.sampling.top_k = 21;
+    bool greedy_top_k_rejected = false;
+    try {
+        (void)to_request_options(request, greedy);
+    } catch (const ApiException& error) {
+        greedy_top_k_rejected = error.error().status == 400 && error.error().param == "top_k";
+    }
+    failures += check(greedy_top_k_rejected, "--greedy bypassed request top_k admission");
+    request.sampling.top_k.reset();
     request.sampling.temperature = 1.1;
     failures += check(to_request_options(request, sampling).execution.sampling.temperature == 1.1F,
                       "request sampling override did not win over the server override");
