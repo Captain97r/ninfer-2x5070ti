@@ -310,29 +310,44 @@ TG by 2.55% at 8K and 2.46% at 100K, with matching speculative counts. The
 [performance record](performance.md#local-dual-5070-ti-exact-draft-selection)
 separates those results from the larger isolated selection speedup.
 
-### 2. Avoid redundant target-logit communication
+### 2. Packed target-logit communication: implemented
 
 [Target verification](../src/targets/qwen3_6/impl/runtime/text_context_impl.h#L2733)
 also gathers full logits onto both cards and repeats selection/acceptance. The
 padded target vocabulary has 248,320 rows, while valid token-domain handling must
 retain its 248,077 limit.
 
-Greedy verification can use an exact distributed argmax. Stochastic verification
+The runtime now transfers each complete target-logit shard once and interleaves
+its raw BF16 bits locally, replacing the per-column loop. T1 keeps its existing
+gather. The T4 peer shard needs 993280 explicitly planned bytes per rank alongside
+the local shard; same-arena tests verify alignment, cursor reuse and guards. Full
+logits remain on both cards, and target selection/acceptance arithmetic is unchanged.
+
+The packed runtime passed 16 focused checks, matched-schedule prefix regressions,
+and exact parity for all 18 short and four retrieval responses (task scores 16/18
+and 4/4). The synthetic 8K/100K benchmarks measured 2.83%/2.58% generation gains
+with unchanged speculative counts and effectively unchanged PP. Overall planned
+workspace and observed allocator peak are unchanged. See the
+[runtime evidence](../diagnostics/column-gather-runtime-validation.json) and
+[measurement limits](performance.md#local-dual-5070-ti-packed-target-logit-gather).
+
+Further changes to target verification remain unqualified. Greedy verification
+could use an exact distributed argmax. Stochastic verification
 requires target probabilities: a coherent first alternative gathers onto rank 0,
 performs acceptance there, then distributes licensed tokens and acceptance/state-selection
 metadata. Stop/cancel retirement determines the committed prefix afterward. Penalty histories, RNG domains, accepted counts and both ranks' GDN/MTP
 frontiers must stay consistent. Replacing target verification with a draft shortlist
 would change semantics and is not part of this proposal.
 
-From the current schedule, a steady MTP3 round performs 137 hidden allreduces
+The pre-optimization steady MTP3 schedule issued 137 hidden allreduces
 (131 at 40 KiB and six at 10 KiB), four target-logit gathers and three draft-logit
-gathers. The vocabulary gathers add 1,386,496 bytes in each direction per round,
-before host-staging legs. These counts come from the
-[MTP schedule](../src/targets/qwen3_6/impl/runtime/mtp_impl.h#L234) and
-[collectives](../src/ops/common/allreduce.cu#L320); they are not measured timing
-shares. Ordinary decoding has 128 hidden allreduces and one target-logit gather
-per token. Do not apply eager-allreduce microbenchmark latency to captured
-mailbox collectives: their execution paths differ.
+gathers. Those vocabulary gathers moved 1,386,496 bytes in each direction per
+round before host-staging legs. Exact distributed draft selection removed the
+full draft gathers; column packing replaces the four target gathers with one
+while preserving the target-logit payload. Hidden-reduction counts are unchanged.
+These are schedule counts, not measured timing shares. Ordinary decoding retains
+128 hidden allreduces and one T1 target-logit gather per token. Do not apply eager
+allreduce timings to captured mailbox collectives, which use a different path.
 
 ### 3. Retune actual 70-SM FP4 and FP8 shapes
 

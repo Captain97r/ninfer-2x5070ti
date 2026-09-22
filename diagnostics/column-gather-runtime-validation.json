@@ -1,0 +1,157 @@
+{
+  "hardware": "2 x RTX 5070 Ti 16 GB, Windows WDDM, no CUDA P2P",
+  "artifact": "Pinned Qwen3.8-27B mixed NVFP4 NInfer v2 artifact from config/model.json",
+  "change": "Packed exact column gather in TP2 target-logit runtime; T1 gather, optimized draft argmax and inference arithmetic unchanged",
+  "inference_math_changed": false,
+  "configuration": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "prefill_chunk": 1024,
+    "kv_cache": "int8-group64",
+    "mtp_draft_tokens": 3,
+    "proposal_head": "optimized",
+    "use_cuda_graph": true,
+    "decode_path": "mtp_cuda_graph",
+    "decode_graph_prime": {
+      "primed": true,
+      "output_tokens": 9
+    },
+    "repetitions": 3,
+    "warmup": 1,
+    "corpus_path": "build/bench_corpus_100000.ids",
+    "corpus_tokens": 100000
+  },
+  "comparison": "Validated bulk-transfer engine versus packed target-logit runtime",
+  "end_to_end": [
+    {
+      "workload": "pp8192+tg256",
+      "prompt_tokens": 8192,
+      "decode_tokens": 256,
+      "before": {
+        "prefill_tok_s_mean": 3137.610678,
+        "prefill_tok_s_stddev": 2.552879793,
+        "decode_output_tok_s_mean": 199.5175598,
+        "decode_output_tok_s_stddev": 0.1276463501
+      },
+      "after": {
+        "prefill_tok_s_mean": 3140.690534,
+        "prefill_tok_s_stddev": 4.485733163,
+        "decode_output_tok_s_mean": 205.1656343,
+        "decode_output_tok_s_stddev": 0.04722998775
+      },
+      "decode_gain_percent": 2.8308658674764065,
+      "prefill_change_percent": 0.09815927838323635,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 195,
+        "drafted_tokens": 585,
+        "accepted_tokens": 573,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.9794871795,
+        "acceptance_length": 3.938461538,
+        "accepted_per_position": [
+          195,
+          192,
+          186
+        ]
+      }
+    },
+    {
+      "workload": "pp100000+tg512",
+      "prompt_tokens": 100000,
+      "decode_tokens": 512,
+      "before": {
+        "prefill_tok_s_mean": 2287.89632,
+        "prefill_tok_s_stddev": 0.4024561627,
+        "decode_output_tok_s_mean": 172.4546394,
+        "decode_output_tok_s_stddev": 0.01910287608
+      },
+      "after": {
+        "prefill_tok_s_mean": 2289.541924,
+        "prefill_tok_s_stddev": 0.08527047378,
+        "decode_output_tok_s_mean": 176.9119314,
+        "decode_output_tok_s_stddev": 0.05782208378
+      },
+      "decode_gain_percent": 2.5846170422017645,
+      "prefill_change_percent": 0.07192651107548187,
+      "speculative_counts_unchanged": true,
+      "speculative": {
+        "enabled": true,
+        "draft_window": 3,
+        "rounds": 405,
+        "drafted_tokens": 1209,
+        "accepted_tokens": 1131,
+        "fallback_steps": 0,
+        "acceptance_rate": 0.935483871,
+        "acceptance_length": 3.792592593,
+        "accepted_per_position": [
+          387,
+          375,
+          369
+        ]
+      }
+    }
+  ],
+  "workspace": {
+    "packed_peer_scratch_bytes_per_rank_t4": 993280,
+    "packed_peer_scratch_bytes_per_rank_t1": 0,
+    "planning": "Explicit aligned peer scratch after the live vocabulary shard, including full-head MTP fallback",
+    "reported_capacity_bytes_before_and_after": 202304000,
+    "reported_allocator_peak_bytes_before_and_after": 117743616,
+    "note": "The head scratch requirement is planned explicitly; another stage still determines the overall peak."
+  },
+  "validation": {
+    "operator_reference": "diagnostics/column-gather-op-validation.json",
+    "same_arena_and_reversed_rank_tests_passed": true,
+    "focused_windows_runner": {
+      "command": "tools/test_windows.ps1",
+      "passed": 16,
+      "failed": 0,
+      "seconds": 49.89
+    },
+    "real_model_prefix": {
+      "passed": true,
+      "modes": [
+        "eager",
+        "cuda_graph"
+      ],
+      "matched_schedule": "Exact first-token logits, 16/16 continuation tokens and MTP counts for append/checkpoint restore; repeated decode schedule also exact",
+      "peer_egress_rounds": 150,
+      "peer_egress_disagreements": 0,
+      "different_schedule_diagnostic": "11/16 initial greedy tokens agree; this comparison is diagnostic, not an acceptance criterion because the historical schedules differ"
+    },
+    "response_panel": {
+      "reference": "diagnostics/quality-reference.json",
+      "cases": 18,
+      "exact_observable_matches": 18,
+      "task_passes": 16,
+      "new_task_failures": 0
+    },
+    "retrieval_panel": {
+      "reference": "diagnostics/retrieval-reference.json",
+      "cases": 4,
+      "exact_observable_matches": 4,
+      "task_passes": 4,
+      "new_task_failures": 0,
+      "prompt_tokens": [
+        4068,
+        32758,
+        99985,
+        99966
+      ]
+    }
+  },
+  "limits": [
+    "Three measured repetitions after one warmup; spreads are sample standard deviations, not confidence intervals.",
+    "Sequential engine blocks on a synthetic cycling token corpus with high MTP acceptance; not ordinary coding/chat throughput.",
+    "PP changes below 0.1% do not establish a prompt-processing improvement.",
+    "Exact response parity covers the fixed 18-case and four-case retrieval panels, not broad model-quality equivalence.",
+    "Linux execution not tested locally."
+  ]
+}

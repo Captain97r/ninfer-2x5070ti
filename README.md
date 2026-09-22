@@ -98,10 +98,26 @@ Downloads stream into a resumable `.part` file and verify size, format and SHA-2
 before a non-overwriting rename. Existing files are preserved. Use
 `download_model.ps1 -ValidateOnly` for an explicit full checksum recheck.
 
-`test_windows.ps1` builds and runs the focused host, transport, NVFP4, TP/MTP and
-70-SM attention checks; `-Model` adds the real-artifact prefix regression. It does
-not run the inherited TP1 reference tests, whose full weights exceed one 16 GB
-card. Build with `-Fresh` once when changing compiler detection/console settings.
+`test_windows.ps1` builds and serially runs the focused host and GPU checks:
+transport, exact distributed draft selection, packed gather, NVFP4/TMA descriptor
+lifetime, sampling, speculative rounds, TP/MTP and 70-SM attention. `-Model` adds
+the real-artifact prefix regression. It does not run the inherited TP1 reference
+tests, whose full weights exceed one 16 GB card. Build with `-Fresh` once when
+changing compiler detection/console settings.
+
+Run response-quality checks separately. These commands each start and stop their
+own temporary TP2/MTP3 server with vision and 102,400-token capacity:
+
+```powershell
+py -3.11 .\tools\run_quality_windows.py --label quality-check --baseline diagnostics/quality-reference.json
+py -3.11 .\tools\run_quality_windows.py --label retrieval-check --fixtures tests/data/retrieval-panel.json --baseline diagnostics/retrieval-reference.json
+```
+
+Use a new report label for each run. Reports separate exact observable response
+parity from task accuracy: the saved short panel scores 16/18, retaining two task
+failures, and the four synthetic retrieval cases score 4/4 at approximately
+4K, 32K and 100K tokens. These are bounded regression checks; see the
+[quality criteria and limitations](docs/design-investigation.md#quality-qualification-implemented-checks-and-remaining-limits).
 
 A fresh build from the consolidated repository also passed the media decode and
 OpenAI/Responses schema tests, plus both application entry points. The inherited
@@ -116,6 +132,16 @@ the [base fork records the same failure](https://github.com/ivanov84/ninfer-wind
   the final decode round.
 - A 70-SM SM120 INT8 attention schedule for one TP2 shard, 1/4/5 token queries and
   approximately 80K-128K visible keys. Graphs retain safe workspace/page bounds.
+- Windows NVFP4 TMA descriptor lifetime and visibility fixes, including release
+  on the owning stream and host descriptors retained by captured graphs.
+- Exact distributed MTP draft argmax with compact candidate transfer, preserving
+  global tie/NaN handling, padding exclusion and token-ID mapping.
+- Explicit pinned-host staging for large eager TP2 prefill collectives, preserving
+  BF16 arithmetic and the captured transport path.
+- Exact packed target-logit gathering with explicitly planned peer scratch;
+  one-token gathering and optimized draft selection retain their existing paths.
+- Fixed HTTP quality and long-context retrieval fixtures, with prompt-count checks
+  and exact response comparison separate from task scoring.
 - Actual TP2 options and both device identities in the end-to-end benchmark.
 - Reproducible Windows build, model download, launch and focused test scripts.
 
@@ -127,10 +153,25 @@ it does not promise arbitrary cached/cold greedy output identity.
 
 ## Validation and measurements
 
-The final [focused test run](diagnostics/validation.json) passed **11/11 checks**,
-including the real-model prefix regression. The [localhost server smoke test](diagnostics/server-smoke.json)
-returned a valid chat response with 102,400-token capacity; the test process was
-stopped afterward.
+The initial [focused test run](diagnostics/validation.json) passed **11/11 checks**,
+including the real-model prefix regression, before the additional operator tests
+were added. Subsequent stage records cover [TMA descriptor ownership](diagnostics/tma-descriptor-validation.json),
+[exact draft selection](diagnostics/draft-argmax-validation.json), and
+[bulk prefill transfer](diagnostics/bulk-transfer-validation.json), including their
+operator, response-quality and workload-specific performance results.
+
+The packed target-logit build passed the updated **16/16 focused checks**, the
+separate real-model prefix regression, and exact response comparison on all 18
+short-panel and four retrieval cases. Its task scores remain 16/18 and 4/4.
+Against the bulk-transfer build, synthetic-corpus generation increased from
+199.52 to **205.17 tokens/s at 8K** and from 172.45 to **176.91 tokens/s at 100K**
+(2.83% and 2.58%; three measured repetitions after one warmup). Prompt throughput
+was effectively unchanged. These are workload-specific results, not ordinary
+coding-session throughput. [Runtime evidence](diagnostics/column-gather-runtime-validation.json)
+and [measurement details](docs/performance.md#local-dual-5070-ti-packed-target-logit-gather).
+
+The [localhost server smoke test](diagnostics/server-smoke.json) returned a valid
+chat response with 102,400-token capacity; the test process was stopped afterward.
 
 [smoke.json](diagnostics/smoke.json) records a successful native NVFP4+TP2+MTP3
 CLI run: 21 prompt tokens, 64 generated tokens, 124.41 reported decode tokens/s.

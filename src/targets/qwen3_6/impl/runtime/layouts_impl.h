@@ -6,6 +6,7 @@
 #include "targets/qwen3_6/impl/runtime/yarn_rope.h"
 
 #include "core/device.h"
+#include "ninfer/ops/allreduce.h"
 #include "ninfer/ops/argmax.h"
 #include "ninfer/ops/gated_delta_net.h"
 #include "ninfer/ops/gdn_gating_proj.h"
@@ -405,7 +406,12 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     //                            GATHERED full logits go straight into each rank's persistent
     //                            RoundState logits, so they cost no workspace. Only the columns
     //                            that actually get a logit are planned: one in prefill (the bonus
-    //                            token), `batch` in a decode round.
+    //                            token), `batch` in ordinary decode, and `batch * verify_width`
+    //                            in target verification, including padded columns.
+    //   * `packed peer logits` - the gather's temporary peer shard, aligned after the live local
+    //                            vocabulary half. Its scoped peak is planned here; it is not
+    //                            carried through unrelated layer stages. One-column gathers
+    //                            need no peer scratch.
     // Every OTHER extent in this plan is still the tp1 (whole-model) extent: at tp == 2 each
     // device's real per-stage need is at most that, so planning it whole is a safe over-estimate.
     // Sizing the sharded stages exactly is a follow-up (it only buys workspace bytes back).
@@ -414,6 +420,8 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         if (plan.tp <= 1) { return; }
         matrix(layout, DType::BF16, TextConfig::hidden, tokens);
         matrix(layout, DType::BF16, TextConfig::output_rows / plan.tp, logit_columns);
+        scratch(layout, ops::allgather_columns_workspace_capacity_bytes(
+                            TextConfig::output_rows / plan.tp, logit_columns));
     };
 
     // The MTP round's own tp2 additions. Its three all-reduces share ONE [hidden, T] staging
@@ -431,6 +439,10 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                                               : TextConfig::output_rows) /
                    plan.tp,
                logit_columns);
+        if (plan.proposal_head == ProposalHead::Full) {
+            scratch(layout, ops::allgather_columns_workspace_capacity_bytes(
+                                TextConfig::output_rows / plan.tp, logit_columns));
+        }
     };
 
     WorkspacePlan out;

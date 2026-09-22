@@ -836,11 +836,13 @@ only after the paired timing and unprofiled model prefill/quality checks pass.
 
 ### TP2 target-logit column gather experiment
 
-`ninfer_allgather_columns_bench` compares the current per-column gather with one packed
+`ninfer_allgather_columns_bench` compares the per-column baseline with one packed
 peer transfer plus an exact integer interleave. `--with-direct2d` adds an experimental
 pair of pitched CUDA copies per rank. Both ranks retain the full physical vocabulary,
 including padding; the benchmark performs no logit arithmetic, sampling or filtering.
-The production target-logit route remains unchanged pending qualification and timing.
+The target-logit runtime selects the qualified packed Op, with T1 retaining its existing
+gather path. Model response parity, prefix checks and end-to-end measurements passed;
+see the [runtime record](../diagnostics/column-gather-runtime-validation.json).
 
 ```powershell
 cmake --build build/windows -j --target ninfer_allgather_columns_test ninfer_allgather_columns_bench
@@ -867,23 +869,29 @@ gather, in both eager and captured modes. `--mode eager|graph|both`, `--calls N`
 `--samples N`, `--warmup N`, `--reverse-devices`, and `--implicit-only` bound individual
 comparisons. Portable pinned staging is provisioned by default and remains eager-only;
 captured calls use the existing UVA copy path. No mailbox is installed or reset.
-Every selected route passes its own poisoned-output exact oracle before measurement.
+Every selected route passes its own poisoned-output exact oracle before and after
+measurement; final timed outputs and guards are checked before any reissue.
 JSON reports host enqueue, complete wall and joined-device time per gather, including
 median/p95 summaries. These overlapping intervals are not additive. This is gather
-latency, not committed-token throughput; a winner still needs the 100K model benchmark.
+latency; committed-token throughput is measured separately in the model benchmark.
 
 The packed Op's explicit per-rank scratch query is
 `allgather_columns_workspace_capacity_bytes(peer_rows, T)`: zero for T1 and 993280 bytes
-for the 124160-row T4 peer shard. Enabling it in `TextContext::logits_tp2` also requires
-planning this live scratch alongside the vocabulary-half allocation in `tp_call_roots`
-and the full-head MTP fallback in `tp_mtp_call_roots`. Do not rely on unrelated arena
-slack. The optimized distributed draft argmax and persistent full-logit outputs are
-unchanged by this experiment.
+for the 124160-row T4 peer shard. `TextContext::logits_tp2` uses this Op; `tp_call_roots`
+and the full-head MTP fallback in `tp_mtp_call_roots` explicitly plan its aligned scratch
+alongside the live vocabulary half. The same-arena regression checks nonzero allocation
+cursors, input and guard preservation, exact output, and the planned versus actual peak.
+The optimized distributed draft argmax and persistent full-logit outputs are unchanged.
 
 On this Windows dual 5070 Ti host, the packed candidate passed both rank orders and
 Compute Sanitizer with zero errors. At T4, median captured complete-wall latency
 was 821.6 us for the per-column baseline and 401.5 us for packed (31 rotating paired
 samples). T1 retains the same gather path. The direct 2D experiment passes eager T4
 but fails whole-graph update with cudaErrorGraphExecUpdateFailure (result 5), so it
-is not qualified for production here. These results do not establish model speed.
-[Operator evidence](../diagnostics/column-gather-op-validation.json).
+is not qualified for production here. [Operator evidence](../diagnostics/column-gather-op-validation.json).
+The separate runtime comparison measured 2.83% and 2.58% generation gains at 8K and
+100K on the fixed synthetic corpus, with unchanged speculative counts and exact
+18-case response / four-case retrieval parity. Overall planned workspace and the
+reported allocator peak stayed at 202304000 and 117743616 bytes; the 993280-byte
+peer shard is explicitly planned even though another stage determines the peak.
+[End-to-end method and results](../docs/performance.md#local-dual-5070-ti-packed-target-logit-gather).

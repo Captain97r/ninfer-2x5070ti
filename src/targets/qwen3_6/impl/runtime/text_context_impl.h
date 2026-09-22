@@ -1935,17 +1935,9 @@ void TextContext::logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits
     }
     ops::linear_column_parallel(hidden, {*lm_head_, *lm_head_peer_}, part, execution);
 
-    // `allgather_rows` gathers along ne[1] and the vocabulary is ne[0], so the gather runs one
-    // column at a time -- which needs no transpose: one column of a [V, C] BF16 matrix is a
-    // contiguous V-element run, and viewed as [1, V] that is exactly the Op's [row length 1,
-    // row count V] layout. C is 1 in prefill and the decode batch size (at most 8) otherwise.
-    for (std::int32_t column = 0; column < columns; ++column) {
-        const std::array<Tensor, 2> piece = {part[0].slice(1, column, 1).view({1, kShardVocab}),
-                                             part[1].slice(1, column, 1).view({1, kShardVocab})};
-        const std::array<Tensor, 2> whole = {logits.slice(1, column, 1).view({1, kCfg.vocab}),
-                                             peer_logits.slice(1, column, 1).view({1, kCfg.vocab})};
-        ops::allgather_rows(whole, piece, execution, *tp_->transfer);
-    }
+    // Gather the complete rectangular logit view, including padded verification columns.
+    // The peer shard lives alongside `part` in each rank's arena until its local interleave.
+    ops::allgather_columns({logits, peer_logits}, part, ws, execution, *tp_->transfer);
 }
 
 PrefillChunkResult TextContext::prefill_impl_tp2(std::span<const int> ids,

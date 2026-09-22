@@ -106,6 +106,38 @@ with the two existing failures explicitly retained. Acceptance counts also match
 at both benchmark lengths. See the [validation record](../diagnostics/draft-argmax-validation.json)
 and [bounded quality criteria](design-investigation.md#quality-qualification-implemented-checks-and-remaining-limits).
 
+## Local dual-5070-Ti packed target-logit gather
+
+The target head now gathers a complete multi-column shard in one transfer and
+interleaves its raw BF16 bits locally. T1 retains the prior gather path; optimized
+draft selection, target logits, sampling and speculative acceptance arithmetic
+are unchanged. The isolated T4 captured gather fell from 821.6 to 401.5 us median
+complete-wall latency; that operator result is separate from inference throughput.
+
+Matched runtime configuration: pinned Qwen3.8-27B v2 artifact, TP2, INT8-G64 KV,
+MTP3 with optimized draft head, 102,400-token capacity, chunk 1024 and CUDA Graphs.
+Each engine ran one warmup and three measured repetitions on the same cycling
+corpus, in sequential blocks. Values below are means +/- sample standard deviation.
+
+| Prompt / generated tokens | Before TG, tok/s | After TG, tok/s | TG gain | Before / after PP, tok/s |
+|---|---:|---:|---:|---:|
+| 8192 / 256 | 199.52 +/- 0.13 | 205.17 +/- 0.05 | 2.83% | 3137.61 +/- 2.55 / 3140.69 +/- 4.49 |
+| 100000 / 512 | 172.45 +/- 0.02 | 176.91 +/- 0.06 | 2.58% | 2287.90 +/- 0.40 / 2289.54 +/- 0.09 |
+
+PP changes below 0.1% do not establish a prompt-processing gain. Speculative counts
+match at both lengths; acceptance remains 97.95% / 93.55%. This synthetic workload
+does not establish coding/chat throughput. All 18 short-panel and four retrieval
+responses match their references exactly, with task scores of 16/18 and 4/4.
+Retrieval prompt counts are 4,068, 32,758, 99,985 and 99,966. The updated focused
+Windows runner passed 16/16 tests; the separate prefix regression passed exact
+matched-schedule checks under eager execution and graphs.
+
+T4 peer scratch is explicitly planned at 993280 bytes per rank alongside the live
+local shard; T1 uses none. Same-arena tests passed in both rank orders. Another
+stage still determines the overall workspace: reported capacity and allocator peak
+remain 202304000 and 117743616 bytes. [Runtime evidence](../diagnostics/column-gather-runtime-validation.json),
+[operator evidence](../diagnostics/column-gather-op-validation.json).
+
 ## TP2 prefix-state correctness
 
 `ninfer_qwen3_8_27b_prefix_tp2_real_test` compares restored text suffixes with cold prefill using

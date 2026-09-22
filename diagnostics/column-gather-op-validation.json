@@ -1,5 +1,5 @@
 {
-  "scope": "Exact column gather operator only; production target-logit route not yet enabled",
+  "scope": "Exact column gather operator qualification; runtime integration and model results are recorded separately",
   "inference_math_changed": false,
   "qualification": {
     "packed": "passed eager implicit/pinned, reversed GPU roles, asymmetric widths, raw BF16 bits, changed calls, capture/replay and whole-graph updates",
@@ -12,7 +12,8 @@
     "direct_2d_experiment": {
       "accepted_for_production": false,
       "result": "T1 eager/capture/replay/update passes; T4 eager passes, whole-graph executable update fails with cudaErrorGraphExecUpdateFailure, update result5. Not substituted or treated as passed."
-    }
+    },
+    "same_arena": "Passed both rank orders with exactly planned capacity, nonzero prefix, aligned live shard plus peer scratch, exact output/input bits, guards and cursor/peak checks"
   },
   "microbenchmarks": [
     {
@@ -155,7 +156,8 @@
   "notes": [
     "Microbenchmark latency is not an end-to-end speedup.",
     "T1 delegates to existing gather; small timing differences do not establish a different GPU path.",
-    "T4 packed scratch is993280bytes per rank, explicitly caller-owned.",
+    "T4 packed scratch is 993280 bytes per rank, explicitly caller-owned.",
     "Linux execution not tested locally."
-  ]
+  ],
+  "runtime_validation": "diagnostics/column-gather-runtime-validation.json"
 }
