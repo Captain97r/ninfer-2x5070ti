@@ -55,6 +55,15 @@ ninfer_add_op_bench(ninfer_nvfp4_swiglu_tp2_cta_bench
           ${PROJECT_SOURCE_DIR}/tests/ops/linear_swiglu/linear_swiglu_test_common.cpp)
 target_include_directories(ninfer_nvfp4_swiglu_tp2_cta_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_nvfp4_swiglu_tp2_cta_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+# Private T4 down-projection CTA grouping, matching the production ninfer_ops RDC build.
+ninfer_add_op_bench(ninfer_nvfp4_down_tp2_cta_bench SOURCES ops/nvfp4_down_tp2_cta_bench.cu)
+target_include_directories(ninfer_nvfp4_down_tp2_cta_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_nvfp4_down_tp2_cta_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_compile_options(ninfer_nvfp4_down_tp2_cta_bench PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
+if(WIN32)
+  set_target_properties(ninfer_nvfp4_down_tp2_cta_bench PROPERTIES CUDA_RUNTIME_LIBRARY Static)
+endif()
 # Private T1024 down-projection schedule experiment. Match ninfer_nvfp4_tma:
 # RDC discards the M256 setmaxnreg warp-specialization contract on SM120.
 ninfer_add_op_bench(ninfer_nvfp4_down_tp2_tma_bench SOURCES ops/nvfp4_down_tp2_tma_bench.cu)

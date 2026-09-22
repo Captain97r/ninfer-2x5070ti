@@ -1192,3 +1192,33 @@ full-bit and guard checks passed, but paired kernel latency increased 10.7-20.3%
 across the 16 seed/epilogue/cache/device settings. **The min2 route is rejected;
 production still uses M256/S3/min1.** The linked evidence records this followup
 separately from the original three-route measurements.
+
+## Local TP2 NVFP4 down decode CTA experiment
+
+`ninfer_nvfp4_down_tp2_cta_bench` compares the public four-warp route, the same
+private-header instantiation, and an eight-warp candidate for `[5120,8704]`, T4.
+Only CTA grouping changes: A16 activation precision, per-row K traversal and
+reduction, weight decoding, and both identity/residual epilogues stay fixed.
+The benchmark uses RDC ON like production, two fixed dense-input seeds, and a
+complete independent FP64 oracle for every one of the 20,480 outputs. Every
+candidate output must also equal production BF16 bits. Eager/captured checks
+cover guards, preserved inputs and the zero-workspace contract.
+
+```powershell
+.\tools\build_windows.ps1 -Action Build -Target ninfer_nvfp4_down_tp2_cta_bench
+.\build\windows\bench\ninfer_nvfp4_down_tp2_cta_bench.exe --device 0 --qualify-only
+.\build\windows\bench\ninfer_nvfp4_down_tp2_cta_bench.exe --device 0 --samples 31 --warmup 10
+# Repeat both commands with --device 1.
+```
+
+Timing rotates all three routes through 31 paired samples after ten warmups,
+with warm and 128 MiB scrubbed caches. External CUDA Graph events enclose the
+kernel only; residual resets and scrubbing precede the interval. Outputs left
+by timing are checked before any new replay. Graph wall time is separate.
+
+On both local cards, eight warps was slower in all 16 seed/epilogue/cache/device
+settings, by 1.2-19.0% in paired median kernel latency. Both schedules use 96
+registers and zero shared/local bytes; the occupancy API permits 20 resident
+warps for four-warp CTAs versus 16 for eight-warp CTAs. These are theoretical
+resource limits. Four warps remains the production choice; no engine gain is
+claimed. [Evidence](../diagnostics/nvfp4-down-cta-validation.json).

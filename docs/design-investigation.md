@@ -422,6 +422,13 @@ The register-limited M128/S2/min2 followup did reach two resident CTAs at 96
 registers/thread and preserved all checked output bits, but was 10.7-20.3% slower.
 Higher occupancy therefore does not justify replacing the existing kernel.
 
+The remaining profiled NVFP4 down T4 shard `[5120,8704]` was tested at four and
+eight warps per CTA, preserving per-row arithmetic. Both passed complete FP64
+and exact BF16 checks, but eight warps was 1.2-19.0% slower across all 16 paired
+settings. At 96 registers/thread, its theoretical residency drops from 20 to
+16 warps/SM. Four warps remains selected; no whole-engine candidate was adopted.
+[Evidence](../diagnostics/nvfp4-down-cta-validation.json).
+
 ### 4. MTP windows require quality qualification
 
 The hidden-reduction count grows as `128 + 3K` in a normal K-draft round, and each
