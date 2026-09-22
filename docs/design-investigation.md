@@ -3,8 +3,9 @@
 Research updated 2026-09-22 against `main` commit `f07b80b2`. Native Windows,
 one session near 100K context, TP2, the pinned mixed-NVFP4 artifact and MTP3
 remain the product target. Linux portability is retained but has not been tested
-locally. This investigation changes documentation and measurement records only;
-no inference code, quantization, sampler, launch default or model file was changed.
+locally. The research baseline changed only documentation and measurements.
+Validated implementation stages are recorded below; weights, activation precision,
+KV format, sampling and launch defaults remain fixed unless explicitly qualified.
 
 ## Assessment
 
@@ -117,23 +118,26 @@ optimization from GPU/CPU timing attribution. [NVIDIA profiling guide](https://d
 
 ## Correctness work that must precede tuning
 
-### Windows descriptor lifetime
+### Windows descriptor lifetime: corrected
 
-[Nvfp4TmaDescriptorBlock](../src/ops/linear/nvfp4/nvfp4_w4a4_tma.cu#L70)
-allocates on the supplied compute stream and launches the descriptor consumer on
-that stream, then its destructor calls `cudaFreeAsync(device, nullptr)`.
-[Compute streams are nonblocking](../src/core/device.cu#L108), so the default-stream
-free has no explicit ordering after that consumer. NVIDIA requires deallocation
-to follow every use, and nonblocking streams do not implicitly synchronize with
-the legacy default stream. [Allocation contract](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html),
+The audit found that [Nvfp4TmaDescriptorBlock](../src/ops/linear/nvfp4/nvfp4_w4a4_tma.cu#L70)
+allocated descriptors on its compute stream but freed them on the legacy default
+stream. The engine's [nonblocking streams](../src/core/device.cu#L108) do not
+implicitly order that free after the descriptor-consuming kernel.
+[Allocation contract](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html),
 [stream semantics](https://docs.nvidia.com/cuda/cuda-runtime-api/stream-sync-behavior.html).
 
-This is a source-confirmed lifetime hazard, not a demonstrated corruption event.
-First retain the owning stream for the free, or establish an explicit equivalent
-dependency. Then consider persistent descriptor storage. Validate repeated
-concurrent allocations and the affected numerical operator on both cards; do not
-attribute profiler crashes to this hazard without reproducing that connection.
-The sibling fused SwiGLU launcher already frees on its supplied stream.
+The helper now retains its owning stream and frees on that same stream. Allocation,
+copy, kernel use and free are ordered without changing arithmetic or dispatch.
+The A4 numerical test now uses a nonblocking stream and explicitly retires its
+legacy-stream fixture setup. The sibling fused SwiGLU launcher was already correct.
+
+Validation: affected Linear, LinearAdd and SwiGLU operator tests passed separately
+on each physical GPU; the three TP2 projection/pipeline tests passed; Compute
+Sanitizer memcheck with stream-ordered race tracking reported zero errors. A real
+8K-prompt/256-token TP2+MTP3 inference check passed. These checks qualify the fix;
+the original unsafe ordering was established by source inspection, without claiming
+that the old build's output corruption was reproduced.
 
 ### Existing quality evidence has gaps
 

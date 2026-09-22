@@ -289,7 +289,7 @@ void cpu_linear_gemm_fp64(const float* weight, const float* activation, double* 
 bool cuda_available() { return !test::cuda_unavailable(); }
 
 int run_shape(std::string_view label, ActivationCompute activation_compute,
-              WeightGenerator generator, const ShapeCase& shape) {
+              WeightGenerator generator, const ShapeCase& shape, cudaStream_t stream) {
     if (shape.invocations.empty()) {
         throw std::invalid_argument("linear test: shape has no invocations");
     }
@@ -335,13 +335,18 @@ int run_shape(std::string_view label, ActivationCompute activation_compute,
         const std::size_t capacity = ops::linear_workspace_capacity_bytes(
             weight.qtype, shape.n, shape.k, invocation.policy, invocation.t, invocation.t);
         DeviceArena workspace(std::max<std::size_t>(capacity, 256));
+        // Fixtures and output guards were initialized on the legacy stream.
+        // A nonblocking consumer must explicitly wait for that setup.
+        if (stream != nullptr) {
+            cuda_check(cudaStreamSynchronize(nullptr), "initialize linear fixtures");
+        }
         try {
             if (invocation.call_form == CallForm::A16Convenience) {
-                ops::linear(input, weight, destination, nullptr);
+                ops::linear(input, weight, destination, stream);
             } else {
-                ops::linear(input, weight, destination, invocation.policy, workspace, nullptr);
+                ops::linear(input, weight, destination, invocation.policy, workspace, stream);
             }
-            cuda_check(cudaDeviceSynchronize(), "synchronize linear");
+            cuda_check(cudaStreamSynchronize(stream), "synchronize linear");
         } catch (const std::exception& error) {
             std::cerr << case_label << ": unexpected exception: " << error.what() << '\n';
             ++failures;

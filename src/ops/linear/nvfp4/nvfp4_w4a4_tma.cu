@@ -71,8 +71,9 @@ static_assert((3072 % TmaM256N128::kBlockN) == 0);
 // the free is stream-ordered. On other hosts the by-value __grid_constant__ parameter is used.
 struct Nvfp4TmaDescriptorBlock {
     Nvfp4W4a4TmaDescriptors* device = nullptr;
+    cudaStream_t owner_stream;
 
-    explicit Nvfp4TmaDescriptorBlock(cudaStream_t stream) {
+    explicit Nvfp4TmaDescriptorBlock(cudaStream_t stream) : owner_stream(stream) {
         CUDA_CHECK(cudaMallocAsync(reinterpret_cast<void**>(&device),
                                    sizeof(Nvfp4W4a4TmaDescriptors), stream));
     }
@@ -82,7 +83,7 @@ struct Nvfp4TmaDescriptorBlock {
 
     ~Nvfp4TmaDescriptorBlock() {
         if (device == nullptr) { return; }
-        CUDA_CHECK(cudaFreeAsync(device, nullptr));
+        CUDA_CHECK(cudaFreeAsync(device, owner_stream));
     }
 };
 

@@ -1,0 +1,47 @@
+{
+  "stages": [
+    {
+      "name": "Windows NVFP4 descriptor stream lifetime",
+      "kind": "correctness",
+      "inference_math_changed": false,
+      "validation": {
+        "operator_targets_per_physical_gpu": [
+          "ninfer_linear_nvfp4_a4_test",
+          "ninfer_linear_add_nvfp4_test",
+          "ninfer_linear_swiglu_nvfp4_test"
+        ],
+        "physical_devices": [
+          0,
+          1
+        ],
+        "tp2_targets": [
+          "ninfer_linear_split_test",
+          "ninfer_linear_add_split_test",
+          "ninfer_linear_swiglu_split_test"
+        ],
+        "sanitizer": {
+          "tool": "Compute Sanitizer memcheck",
+          "stream_ordered_races": "all",
+          "physical_device": 0,
+          "error_count": 0
+        },
+        "model_smoke": {
+          "target": "qwen3_8_27b",
+          "weights_id": "nvfp4",
+          "tp": 2,
+          "max_context": 102400,
+          "prompt_tokens": 8192,
+          "decode_tokens": 256,
+          "kv_dtype": "int8-group64",
+          "mtp_draft_tokens": 3,
+          "graphs": true,
+          "passed": true
+        }
+      },
+      "notes": [
+        "Original unsafe ordering established by source inspection; old-build corruption not claimed.",
+        "Independent numeric tests now exercise a nonblocking stream with explicit fixture initialization ordering."
+      ]
+    }
+  ]
+}

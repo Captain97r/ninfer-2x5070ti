@@ -62,6 +62,6 @@ void cpu_linear_gemm_fp64(const float* weight, const float* activation, double* 
 bool cuda_available();
 
 int run_shape(std::string_view label, ActivationCompute activation_compute,
-              WeightGenerator generator, const ShapeCase& shape);
+              WeightGenerator generator, const ShapeCase& shape, cudaStream_t stream = nullptr);
 
 } // namespace ninfer::test::linear
