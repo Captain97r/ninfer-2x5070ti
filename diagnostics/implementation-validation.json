@@ -42,6 +42,45 @@
         "Original unsafe ordering established by source inspection; old-build corruption not claimed.",
         "Independent numeric tests now exercise a nonblocking stream with explicit fixture initialization ordering."
       ]
+    },
+    {
+      "name": "Speculative sampler and response regression qualification",
+      "kind": "testing",
+      "inference_math_changed": false,
+      "validation": {
+        "operator_targets_per_physical_gpu": [
+          "ninfer_sampling_test",
+          "ninfer_speculative_round_test"
+        ],
+        "physical_devices": [
+          0,
+          1
+        ],
+        "speculative_draws_per_device": 49152,
+        "speculative_joint_max_n_kl": 2.18174,
+        "speculative_joint_n_kl_limit": 22.8264,
+        "host_regret_ctest_passed": true,
+        "python_quality_gate_tests_passed": 9,
+        "panel": {
+          "reference": "diagnostics/quality-reference.json",
+          "tasks_passed": 16,
+          "tasks_total": 18,
+          "task_failures": [
+            "integer-inventory-arithmetic",
+            "code-repair-as-json"
+          ],
+          "fresh_process_repeat_exact_observables": 18,
+          "original_f07_vs_stream_lifetime_fix_exact_observables": 18,
+          "task_failures_reproduced_without_mtp": true,
+          "regression_passed": true
+        }
+      },
+      "notes": [
+        "Existing task failures remain failures; regression success does not mean all tasks passed.",
+        "Observable parity retains content, reasoning, ordered tool arguments, finish reason and completion count; it is not token-ID or broad quality equivalence.",
+        "Legacy full-model TP1/TP2 MTP comparison was not run: its TP1 allocation exceeds one 16 GB GPU.",
+        "Independent sampler oracle checks represented target logits, not full-model state equivalence."
+      ]
     }
   ]
 }

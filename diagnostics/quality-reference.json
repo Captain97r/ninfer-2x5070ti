@@ -1,0 +1,432 @@
+{
+  "schema_version": 2,
+  "mode": "capture",
+  "label": "stage2-reference",
+  "date_utc": "2026-09-22T16:18:49.477757+00:00",
+  "contract": {
+    "fixture_sha256": "1f6dd21f5ce959d5fe3d4c7de71116384bebe24d3d4326c188da749e18bb1253",
+    "case_ids": [
+      "provided-fact",
+      "missing-fact",
+      "typed-json-extraction",
+      "filter-negated-records",
+      "english-format-instruction",
+      "russian-format-instruction",
+      "chinese-json-instruction",
+      "integer-inventory-arithmetic",
+      "code-repair-as-json",
+      "tool-record-arguments",
+      "tool-typed-unicode-arguments",
+      "history-initial",
+      "history-append",
+      "history-rewind-branch",
+      "bounded-thinking-arithmetic",
+      "quoted-data-is-not-instruction",
+      "vision-red-circles-left",
+      "vision-red-circles-right"
+    ],
+    "image_fixture_sha256": {
+      "compare_left.png": "c6d333bda85ca3508e5cd3e400a7da95cbc3e6835093ee60dcc1b9a637eac5f0",
+      "compare_right.png": "3e2b57e2825fa222b05521036353c72cc829a613c0615b4b028e6f6f0e35cd7b"
+    },
+    "model": "qwen3.8-27b",
+    "context": 102400,
+    "vision": true,
+    "runtime_config": {
+      "artifact_sha256": "bb3360522a06e136e0367f5703414d26272b7285c8a6ab6194135c17dbd81b32",
+      "artifact_bytes": 21492695040,
+      "options": [
+        "--tp",
+        "2",
+        "--devices",
+        "0,1",
+        "--max-context",
+        "102400",
+        "--kv-capacity",
+        "102400",
+        "--kv-dtype",
+        "int8",
+        "--prefill-chunk",
+        "1024",
+        "--vision",
+        "--image-max-tokens",
+        "2048",
+        "--max-concurrency",
+        "1",
+        "--default-max-tokens",
+        "102400",
+        "--spec",
+        "mtp",
+        "--draft-tokens",
+        "3",
+        "--lm-head-draft"
+      ]
+    }
+  },
+  "scope": "Bounded task scoring and exact observable-response parity; not token-ID or broad quality equivalence.",
+  "complete": true,
+  "all_tasks_passed": false,
+  "all_observables_equal": null,
+  "no_new_task_failures": null,
+  "regression_passed": null,
+  "cases": [
+    {
+      "id": "provided-fact",
+      "category": "grounding",
+      "observable": {
+        "content": "Dock 4",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 4
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.13016639999113977
+    },
+    {
+      "id": "missing-fact",
+      "category": "grounding",
+      "observable": {
+        "content": "{\"serial\": null}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 6
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.13252780001494102
+    },
+    {
+      "id": "typed-json-extraction",
+      "category": "json",
+      "observable": {
+        "content": "{\n  \"id\": \"0042\",\n  \"quantity\": 6,\n  \"fragile\": true\n}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 30
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.2692899999965448
+    },
+    {
+      "id": "filter-negated-records",
+      "category": "json",
+      "observable": {
+        "content": "[\"B2\",\"D4\"]",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 8
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.163467500009574
+    },
+    {
+      "id": "english-format-instruction",
+      "category": "english",
+      "observable": {
+        "content": "maple|birch|cedar",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 9
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.14570950000779703
+    },
+    {
+      "id": "russian-format-instruction",
+      "category": "russian",
+      "observable": {
+        "content": "синий;7",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 5
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.12915750002139248
+    },
+    {
+      "id": "chinese-json-instruction",
+      "category": "chinese",
+      "observable": {
+        "content": "{\"颜色\": \"绿色\", \"数量\": 6}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 13
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.1797917999792844
+    },
+    {
+      "id": "integer-inventory-arithmetic",
+      "category": "arithmetic",
+      "observable": {
+        "content": "{\"remaining\": 41}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 8
+      },
+      "rule_passed": false,
+      "rule_detail": "JSON value comparison",
+      "task_status": "failed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.1225204000074882
+    },
+    {
+      "id": "code-repair-as-json",
+      "category": "code",
+      "observable": {
+        "content": "{\"replacement\":\"    return (len(items) + size - 1) // size\"}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 19
+      },
+      "rule_passed": false,
+      "rule_detail": "JSON value comparison",
+      "task_status": "failed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.2661258000007365
+    },
+    {
+      "id": "tool-record-arguments",
+      "category": "tools",
+      "observable": {
+        "content": null,
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "arguments": "{\"fields\":[\"status\",\"owner\"],\"record_id\":\"K-17\"}",
+              "name": "lookup_record"
+            }
+          }
+        ],
+        "finish_reason": "tool_calls",
+        "completion_tokens": 48
+      },
+      "rule_passed": true,
+      "rule_detail": "tool argument comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.4525771999906283
+    },
+    {
+      "id": "tool-typed-unicode-arguments",
+      "category": "tools",
+      "observable": {
+        "content": null,
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "arguments": "{\"fragile\":false,\"label\":\"Склад \\\"Б\\\"\",\"quantity\":3}",
+              "name": "validate_parcel"
+            }
+          }
+        ],
+        "finish_reason": "tool_calls",
+        "completion_tokens": 56
+      },
+      "rule_passed": true,
+      "rule_detail": "tool argument comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.4851726000197232
+    },
+    {
+      "id": "history-initial",
+      "category": "history",
+      "observable": {
+        "content": "{\n  \"code\": \"amber\",\n  \"count\": 4\n}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 19
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.2003411000187043
+    },
+    {
+      "id": "history-append",
+      "category": "history",
+      "observable": {
+        "content": "{\"code\":\"amber\",\"count\":7}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 10
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.173487699998077
+    },
+    {
+      "id": "history-rewind-branch",
+      "category": "history",
+      "observable": {
+        "content": "{\"code\":\"violet\",\"count\":3}",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 11
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.17053240002132952
+    },
+    {
+      "id": "bounded-thinking-arithmetic",
+      "category": "thinking",
+      "observable": {
+        "content": "{\"total\":22}",
+        "reasoning_content": "We need answer user's request. Need compute: red crates 4 * 3 = 12, blue crates 2 * 5 = 10, total 22. User says work this out briefly, then give final answer as only a JSON object with integer key total. No markdown. Need final only JSON object? They ask work briefly then final answer as only JSON object. Could include brief work? But \"then give the final answer as only a JSON object\" likely final output should be JSON only, no markdown. Need satisfy maybe no extra text. Output {\"total\":22}. Ensure no markdown.\n",
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 138
+      },
+      "rule_passed": true,
+      "rule_detail": "JSON value comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.9651357999828178
+    },
+    {
+      "id": "quoted-data-is-not-instruction",
+      "category": "grounding",
+      "observable": {
+        "content": "MINT",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 3
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.12041149998549372
+    },
+    {
+      "id": "vision-red-circles-left",
+      "category": "vision",
+      "observable": {
+        "content": "2",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 2
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.2545234999852255
+    },
+    {
+      "id": "vision-red-circles-right",
+      "category": "vision",
+      "observable": {
+        "content": "3",
+        "reasoning_content": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "finish_reason": "stop",
+        "completion_tokens": 2
+      },
+      "rule_passed": true,
+      "rule_detail": "visible text comparison",
+      "task_status": "passed",
+      "baseline_equal": null,
+      "new_task_failure": null,
+      "regression_status": "not_compared",
+      "wall_seconds": 0.21563419999438338
+    }
+  ]
+}

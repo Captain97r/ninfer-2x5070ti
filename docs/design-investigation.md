@@ -139,21 +139,56 @@ Sanitizer memcheck with stream-ordered race tracking reported zero errors. A rea
 the original unsafe ordering was established by source inspection, without claiming
 that the old build's output corruption was reproduced.
 
-### Existing quality evidence has gaps
+### Quality qualification: implemented checks and remaining limits
 
-The legacy real-model MTP test's near-tie check computes top1-minus-top2, rather
-than top1-minus-the-actually-emitted-token. A poor emitted token could therefore
-pass if the best two logits happen to be close. Its threshold permits
-`max(0.5, TP1 worst gap)` and disagreement counts relative to TP1. See
-[test_engine_mtp_tp2_real.cpp](../tests/targets/qwen3_6_27b/test_engine_mtp_tp2_real.cpp#L260).
-This test also requires a TP1 model allocation that exceeds a local 16 GB card.
-Replace the weak criterion with actual emitted-token regret and same-state TP2
-teacher forcing; retain exact checks where the computation is unchanged.
+The legacy real-model MTP test now measures top1-minus-the-actually-emitted-token,
+rejects non-finite valid logits and excludes padded vocabulary rows. A host-only
+regression checks that a low-ranked emitted token cannot hide behind a small
+top-two gap. Its unchanged `max(0.5, TP1 worst regret)` threshold is an uncalibrated
+legacy structural screen. Cold-prefilling each growing prefix does not reproduce
+decode KV/GDN state, and the full test requires more than 16 GB on one GPU. That
+full-model test has not been run on this pair; it is not a same-state proof.
 
-The ordinary sampler has useful independent distribution tests. The speculative
-round tests cover acceptance/state mechanics, but their stochastic fixtures
-largely collapse to top_k=1. They need nondegenerate rejection-distribution tests
-before supporting a broad stochastic-equivalence claim.
+The speculative round test now compares joint accepted-count/terminal-token
+frequencies against an independent FP64 formula. Both physical GPUs passed 49,152
+draws each across batch widths 1, 2 and 8, full 248,077-token domain, poisoned
+padding, penalties, repeated proposals, shortened rounds and zero/unit proposal
+probabilities. Licensed tokens, committed counts, lengths, anchors, untouched
+inputs and allocation guards are also checked. The prespecified multinomial
+marginal Chernoff/KL criterion uses a union-bound family error of 1e-6 under
+independent uniform draws; it is not fitted to the observed output. This qualifies
+the sampler transition for represented logits, not the entire model state.
+
+The fixed [response panel](../tests/data/quality-panel.json) covers 18 text, JSON,
+tool, English/Russian/Chinese, reasoning, provided-history and image tasks. The
+reference scores **16/18**: it answers the inventory arithmetic with 41 instead of
+37, and adds prohibited indentation to a correct code expression. Both failures
+also occur in the preserved original engine and with MTP disabled. The stream
+lifetime fix matches all 18 original observable responses exactly. These controls
+do not establish the quantized artifact's quality against an unquantized model.
+
+[The panel runner](../tools/test_quality.py) reports task success separately from
+exact observable parity. Existing failures remain failures; a complete failed
+capture may be a regression reference but is never called an all-tasks-passing
+baseline. Exact comparison retains content, reasoning, raw tool arguments, finish
+reason and completion-token count, excluding random response/tool IDs. It is not
+a token-ID comparison. Artifact/runtime settings and image bytes are fixed by
+the comparison contract. The history cases do not prove a particular prefix
+checkpoint path, and this short panel does not establish long-context quality.
+
+On Windows, [the owned-server launcher](../tools/run_quality_windows.py) starts
+the shipping TP2/MTP3/INT8/102400-context/vision configuration on loopback port
+19080 and stops it after each panel. Use Python 3.11:
+
+```powershell
+python tools/run_quality_windows.py --label reference
+python tools/run_quality_windows.py --label candidate --baseline build/quality/reference.json
+```
+
+Capture currently returns exit 1 for the two real task failures. Comparison
+returns success only for complete exact parity without new task failures, while
+retaining `all_tasks_passed: false`. The server used for ordinary OMP requests
+continues to use port 8000.
 
 The documented sampler keeps at most 20 candidates. Normal Qwen3.8 presets use
 20, and uncustomized OMP omits sampling overrides. Explicit top_k=0 or values

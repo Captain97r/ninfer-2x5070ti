@@ -161,6 +161,8 @@ ninfer_add_test(ninfer_qwen3_8_27b_mtp_tp2_real_test
   LIBRARIES ninfer_engine ninfer_product_prompt_input)
 target_link_libraries(ninfer_qwen3_8_27b_mtp_tp2_real_test PRIVATE ${NINFER_CUDART_TARGET})
 set_tests_properties(ninfer_qwen3_8_27b_mtp_tp2_real_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 3600)
+add_test(NAME ninfer_emitted_token_regret_test
+  COMMAND ninfer_qwen3_8_27b_mtp_tp2_real_test --check-regret)
 # `--rope yarn` past the native 262144-position window, on real weights, at both tp widths.
 # Artifact-gated; the tp2 leg additionally needs two devices.
 ninfer_add_test(ninfer_qwen3_8_27b_yarn_real_test

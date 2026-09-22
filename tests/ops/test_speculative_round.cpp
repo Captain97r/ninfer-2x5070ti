@@ -2,10 +2,14 @@
 #include "ops/op_tester.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -342,6 +346,369 @@ int batched_sampling_workspace_stride_case() {
     return failures;
 }
 
+// This oracle starts from the represented BF16 logits and evaluates the public
+// sampling formula in FP64. It does not call the production sampler or copy its
+// RNG, reduction tree, workspace layout, or rejection-sampling implementation.
+struct OracleCandidate {
+    int token;
+    double probability;
+};
+
+std::vector<OracleCandidate> verification_distribution(
+    std::span<const std::uint16_t> logits, const ops::SamplingConfig& config,
+    std::span<const std::int32_t> initial_counts, std::span<const std::int32_t> prior_drafts) {
+    struct ScoredToken {
+        int token;
+        double score;
+    };
+    std::vector<ScoredToken> sorted;
+    sorted.reserve(logits.size());
+    for (std::size_t token = 0; token < logits.size(); ++token) {
+        int count = initial_counts.empty() ? 0 : initial_counts[token];
+        count += static_cast<int>(std::count(prior_drafts.begin(), prior_drafts.end(),
+                                            static_cast<std::int32_t>(token)));
+        double score = bf16_to_f32(logits[token]);
+        if (count > 0) { score -= static_cast<double>(config.presence_penalty); }
+        score -= static_cast<double>(config.frequency_penalty) * count;
+        sorted.push_back({static_cast<int>(token), score});
+    }
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        return a.score == b.score ? a.token < b.token : a.score > b.score;
+    });
+    const int cap = std::min(static_cast<int>(sorted.size()),
+                            config.top_k > 0 && config.top_k < 20 ? config.top_k : 20);
+    sorted.resize(static_cast<std::size_t>(cap));
+    std::vector<double> weights(static_cast<std::size_t>(cap));
+    double total = 0.0;
+    for (int i = 0; i < cap; ++i) {
+        weights[i] = std::exp((sorted[i].score - sorted.front().score) /
+                              static_cast<double>(config.temperature));
+        total += weights[i];
+    }
+    int kept = 0;
+    double kept_weight = 0.0;
+    for (int i = 0; i < cap; ++i) {
+        if (config.min_p > 0.0f && weights[i] < config.min_p * weights.front()) { break; }
+        kept_weight += weights[i];
+        ++kept;
+        if (config.top_p < 1.0f && kept_weight >= config.top_p * total) { break; }
+    }
+    if (kept == 0) {
+        kept = 1;
+        kept_weight = weights.front();
+    }
+    std::vector<OracleCandidate> result;
+    for (int i = 0; i < kept; ++i) {
+        result.push_back({sorted[i].token, weights[i] / kept_weight});
+    }
+    return result;
+}
+
+struct JointOutcome {
+    int accepted;
+    int terminal_token;
+    double probability;
+    std::uint32_t observed = 0;
+};
+
+std::vector<JointOutcome> joint_outcome_oracle(
+    const std::vector<std::vector<OracleCandidate>>& distributions,
+    std::span<const std::int32_t> drafts, int extent) {
+    std::vector<JointOutcome> result;
+    double reach = 1.0;
+    for (int column = 0; column <= extent; ++column) {
+        double draft_probability = 0.0;
+        for (const auto& candidate : distributions[column]) {
+            if (column < extent && candidate.token == drafts[column]) {
+                draft_probability = candidate.probability;
+            } else {
+                // Rejection: reach * (1-p(d)) * p(t)/(1-p(d)) = reach*p(t).
+                // Bonus: reach*p(t). No simulated CPU draws are needed.
+                if (reach * candidate.probability > 0.0) {
+                    result.push_back({column, candidate.token, reach * candidate.probability});
+                }
+            }
+        }
+        reach *= draft_probability;
+    }
+    double total = 0.0;
+    for (const auto& outcome : result) { total += outcome.probability; }
+    if (std::abs(total - 1.0) > 1e-12) {
+        throw std::runtime_error("speculative joint probability oracle did not normalize");
+    }
+    return result;
+}
+
+int check_joint_frequencies(const std::string& label, const std::vector<JointOutcome>& outcomes,
+                            int draws) {
+    // A two-sided binomial Chernoff/KL bound for each multinomial marginal,
+    // followed by a union bound over at most 4096 tested bins in this executable.
+    // Under independent uniform draws the family-wise false rejection bound is
+    // <= 1e-6. This is a prespecified statistical criterion, not a numeric epsilon
+    // fitted to observed GPU output. Seeds are distinct across every trial/lane.
+    constexpr double family_error = 1e-6;
+    constexpr int maximum_bins = 4096;
+    const double cutoff = std::log(2.0 * maximum_bins / family_error);
+    int failures = 0;
+    double maximum_statistic = 0.0;
+    for (const auto& outcome : outcomes) {
+        const double p = outcome.probability;
+        const double q = static_cast<double>(outcome.observed) / draws;
+        double divergence = 0.0;
+        if (p == 1.0) {
+            divergence = q == 1.0 ? 0.0 : std::numeric_limits<double>::infinity();
+        } else {
+            if (q > 0.0) { divergence += q * std::log(q / p); }
+            if (q < 1.0) { divergence += (1.0 - q) * std::log((1.0 - q) / (1.0 - p)); }
+        }
+        const double statistic = draws * std::max(0.0, divergence);
+        maximum_statistic = std::max(maximum_statistic, statistic);
+        if (statistic > cutoff) {
+            std::cerr << label << ": A=" << outcome.accepted
+                      << " terminal=" << outcome.terminal_token << " observed=" << q
+                      << " expected=" << p << " N*KL=" << statistic
+                      << " limit=" << cutoff << '\n';
+            ++failures;
+        }
+    }
+    std::cout << "    " << label << ": " << draws << " draws, " << outcomes.size()
+              << " joint bins, max N*KL=" << maximum_statistic << " limit=" << cutoff << '\n';
+    return failures;
+}
+
+int nondegenerate_sampling_case(int token_domain, int physical_rows, int batch, int iterations,
+                                bool penalties) {
+    constexpr int k = 3;
+    constexpr int columns = k + 1;
+    const std::string label = "speculative joint V=" + std::to_string(token_domain) +
+                              " B=" + std::to_string(batch) + (penalties ? " penalties" : "");
+    // Scatter the real-vocabulary support across distant sampler partitions, including
+    // the final valid token. Padding receives enormous logits and must be ignored.
+    const std::array<int, 5> ids = token_domain > 65537
+        ? std::array<int, 5>{17, 7919, 65537, 200003, token_domain - 1}
+        : std::array<int, 5>{3, 11, 29, 47, token_domain - 1};
+    const float scores[columns][5] = {
+        {1.5f, 0.4f, 0.0f, -0.5f, -2.0f},
+        {0.6f, 1.7f, 0.1f, -0.2f, -1.7f},
+        {1.6f, 0.9f, 0.0f, -0.3f, -2.0f},
+        {0.1f, 0.5f, 1.2f, 0.8f, 0.4f},
+    };
+    std::vector<std::uint16_t> host_logits(
+        static_cast<std::size_t>(physical_rows) * columns * batch, f32_to_bf16(-32.0f));
+    std::vector<std::int32_t> host_drafts(static_cast<std::size_t>(k) * batch);
+    std::vector<std::int32_t> host_extents(batch);
+    std::vector<std::int32_t> host_targets(static_cast<std::size_t>(columns) * batch, ids[2]);
+    std::vector<std::int32_t> initial_counts(
+        penalties ? static_cast<std::size_t>(token_domain) * batch : 0, 0);
+    std::vector<ops::SamplingConfig> configs(batch);
+    std::vector<std::vector<JointOutcome>> expected(batch);
+    std::size_t bin_count = 0;
+    for (int row = 0; row < batch; ++row) {
+        const int kind = row % 4;
+        host_extents[row] = kind == 1 ? 1 : (kind == 2 ? 2 : k);
+        host_drafts[k * row] = ids[0];
+        host_drafts[k * row + 1] = ids[1];
+        host_drafts[k * row + 2] = ids[0]; // repeated proposal exercises the penalty overlay
+        auto& config = configs[row];
+        config.temperature = 0.875f;
+        config.top_k = 5;
+        // Separate lanes make each filter observable on its own; the combined
+        // lane alone can hide a broken filter when both remove the same token.
+        config.top_p = kind == 1 ? 0.8f : (kind == 2 ? 1.0f : 0.96f);
+        config.min_p = kind == 1 ? 0.0f : (kind == 2 ? 0.25f : 0.08f);
+        if (penalties) {
+            config.presence_penalty = 0.375f;
+            config.frequency_penalty = 0.25f;
+            initial_counts[static_cast<std::size_t>(row) * token_domain + ids[0]] = 1;
+            initial_counts[static_cast<std::size_t>(row) * token_domain + ids[1]] = 2;
+        }
+        std::vector<std::vector<OracleCandidate>> distributions;
+        double column_reach = 1.0;
+        bool isolated_filter_changes_reachable_distribution = false;
+        for (int column = 0; column < columns; ++column) {
+            const std::size_t base =
+                (static_cast<std::size_t>(row) * columns + column) * physical_rows;
+            for (int i = 0; i < 5; ++i) {
+                float value = scores[column][i];
+                if (kind == 3 && column == 0) { value = i == 0 ? 20.0f : -20.0f; }
+                if (kind == 3 && column == 1 && i == 1) { value = -20.0f; }
+                host_logits[base + ids[i]] = f32_to_bf16(value);
+            }
+            for (int token = token_domain; token < physical_rows; ++token) {
+                host_logits[base + token] = f32_to_bf16(100.0f);
+            }
+            const auto counts = penalties
+                ? std::span<const std::int32_t>(initial_counts).subspan(
+                      static_cast<std::size_t>(row) * token_domain, token_domain)
+                : std::span<const std::int32_t>{};
+            const auto column_logits =
+                std::span<const std::uint16_t>(host_logits).subspan(base, token_domain);
+            const auto prior_drafts =
+                std::span<const std::int32_t>(host_drafts).subspan(k * row, column);
+            distributions.push_back(
+                verification_distribution(column_logits, config, counts, prior_drafts));
+            const auto& distribution = distributions.back();
+            if ((kind == 1 || kind == 2) && column <= host_extents[row] && column_reach > 0.0) {
+                auto disabled = config;
+                if (kind == 1) { disabled.top_p = 1.0f; }
+                if (kind == 2) { disabled.min_p = 0.0f; }
+                const auto without_filter =
+                    verification_distribution(column_logits, disabled, counts, prior_drafts);
+                const bool same = std::equal(
+                    distribution.begin(), distribution.end(), without_filter.begin(),
+                    without_filter.end(), [](const auto& a, const auto& b) {
+                        return a.token == b.token && a.probability == b.probability;
+                    });
+                isolated_filter_changes_reachable_distribution |= !same;
+            }
+            if (column < host_extents[row]) {
+                const auto proposal = std::find_if(
+                    distribution.begin(), distribution.end(), [&](const auto& candidate) {
+                        return candidate.token == host_drafts[k * row + column];
+                    });
+                column_reach *= proposal == distribution.end() ? 0.0 : proposal->probability;
+            }
+        }
+        if ((kind == 1 || kind == 2) && !isolated_filter_changes_reachable_distribution) {
+            throw std::runtime_error(
+                kind == 1 ? "top_p fixture does not affect a reachable distribution"
+                          : "min_p fixture does not affect a reachable distribution");
+        }
+        if (kind == 3 &&
+            (distributions[0].size() != 1 || distributions[0][0].token != ids[0] ||
+             std::any_of(distributions[1].begin(), distributions[1].end(),
+                         [&](const auto& candidate) { return candidate.token == ids[1]; }))) {
+            throw std::runtime_error("unit/zero proposal probability fixture is invalid");
+        }
+        expected[row] = joint_outcome_oracle(
+            distributions, std::span<const std::int32_t>(host_drafts).subspan(k * row, k),
+            host_extents[row]);
+        bin_count += expected[row].size();
+    }
+    // Four calls below have <= 8 * 4 * 5 bins each, strictly below the union-bound budget.
+    if (bin_count > 160) { throw std::runtime_error("joint-test bin budget exceeded"); }
+
+    GuardedDeviceBuffer d_logits(host_logits.size() * sizeof(std::uint16_t));
+    initialize(d_logits, host_logits);
+    DeviceBuffer d_drafts = to_device(host_drafts);
+    DeviceBuffer d_extents = to_device(host_extents);
+    DeviceBuffer d_targets = to_device(host_targets);
+    GuardedDeviceBuffer d_token_counts(initial_counts.size() * sizeof(std::int32_t));
+    GuardedDeviceBuffer d_configs(configs.size() * sizeof(ops::SamplingConfig));
+    // Disjoint views of one guarded output allocation permit one retirement copy
+    // per trial; every field and every unused licensed slot is checked below.
+    const int produced_offset = columns * batch;
+    const int accepted_offset = produced_offset + batch;
+    const int length_offset = accepted_offset + batch;
+    const int anchor_offset = length_offset + batch;
+    std::vector<std::int32_t> initial_io(anchor_offset + batch, -777);
+    for (int row = 0; row < batch; ++row) { initial_io[length_offset + row] = 4093 + row * 97; }
+    GuardedDeviceBuffer d_io(initial_io.size() * sizeof(std::int32_t));
+    auto* io = static_cast<std::int32_t*>(d_io.data());
+    for (int row = 0; row < batch; ++row) {
+        configs[row].token_counts = penalties
+            ? static_cast<std::int32_t*>(d_token_counts.data()) +
+                  static_cast<std::size_t>(row) * token_domain
+            : nullptr;
+    }
+    Tensor targets(d_targets.p, DType::I32, {columns, batch});
+    Tensor logits(d_logits.data(), DType::BF16, {physical_rows, columns, batch});
+    Tensor drafts(d_drafts.p, DType::I32, {k, batch});
+    Tensor extents(d_extents.p, DType::I32, {batch});
+    Tensor licensed(io, DType::I32, {columns, batch});
+    Tensor produced(io + produced_offset, DType::I32, {batch});
+    Tensor accepted(io + accepted_offset, DType::I32, {batch});
+    Tensor lengths(io + length_offset, DType::I32, {batch});
+    Tensor anchors(io + anchor_offset, DType::I32, {batch});
+    const std::size_t workspace_bytes =
+        ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(token_domain, k, k,
+                                                                       batch, batch);
+    WorkspaceArena workspace(std::max<std::size_t>(256, workspace_bytes));
+    for (int trial = 0; trial < iterations; ++trial) {
+        initialize(d_io, initial_io);
+        initialize(d_token_counts, initial_counts);
+        for (int row = 0; row < batch; ++row) {
+            configs[row].seed = 0x7123000000000000ull +
+                (static_cast<unsigned long long>(token_domain) << 24) +
+                (static_cast<unsigned long long>(batch) << 20) +
+                static_cast<unsigned long long>(trial * batch + row);
+        }
+        initialize(d_configs, configs);
+        ops::speculative_accept_greedy_drafts(
+            targets, logits, drafts, extents, lengths, anchors, licensed, produced, accepted,
+            token_domain, static_cast<const ops::SamplingConfig*>(d_configs.data()), workspace,
+            nullptr);
+        const auto result = read<std::int32_t>(d_io, initial_io.size()); // synchronizes this trial
+        auto expected_counts = initial_counts;
+        for (int row = 0; row < batch; ++row) {
+            const int a = result[accepted_offset + row];
+            const int n = result[produced_offset + row];
+            if (a < 0 || a > host_extents[row] || n != a + 1 ||
+                result[length_offset + row] != initial_io[length_offset + row] + n) {
+                std::cerr << label << ": invalid accepted count/length at trial=" << trial
+                          << " row=" << row << '\n';
+                return 1;
+            }
+            const int terminal = result[columns * row + a];
+            if (terminal != result[anchor_offset + row]) {
+                std::cerr << label << ": terminal/anchor mismatch\n";
+                return 1;
+            }
+            auto& bins = expected[row];
+            const auto found = std::find_if(bins.begin(), bins.end(), [&](const auto& outcome) {
+                return outcome.accepted == a && outcome.terminal_token == terminal;
+            });
+            if (found == bins.end()) {
+                std::cerr << label << ": impossible outcome A=" << a << " token=" << terminal
+                          << " trial=" << trial << " row=" << row << '\n';
+                return 1;
+            }
+            ++found->observed;
+            for (int column = 0; column < columns; ++column) {
+                const int token = result[columns * row + column];
+                if ((column < a && token != host_drafts[k * row + column]) ||
+                    (column >= n && token != 0)) {
+                    std::cerr << label << ": licensed prefix/unused slot mismatch\n";
+                    return 1;
+                }
+                if (penalties && column < n) {
+                    ++expected_counts[static_cast<std::size_t>(row) * token_domain + token];
+                }
+            }
+        }
+        if (penalties && read<std::int32_t>(d_token_counts, initial_counts.size()) != expected_counts) {
+            std::cerr << label << ": token counts include rejected/provisional tokens or lost repeats\n";
+            return 1;
+        }
+    }
+    int failures = 0;
+    for (int row = 0; row < batch; ++row) {
+        failures += check_joint_frequencies(label + " row=" + std::to_string(row), expected[row],
+                                            iterations);
+    }
+    failures += verify_exact("joint logits unchanged",
+                              read<std::uint16_t>(d_logits, host_logits.size()), host_logits);
+    failures += verify_exact("joint drafts unchanged",
+                              from_device<std::int32_t>(d_drafts, host_drafts.size()), host_drafts);
+    failures += verify_exact("joint extents unchanged",
+                              from_device<std::int32_t>(d_extents, host_extents.size()), host_extents);
+    failures += verify_exact("joint targets unchanged",
+                              from_device<std::int32_t>(d_targets, host_targets.size()), host_targets);
+    std::vector<std::uint8_t> config_bytes(configs.size() * sizeof(ops::SamplingConfig));
+    std::memcpy(config_bytes.data(), configs.data(), config_bytes.size());
+    failures += verify_exact("joint configs unchanged",
+                              read<std::uint8_t>(d_configs, config_bytes.size()), config_bytes);
+    failures += d_io.verify_guards(label + " outputs");
+    failures += d_logits.verify_guards(label + " logits");
+    failures += d_configs.verify_guards(label + " configs");
+    failures += d_token_counts.verify_guards(label + " token counts");
+    if (workspace.used() != 0 || workspace.peak_used() != workspace_bytes) {
+        std::cerr << label << ": workspace query/execution high-water mismatch\n";
+        ++failures;
+    }
+    return failures;
+}
+
 int select_hidden_case(int rows, int columns, int accepted_value) {
     std::vector<std::uint16_t> hidden(static_cast<std::size_t>(rows) * columns);
     for (int col = 0; col < columns; ++col) {
@@ -441,6 +808,10 @@ int main() {
     failures += greedy_accept_case(15, 7, 257);
     failures += deterministic_sampling_case();
     failures += batched_sampling_workspace_stride_case();
+    failures += nondegenerate_sampling_case(64, 80, 1, 8192, false);
+    failures += nondegenerate_sampling_case(257, 272, 2, 4096, true);
+    failures += nondegenerate_sampling_case(128, 144, 8, 2048, true);
+    failures += nondegenerate_sampling_case(248077, 248320, 8, 2048, false);
     failures += select_hidden_case(5120, 6, 0);
     failures += select_hidden_case(5120, 6, 5);
     failures += select_hidden_case(2048, 16, 7);

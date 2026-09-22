@@ -4,13 +4,11 @@
 // structure; what follows documents what is different and, above all, WHICH equality is the right
 // one to demand.
 //
-// THE PRIMARY GATE IS A PER-POSITION ORACLE, NOT TOKEN AGREEMENT. Speculative decoding is lossless
-// with respect to the target model's own choices: a draft is committed only if the target's argmax
-// at that position agrees with it. That is a statement about POSITIONS, and it is checkable
-// directly: for each token t_i the MTP run emitted, teacher-force the context `prompt + t_0..t_{i-1}`
-// through a NON-SPECULATIVE engine and ask whether the target's argmax is t_i (leg 0). Nothing
-// about batch composition, round boundaries or greedy amplification enters that question, so it is
-// the one measurement in this file with no confound in it.
+// The per-position oracle below is a legacy cold-prefill comparison. It measures
+// the actual emitted token's regret in a non-speculative engine's captured logits.
+// Rebuilding prompt + generated history does NOT reproduce the decode KV/GDN state:
+// prefill and verification use different arithmetic schedules. This is a structural
+// regression screen with a TP1 control, not a same-state or losslessness proof.
 //
 // THE OBVIOUS WHOLE-SEQUENCE CRITERION HAS TWO CONFOUNDS, AND BOTH ARE MEASURED HERE RATHER THAN
 // ASSERTED IN PROSE:
@@ -54,6 +52,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -73,20 +72,14 @@ constexpr std::uint32_t kDraftTokens       = 3;
 constexpr std::uint32_t kConcurrentContext = 4096;
 constexpr std::size_t kShortPromptTokens   = 600;
 
-// A teacher-forced disagreement is admissible only when it is a near-tie. The floor is derived,
-// not fitted: logits here run to roughly +/-20, where BF16's 8 mantissa bits give a quantum of
-// 2^-8 * 16 = 0.0625, and a single differing rounding in the last GEMM moves a logit by a few of
-// those. 0.5 is eight quanta -- loose enough that a rounding-order flip passes, tight enough that
-// a structurally wrong logit (wrong by order one, as the negative controls in
-// tools/tp2/parity.cpp show) cannot.
-//
-// It is a FLOOR on a control-based limit, not the limit itself. The single-device MTP run has its
-// own teacher-forced disagreements -- the column-count confound is exactly that -- and they are
-// not all near-ties: measured on probe A, tp1 disagrees at 2 of 64 positions with a worst gap of
-// 0.75. Holding the split to a tighter standard than the implementation it splits would be
-// measuring the confound, so the admissible gap is `max(kNearTieGap, tp1's worst on the same
-// prompt)`.
-constexpr float kNearTieGap = 0.5F;
+// Retain the legacy numerical floor, without widening it for the corrected metric.
+// The old top1-minus-top2 measurement did not constrain the emitted token at all.
+// We now use top1-minus-emitted, including for the TP1 control. The historical 0.5
+// floor has not been calibrated as a quality bound for that metric; it remains only
+// a legacy regression screen. Passing it does not prove MTP/ordinary equivalence.
+// This full-model test still needs TP1 capacity beyond a local 16 GB card.
+constexpr float kLegacyRegretFloor = 0.5F;
+constexpr std::size_t kTokenDomain = 248077;
 
 // Acceptance floor that does not depend on two engines emitting the same text. Chance acceptance
 // is ~1/248077 per drafted token (the draft must hit the target's exact argmax over the whole
@@ -257,33 +250,67 @@ float bf16_to_float(std::uint16_t bits) {
     return value;
 }
 
-struct Top2 {
-    std::int64_t best_index   = -1;
-    float best_value          = -std::numeric_limits<float>::infinity();
-    float second_value        = -std::numeric_limits<float>::infinity();
-    [[nodiscard]] float gap() const { return best_value - second_value; }
+struct LogitInspection {
+    std::int64_t best_index = -1;
+    float best_value = -std::numeric_limits<float>::infinity();
+    float emitted_regret = 0.0F;
+    float top_two_gap = 0.0F; // descriptive only: this is not emitted-token regret
 };
 
-Top2 top2_of(const std::vector<std::uint16_t>& bits) {
-    Top2 out;
-    for (std::size_t index = 0; index < bits.size(); ++index) {
+bool inspect_logits(const std::vector<std::uint16_t>& bits, std::int64_t emitted,
+                    std::size_t token_domain, LogitInspection& out) {
+    if (token_domain == 0 || bits.size() < token_domain || emitted < 0 ||
+        static_cast<std::uint64_t>(emitted) >= token_domain) {
+        return false;
+    }
+    out = {};
+    float runner_up = -std::numeric_limits<float>::infinity();
+    for (std::size_t index = 0; index < token_domain; ++index) {
         const float value = bf16_to_float(bits[index]);
+        if (!std::isfinite(value)) { return false; }
         if (value > out.best_value) {
-            out.second_value = out.best_value;
-            out.best_value   = value;
-            out.best_index   = static_cast<std::int64_t>(index);
-        } else if (value > out.second_value) {
-            out.second_value = value;
+            runner_up = out.best_value;
+            out.best_value = value;
+            out.best_index = static_cast<std::int64_t>(index);
+        } else if (value > runner_up) {
+            runner_up = value;
         }
     }
-    return out;
+    out.emitted_regret = out.best_value - bf16_to_float(bits[static_cast<std::size_t>(emitted)]);
+    out.top_two_gap = token_domain > 1 ? out.best_value - runner_up : 0.0F;
+    return std::isfinite(out.emitted_regret) && std::isfinite(out.top_two_gap);
+}
+
+int check_regret_oracle() {
+    // BF16 [16, 15.9375, -8, 100-padding]: the top two are close, but emitting
+    // token 2 has regret 24. The previous top-two-only check hid this exact defect.
+    std::vector<std::uint16_t> bits{0x4180, 0x417f, 0xc100, 0x42c8};
+    LogitInspection out;
+    if (!inspect_logits(bits, 2, 3, out) || out.best_index != 0 ||
+        out.top_two_gap != 0.0625F || out.emitted_regret != 24.0F ||
+        !inspect_logits(bits, 0, 3, out) || out.emitted_regret != 0.0F ||
+        inspect_logits(bits, -1, 3, out) || inspect_logits(bits, 3, 3, out) ||
+        inspect_logits(bits, 0, 5, out)) {
+        std::cerr << "emitted-token regret oracle regression failed\n";
+        return 1;
+    }
+    for (const std::uint16_t nonfinite : {std::uint16_t{0x7fc1}, std::uint16_t{0x7f80}}) {
+        bits[1] = nonfinite;
+        if (inspect_logits(bits, 0, 3, out)) {
+            std::cerr << "emitted-token regret oracle accepted non-finite logits\n";
+            return 1;
+        }
+    }
+    std::cout << "emitted-token regret oracle: PASS\n";
+    return 0;
 }
 
 struct OracleResult {
     std::size_t positions          = 0;
     std::size_t agreements         = 0;
     std::size_t disagreements     = 0;
-    float worst_gap                = 0.0F;
+    float worst_regret             = 0.0F;
+    float worst_top_two_gap        = 0.0F;
     bool capture_sane              = true;
 };
 
@@ -306,7 +333,12 @@ OracleResult teacher_force(ninfer::Engine& oracle, const std::vector<ninfer::Tok
             out.capture_sane = false;
             return out;
         }
-        const Top2 ranking = top2_of(captured);
+        LogitInspection ranking;
+        if (!inspect_logits(captured, static_cast<std::int64_t>(expected), kTokenDomain, ranking)) {
+            std::cerr << "teacher-force oracle: invalid emitted id or non-finite captured logits\n";
+            out.capture_sane = false;
+            return out;
+        }
         // The captured vector must be the one the token came from. If the engine's own greedy
         // choice is not this vector's argmax, every gap below is measuring the wrong thing --
         // most plausibly because the capture holds a stale round or spans rows outside the
@@ -320,7 +352,8 @@ OracleResult teacher_force(ninfer::Engine& oracle, const std::vector<ninfer::Tok
             ++out.agreements;
         } else {
             ++out.disagreements;
-            out.worst_gap = std::max(out.worst_gap, ranking.gap());
+            out.worst_regret = std::max(out.worst_regret, ranking.emitted_regret);
+            out.worst_top_two_gap = std::max(out.worst_top_two_gap, ranking.top_two_gap);
         }
         context.push_back(expected);
     }
@@ -337,14 +370,10 @@ int judge_oracle(const OracleResult& subject, const OracleResult& control, const
                   << " vs " << control.positions << ")\n";
         return 1;
     }
-    // HOW THE COUNTS ARE JUDGED. When the single-device run agrees with its own target at EVERY
-    // position, the prompt has no near-tie site in this horizon and the split must be perfect too
-    // -- that is the strong case, and probe A supplies it. When tp1 itself disagrees at d
-    // positions, the prompt HAS d near-tie sites within the horizon (that is what the column-count
-    // confound is), and the split may legitimately flip a comparable number of them; the bound is
-    // stated as 2d, which a structural defect -- wrong shard half, dropped collective, wrong head
-    // map -- exceeds by an order of magnitude rather than by one. The gap bound below is what
-    // carries the real weight in that regime.
+    // Retain the existing TP1-relative disagreement-count screen: zero control
+    // disagreements require zero here; otherwise allow the legacy 2x count.
+    // This empirical structural control is not an independent losslessness bound.
+    // The regret check below now measures the actual emitted candidate's distance.
     if (control.disagreements == 0) {
         if (subject.disagreements != 0) {
             std::cerr << label << ": tp1 MTP" << kDraftTokens
@@ -359,19 +388,19 @@ int judge_oracle(const OracleResult& subject, const OracleResult& control, const
                   << " on the same prompt\n";
         return 1;
     }
-    const float limit = std::max(kNearTieGap, control.worst_gap);
-    if (subject.worst_gap > limit) {
-        std::cerr << label << ": a teacher-forced disagreement at tp2 is not a near-tie (worst "
-                     "top-2 gap "
-                  << subject.worst_gap << " > " << limit << ", the larger of the derived near-tie "
-                  << "floor " << kNearTieGap << " and tp1's own worst " << control.worst_gap
-                  << ")\n";
+    const float limit = std::max(kLegacyRegretFloor, control.worst_regret);
+    if (subject.worst_regret > limit) {
+        std::cerr << label << ": emitted-token regret exceeds the legacy control limit ("
+                  << subject.worst_regret << " > " << limit << ", floor "
+                  << kLegacyRegretFloor << ", TP1 regret " << control.worst_regret << ")\n";
         return 1;
     }
     std::cout << label << ": oracle agreement " << subject.agreements << "/" << subject.positions
-              << " (tp1 " << control.agreements << "/" << control.positions
-              << "), worst disagreement gap " << subject.worst_gap << " (tp1 " << control.worst_gap
-              << "), limit " << limit << "\n";
+              << " (TP1 " << control.agreements << "/" << control.positions
+              << "), worst emitted-token regret " << subject.worst_regret
+              << " (TP1 " << control.worst_regret << "), limit " << limit
+              << "; descriptive top-two gap at disagreements " << subject.worst_top_two_gap
+              << " (TP1 " << control.worst_top_two_gap << ")\n";
     return 0;
 }
 
@@ -923,7 +952,13 @@ int exercise(const char* artifact) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 2 || (argc == 2 && std::strcmp(argv[1], "--check-regret") != 0)) {
+        std::cerr << "usage: ninfer_qwen3_8_27b_mtp_tp2_real_test [--check-regret]\n";
+        return 2;
+    }
+    if (check_regret_oracle() != 0) { return 1; }
+    if (argc == 2) { return 0; } // CPU-only: no artifact or CUDA initialization.
     const char* artifact = std::getenv("NINFER_QWEN3_8_27B_WEIGHTS");
     if (artifact == nullptr || *artifact == '\0') {
         std::cout << "skip: NINFER_QWEN3_8_27B_WEIGHTS is not set\n";
