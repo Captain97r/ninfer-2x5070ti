@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from tools.test_quality import (comparison_contract, evaluate_case, main, observable,
                                 panel_summary, request_body, score, strict_json_loads,
-                                validate_reference)
+                                validate_prompt_count, validate_reference)
 
 
 def answer(content, finish="stop", tools=None):
@@ -57,14 +57,17 @@ class QualityGateTests(unittest.TestCase):
 
 
     @staticmethod
-    def run_panel(directory, content, baseline=None):
+    def run_panel(directory, content, baseline=None, *, expected_prompt_tokens=None, usage=None):
         """Exercise CLI reports and exit codes with HTTP bytes supplied locally."""
         fixtures = directory / "fixtures.json"
-        fixtures.write_text(json.dumps({"cases": [{
+        case = {
             "id": "arithmetic", "category": "reasoning",
             "request": {"messages": [{"role": "user", "content": "48-21+10"}]},
             "expected": {"kind": "json", "value": {"remaining": 37}},
-        }]}), encoding="utf-8")
+        }
+        if expected_prompt_tokens is not None:
+            case["expected_prompt_tokens"] = expected_prompt_tokens
+        fixtures.write_text(json.dumps({"cases": [case]}), encoding="utf-8")
         runtime = directory / "runtime.json"
         runtime.write_text('{"artifact":"fixed.ninfer","spec":"mtp","mtp_k":3}', encoding="utf-8")
         report = directory / ("candidate.json" if baseline else "reference.json")
@@ -74,11 +77,62 @@ class QualityGateTests(unittest.TestCase):
             args.extend(["--baseline", str(baseline)])
         models = {"data": [{"id": "qwen3.8-27b", "context_length": 102400}]}
         response = {"choices": [{"message": {"content": content}, "finish_reason": "stop"}],
-                    "usage": {"completion_tokens": 4}}
+                    "usage": {"completion_tokens": 4, "prompt_tokens": 11} if usage is None else usage}
         responses = [io.BytesIO(json.dumps(value).encode("utf-8")) for value in (models, response)]
         with patch("sys.argv", args), patch("tools.test_quality.urlopen", side_effect=responses), redirect_stdout(io.StringIO()):
             code = main()
         return code, strict_json_loads(report.read_bytes()), report
+
+    def test_expected_prompt_count_rejects_wrong_context_and_malformed_usage(self):
+        for usage in ({"completion_tokens": 4, "prompt_tokens": 12},
+                      {"completion_tokens": 4},
+                      {"completion_tokens": 4, "prompt_tokens": None},
+                      {"completion_tokens": 4, "prompt_tokens": True},
+                      {"completion_tokens": 4, "prompt_tokens": 11.0},
+                      {"completion_tokens": 4, "prompt_tokens": "11"},
+                      {"completion_tokens": 4, "prompt_tokens": -1}):
+            with self.subTest(usage=usage), tempfile.TemporaryDirectory() as temp:
+                code, report, _ = self.run_panel(
+                    Path(temp), '{"remaining":37}', expected_prompt_tokens=11, usage=usage)
+                self.assertEqual(code, 1)
+                self.assertFalse(report["complete"])
+                self.assertEqual(report["cases"][0]["task_status"], "error")
+                self.assertEqual(report["cases"][0]["prompt_tokens"], usage.get("prompt_tokens"))
+                self.assertIn("error", report["cases"][0])
+
+    def test_prompt_count_metadata_preserves_output_parity_and_checks_reference(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            code, reference, path = self.run_panel(
+                directory, '{"remaining":37}', expected_prompt_tokens=11)
+            self.assertEqual(code, 0)
+            self.assertEqual(reference["cases"][0]["prompt_tokens"], 11)
+            self.assertNotIn("prompt_tokens", reference["cases"][0]["observable"])
+            code, candidate, _ = self.run_panel(
+                directory, '{"remaining":37}', path, expected_prompt_tokens=11)
+            self.assertEqual(code, 0)
+            self.assertTrue(candidate["all_observables_equal"])
+            cases = strict_json_loads((directory / "fixtures.json").read_bytes())["cases"]
+            for wrong in (None, 12):
+                broken = copy.deepcopy(reference)
+                broken["cases"][0]["prompt_tokens"] = wrong
+                with self.subTest(reference_count=wrong), self.assertRaises(ValueError):
+                    validate_reference(broken, reference["contract"], cases)
+
+    def test_frozen_reference_without_prompt_metadata_still_compares(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            _, reference, path = self.run_panel(directory, '{"remaining":37}')
+            reference["cases"][0].pop("prompt_tokens")
+            path.write_text(json.dumps(reference), encoding="utf-8")
+            code, candidate, _ = self.run_panel(directory, '{"remaining":37}', path)
+            self.assertEqual(code, 0)
+            self.assertTrue(candidate["all_observables_equal"])
+
+    def test_expected_prompt_count_requires_an_integer_fixture(self):
+        for expected in (None, True, 11.0, "11", -1):
+            with self.subTest(expected=expected), self.assertRaises(ValueError):
+                validate_prompt_count({"expected_prompt_tokens": expected}, 11)
 
     def test_failed_reference_preserves_failure_but_allows_exact_regression(self):
         with tempfile.TemporaryDirectory() as temp:

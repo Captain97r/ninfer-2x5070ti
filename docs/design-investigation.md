@@ -224,6 +224,12 @@ python tools/run_quality_windows.py --label reference
 python tools/run_quality_windows.py --label candidate --baseline build/quality/reference.json
 ```
 
+Pass `--fixtures path/to/panel.json` to run a frozen custom panel with the same
+owned server. A case may specify `expected_prompt_tokens`; the runner then requires
+that exact integer in the response usage, so a long-context check cannot silently
+exercise a shorter prompt. Prompt counts are report metadata, separate from output
+parity. This mechanism does not itself establish a long-context quality result.
+
 Capture currently returns exit 1 for the two real task failures. Comparison
 returns success only for complete exact parity without new task failures, while
 retaining `all_tasks_passed: false`. The server used for ordinary OMP requests

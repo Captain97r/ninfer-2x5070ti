@@ -31,6 +31,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--fixtures", type=Path,
+                        default=ROOT / "tests/data/quality-panel.json")
     parser.add_argument("--binary", type=Path, default=ROOT / "build/windows/apps/ninfer-serve.exe")
     parser.add_argument("--weights", type=Path, default=WEIGHTS)
     parser.add_argument("--no-spec", action="store_true", help="Target-only diagnostic control")
@@ -89,7 +91,8 @@ def main():
             print("Quality server ready for " + args.label, flush=True)
             check = [sys.executable, str(ROOT / "tools/test_quality.py"), "--vision",
                      "--label", args.label, "--report", str(report),
-                     "--runtime-config", str(runtime_path)]
+                     "--runtime-config", str(runtime_path),
+                     "--fixtures", str(args.fixtures.resolve(strict=True))]
             if args.baseline:
                 check += ["--baseline", str(args.baseline.resolve(strict=True))]
             result = subprocess.run(check, cwd=ROOT, env=env, timeout=600)

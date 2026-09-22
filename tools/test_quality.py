@@ -46,6 +46,21 @@ def observable(response):
     }
 
 
+def validate_prompt_count(case, actual):
+    """Keep prompt metadata outside output parity, but enforce a fixture's exact context."""
+    if actual is not None and (type(actual) is not int or actual < 0):
+        raise ValueError("usage.prompt_tokens must be a nonnegative integer")
+    if "expected_prompt_tokens" not in case:
+        return
+    expected = case["expected_prompt_tokens"]
+    if type(expected) is not int or expected < 0:
+        raise ValueError("expected_prompt_tokens must be a nonnegative integer")
+    if type(actual) is not int:
+        raise ValueError("expected_prompt_tokens requires usage.prompt_tokens")
+    if actual != expected:
+        raise ValueError(f"prompt token count differs: expected {expected}, received {actual}")
+
+
 def json_equal(actual, expected):
     # Python considers True == 1. JSON task scoring must distinguish those types.
     if type(actual) is not type(expected):
@@ -203,6 +218,7 @@ def validate_reference(reference, contract, cases):
             passed, _ = score(case["expected"], row["observable"])
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError("reference has an unscorable response") from error
+        validate_prompt_count(case, row.get("prompt_tokens"))
         if (row.get("rule_passed") is not passed
                 or row.get("task_status") != ("passed" if passed else "failed")):
             raise ValueError("reference task result does not match its recorded response")
@@ -261,7 +277,7 @@ def main():
     for case in cases:
         begin = time.perf_counter()
         row = {"id": case["id"], "category": case["category"], "rule_passed": None,
-               "task_status": "error", "baseline_equal": None,
+               "task_status": "error", "baseline_equal": None, "prompt_tokens": None,
                "new_task_failure": None, "regression_status": "error" if comparing else "not_compared"}
         try:
             body = request_body(case, args.model, image_bytes)
@@ -269,8 +285,11 @@ def main():
                               data=json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8"),
                               headers={"Content-Type": "application/json"})
             with urlopen(request, timeout=180) as response:
-                answer = observable(strict_json_loads(response.read()))
-            row = evaluate_case(case, answer, prior.get(case["id"]))
+                decoded = strict_json_loads(response.read())
+            row["prompt_tokens"] = decoded["usage"].get("prompt_tokens")
+            validate_prompt_count(case, row["prompt_tokens"])
+            answer = observable(decoded)
+            row.update(evaluate_case(case, answer, prior.get(case["id"])))
         except HTTPError as error:
             row["error"] = f"HTTP {error.code}: {error.read().decode('utf-8', errors='replace')[:2000]}"
         except (KeyError, ValueError, TypeError, AttributeError, OSError) as error:
