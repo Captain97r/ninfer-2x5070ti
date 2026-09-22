@@ -21,8 +21,9 @@ Content sources:
 
 - Built-in curated multi-domain prose (Chinese / English / code / math) — the default. It is
   encoded WITHOUT the chat template or special tokens, then tiled (paragraphs rotated each cycle)
-  and truncated to exactly `--tokens`. Repetition only fills length; because prefill/decode
-  throughput is token-count / bandwidth bound, it does not bias the numbers.
+  and truncated to exactly `--tokens`. Repetition can change generated continuations and
+  speculative acceptance, so measured throughput applies to this corpus. It does not
+  establish ordinary chat or coding performance.
 - `--source-text <file>` (repeatable) — tokenize your own long meaningful text instead, e.g. a
   downloaded public-domain book or a concatenated document set, for genuinely diverse very long
   content. The committed default is `~64k` tokens; raise `--tokens` and/or pass `--source-text`

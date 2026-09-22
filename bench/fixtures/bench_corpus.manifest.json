@@ -10,5 +10,5 @@
   "ids_sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002",
   "source": "builtin_curated_bank",
   "source_files": [],
-  "note": "meaningful tokens; tiled (rotated) and truncated to exactly `tokens`. Repetition fills length only and does not bias throughput."
+  "note": "meaningful tokens; tiled (rotated) and truncated to exactly `tokens`. Repetition can change generated continuations and speculative acceptance; throughput is corpus-specific."
 }

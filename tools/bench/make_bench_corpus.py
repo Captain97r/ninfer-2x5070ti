@@ -39,9 +39,9 @@ TOKENIZER_MODEL_ID = "Qwen/Qwen3.6-27B"
 DEFAULT_TOKENS = 65536
 
 # Curated, in-distribution prose spanning several domains and languages. Order and content are part
-# of the corpus contract: changing them changes the committed ids. Repetition to reach --tokens does
-# not bias prefill/decode throughput (both are token-count/bandwidth bound, not content dependent),
-# so this bank fills long corpora by rotated tiling. For genuinely diverse very long content, pass
+# of the corpus contract: changing them changes the committed ids. Rotated tiling fills length,
+# but repetition can change generated continuations and speculative acceptance. Throughput from
+# this corpus must not be generalized to ordinary chat/coding. For diverse long content, pass
 # --source-text instead.
 PARAGRAPHS: tuple[str, ...] = (
     "周末旅行规划资料：目的地是一个适合亲子散步的湖边小城，市中心到湖区有直达公交，车程大约"
@@ -244,7 +244,7 @@ def build_manifest(
         "source_files": source_provenance,
         "note": (
             "meaningful tokens; tiled (rotated) and truncated to exactly `tokens`. "
-            "Repetition fills length only and does not bias throughput."
+            "Repetition can change generated continuations and speculative acceptance; throughput is corpus-specific."
         ),
     }
 
