@@ -22,9 +22,32 @@ Use `-Context 4096` for a small allocation, `-DraftTokens 0` for ordinary decode
 execution. Use `-NoThinking` to disable thinking by default in either mode. CLI sampling follows the artifact defaults; `-Greedy -NoThinking`
 reproduces the short smoke-run settings. Server requests control their own sampling.
 
+To try **BF16 (16-bit) KV cache**, stop the running server with Ctrl+C, then run:
+
+```powershell
+.\tools\run_windows.ps1 -Mode Server -KvDtype bf16 -Context 102400
+```
+
+`-KvDtype bf16` uses 102,400 tokens when `-Context` is omitted. The regular INT8
+launch keeps its 199,680-token default. For a fair comparison, use the same context,
+prompts and request sampling in both modes; restart the server between them:
+
+```powershell
+.\tools\run_windows.ps1 -Mode Server -KvDtype int8 -Context 102400
+```
+
+Refresh OMP model discovery after changing the context. Compare the same fresh
+conversation and images, allowing enough output tokens for the task. BF16 changes
+cache precision; exact generated text need not match INT8. The published long-context
+performance and capacity qualification above 100K applies to INT8. Model weight
+quantization, TP2, MTP and vision settings are unchanged by `-KvDtype`.
+A local BF16 launch at 102,400 tokens passed model discovery, a short exact-answer
+check and a 128-token decode. Long BF16 generation, image behavior and quality
+comparisons remain unqualified.
+
 The model-discovery endpoints publish the configured context window as `max_model_len`
 and `context_length`, so clients such as oh-my-pi can budget the session correctly.
-The default is **199,680 tokens**, shared by prompt, image and generated tokens;
+With INT8, the default is **199,680 tokens**, shared by prompt, image and generated tokens;
 changing `-Context` changes the advertised limit too.
 When a client omits its output limit, the Windows server launcher allows generation
 up to the remaining context instead of cutting replies at 8,192 tokens. Explicit
@@ -75,6 +98,9 @@ To repeat the bounded image-grounding checks against an already running server:
 ```powershell
 py -3.11 .\tools\test_vision.py
 ```
+
+For a BF16 server at 102,400 tokens, add `--context 102400` and use
+`--report build/vision-bf16.json` to keep its result separate from the INT8 record.
 
 [Local vision validation](diagnostics/vision-validation.json) passed seven checks: OCR,
 counting and position, streamed answers, changed images, two-image history, thinking,

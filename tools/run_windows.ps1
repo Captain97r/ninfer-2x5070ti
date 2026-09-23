@@ -5,6 +5,7 @@ param(
     [string]$Prompt = 'Explain how tensor parallel inference works in three sentences.',
     [string]$MessagesFile,
     [ValidateRange(512, 262144)][int]$Context = 199680,
+    [ValidateSet('int8', 'bf16')][string]$KvDtype = 'int8',
     [ValidateRange(1, 32768)][int]$MaxNew = 256,
     [ValidateRange(0, 5)][int]$DraftTokens = 3,
     [ValidateRange(1, 65535)][int]$Port = 8000,
@@ -16,6 +17,11 @@ param(
     [switch]$IgnoreEos
 )
 $ErrorActionPreference = 'Stop'
+$KvDtype = $KvDtype.ToLowerInvariant()
+# Keep the validated INT8 default; BF16 stores almost twice the KV bytes per token.
+if ($KvDtype -eq 'bf16' -and -not $PSBoundParameters.ContainsKey('Context')) {
+    $Context = 102400
+}
 $workspace = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $workspace 'build\windows'
 if (-not $ModelPath) {
@@ -34,7 +40,7 @@ try {
 } finally { $stream.Dispose() }
 $env:PATH = (Join-Path $build 'vcpkg_installed\x64-windows\bin') + ';' + $env:PATH
 $launchArgs = @($ModelPath, '--tp', '2', '--devices', '0,1', '--max-context', "$Context",
-    '--kv-capacity', "$Context", '--kv-dtype', 'int8', '--prefill-chunk', '1024')
+    '--kv-capacity', "$Context", '--kv-dtype', $KvDtype, '--prefill-chunk', '1024')
 if ($DraftTokens -gt 0) { $launchArgs += @('--spec', 'mtp', '--draft-tokens', "$DraftTokens", '--lm-head-draft') }
 if (-not $NoVision) { $launchArgs += @('--vision', '--image-max-tokens', "$ImageMaxTokens") }
 if ($NoCudaGraph) { $launchArgs += '--no-cuda-graph' }
