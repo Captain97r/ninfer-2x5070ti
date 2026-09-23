@@ -166,6 +166,22 @@ Bytes build_row_scale(std::uint64_t rows, std::uint64_t columns, std::uint64_t r
     return out;
 }
 
+// Independent F32 row-scale byte oracle: do not obtain offsets or word width from production.
+Bytes build_row_scale_f32(std::uint64_t rows, std::uint64_t columns, std::uint64_t row_origin,
+                          std::uint64_t column_origin) {
+    const auto scales = (rows * columns + 255u) / 256u * 256u;
+    Bytes out(static_cast<std::size_t>(scales + 4 * rows), 0);
+    for (std::uint64_t n = 0; n < rows; ++n) {
+        for (std::uint64_t k = 0; k < columns; ++k) {
+            out[n * columns + k] = pattern(row_origin + n, column_origin + k, 0);
+        }
+        for (std::uint64_t byte = 0; byte < 4; ++byte) {
+            out[scales + n * 4 + byte] = pattern(row_origin + n, 0, 200 + byte);
+        }
+    }
+    return out;
+}
+
 template <typename Fn> void expect_throws(Fn&& fn, const std::string& label) {
     try {
         fn();
@@ -408,6 +424,50 @@ int main() {
             one(SliceRange{8, 16}));
         expect_equal(apply_slice(parent, column_slice), build_row_scale(kRows, 16, 0, 8),
                      "FP8 column slice");
+    }
+
+    // New formats preserve every source scalar bit through TP2 row and column slicing.
+    {
+        const std::array<std::uint64_t, 2> shape = {6, 40};
+        const auto parent                        = build_row_scale_f32(6, 40, 0, 0);
+        const auto row = ninfer::artifact::tensor_row_slice(StorageLayout::RowScaleF32V1,
+                                                            NumericFormat::FP8_E4M3FN_ROW_F32S,
+                                                            shape, one(SliceRange{2, 3}));
+        expect_equal(apply_slice(parent, row), build_row_scale_f32(3, 40, 2, 0),
+                     "FP8 F32 row slice");
+        const auto col = ninfer::artifact::tensor_column_slice(StorageLayout::RowScaleF32V1,
+                                                               NumericFormat::FP8_E4M3FN_ROW_F32S,
+                                                               shape, one(SliceRange{8, 16}));
+        expect_equal(apply_slice(parent, col), build_row_scale_f32(6, 16, 0, 8),
+                     "FP8 F32 column slice");
+        expect_throws(
+            [&] {
+                (void)ninfer::artifact::tensor_column_slice(StorageLayout::RowScaleV1,
+                                                            NumericFormat::FP8_E4M3FN_ROW_F32S,
+                                                            shape, one(SliceRange{8, 16}));
+            },
+            "FP8 F32 wrong layout");
+    }
+    {
+        const std::array<std::uint64_t, 2> shape = {384, 192};
+        const auto parent                        = build_block_scale(384, 192, 0, 0);
+        const auto row                           = ninfer::artifact::tensor_row_slice(
+            StorageLayout::BlockScaleK16M128x4MultiplierV1, NumericFormat::NVFP4_F32M, shape,
+            one(SliceRange{128, 256}));
+        expect_equal(apply_slice(parent, row), build_block_scale(256, 192, 128, 0),
+                     "NVFP4 multiplier row slice");
+        const auto col = ninfer::artifact::tensor_column_slice(
+            StorageLayout::BlockScaleK16M128x4MultiplierV1, NumericFormat::NVFP4_F32M, shape,
+            one(SliceRange{64, 128}));
+        expect_equal(apply_slice(parent, col), build_block_scale(384, 128, 0, 4),
+                     "NVFP4 multiplier column slice");
+        expect_throws(
+            [&] {
+                (void)ninfer::artifact::tensor_row_slice(StorageLayout::BlockScaleK16M128x4V1,
+                                                         NumericFormat::NVFP4_F32M, shape,
+                                                         one(SliceRange{128, 128}));
+            },
+            "NVFP4 multiplier wrong layout");
     }
 
     // --- range validation -------------------------------------------------------------------

@@ -15,6 +15,8 @@ The storage registry contains exactly these identities:
 | `row-split-k128-v1` | tensor layout | `Q4G64_F16S`, `Q5G64_F16S`, `Q6G64_F16S`, `W8G32_F16S` | rank 2 `[N,K]` | 256 bytes |
 | `blockscale-k16-m128x4-v1` | tensor layout | `NVFP4` | rank 2 `[N,K]`, `N % 128 == 0`, `K % 64 == 0` | 256 bytes |
 | `row-scale-v1` | tensor layout | `FP8_E4M3FN_ROW_BF16S` | rank 2 `[N,K]` | 256 bytes |
+| `blockscale-k16-m128x4-multiplier-v1` | tensor layout | `NVFP4_F32M` | rank 2 `[N,K]`, `N % 128 == 0`, `K % 64 == 0` | 256 bytes |
+| `row-scale-f32-v1` | tensor layout | `FP8_E4M3FN_ROW_F32S` | rank 2 `[N,K]` | 256 bytes |
 | `raw-bytes-v1` | resource encoding | not applicable | nonempty byte string | 1 byte |
 
 These are closed identities, not templates. A format/layout combination not present in the table is
@@ -297,6 +299,14 @@ The scale word's byte offset within the scale plane is:
 Layout decoding must recover the original packed E2M1 words, natural `[N,K/16]` E4M3FN scale-word
 matrix, and exact divisor word. It never decodes and re-encodes either floating-point format.
 
+### 4.1 `blockscale-k16-m128x4-multiplier-v1`
+
+This distinct layout accepts only `NVFP4_F32M`. Shape admission, packed-code order, swizzle and
+byte counts are identical to Section 4. The final four bytes contain the original little-endian
+FP32 **weight multiplier**, at `scale_plane_offset + scale_plane_bytes`. Layout transforms and
+TP slices preserve that word exactly; they never replace it with a rounded reciprocal.
+The layout identity distinguishes these semantics even though the physical geometry is shared.
+
 ## 5. `row-scale-v1`
 
 `row-scale-v1` stores only rank-two `FP8_E4M3FN_ROW_BF16S` matrices `[N,K]` with positive
@@ -324,6 +334,21 @@ encoded by concatenating the selected code rows, recomputing the scale-plane ali
 row count, and appending the selected scale words in the same row order. It does not decode or
 requantize either plane.
 
+### 5.1 `row-scale-f32-v1`
+
+This distinct layout accepts only `FP8_E4M3FN_ROW_F32S`. Its E4M3FN code plane and zero padding
+follow Section 5. The scale plane contains four bytes per row:
+
+```text
+scale_plane_offset = align_up(N * K, 256)
+scale_plane_bytes  = N * 4
+payload_bytes      = scale_plane_offset + scale_plane_bytes
+scale_word_offset(n) = scale_plane_offset + 4 * n
+```
+
+Each scale is its original little-endian FP32 multiplier word. Row gathering and column slicing
+copy the owning scale words without casting them to BF16 or combining them with code values.
+
 ## 6. `raw-bytes-v1`
 
 `raw-bytes-v1` is a required-resource encoding, not a tensor layout. Its enclosing object payload is
@@ -350,6 +375,9 @@ Layout decoding yields only persistent logical words:
   matrix-level FP32 weight divisor;
 - `row-scale-v1` yields the natural row-major E4M3FN code words and one BF16 multiplier per logical
   row;
+- `blockscale-k16-m128x4-multiplier-v1` yields the same logical code and block-scale words plus
+  the original FP32 weight multiplier;
+- `row-scale-f32-v1` yields E4M3FN words and one original FP32 multiplier per logical row;
 - `raw-bytes-v1` yields the enclosing resource bytes.
 
 Dequantized values follow the reconstruction rule in `tensor-formats.md`. This document does

@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-23",
+  "target": "qwen3_8_27b",
+  "weights_id": "nvfp4-modelopt",
+  "hardware": {
+    "gpus": "2 x RTX 5070 Ti 16 GB (70 SM each)",
+    "os": "native Windows",
+    "cuda": "13.3",
+    "compiler": "MSVC 19.44",
+    "transport": "mapped pinned host memory; no direct CUDA peer access"
+  },
+  "source": {
+    "repo": "nvidia/Qwen3.8-27B-NVFP4",
+    "revision": "482ca0f3832238542f8f5295dde86b5f22711d80",
+    "url": "https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/tree/482ca0f3832238542f8f5295dde86b5f22711d80"
+  },
+  "artifact": {
+    "path": "C:/LLM/nvidia/Qwen3.8-27B-NVFP4/qwen3_8_27b_nvfp4_modelopt.ninfer",
+    "bytes": 21294095360,
+    "conversion_device": "CPU",
+    "conversion_seconds": 67.6566605,
+    "source_quantized_matrices": {
+      "NVFP4": 193,
+      "FP8": 208
+    },
+    "preservation": "Packed text codes, source scales and BF16 embedding preserved; selected draft head rows remain packed NVFP4. MTP/Vision BF16 source matrices use existing target encoders. Two frontend metadata resources are canonicalized; vocabulary/template and registered semantics are unchanged."
+  },
+  "verification": {
+    "python_artifact_converter_tests_passed": 58,
+    "python_benchmark_contract_tests_passed": 24,
+    "cpp_artifact_slice_workspace_tests_passed": 4,
+    "nvfp4_gpu_cases_passed": 48,
+    "fp8_gpu_cases_passed": 30,
+    "gpu_oracle": "Independent FP64 full-K dot products sampled across real model tile seams, with independent exact activation codec checks on both GPUs. Explicit calibrated activation and BF16 output boundaries; fused-operation tolerances differ from plain linear. Not an exhaustive comparison of every output element.",
+    "legacy_nvfp4_a4_and_fp8_a8_tests": "passed",
+    "source_preservation": {
+      "all_passed": true,
+      "scope": "Independent scalar byte indexing of representative source rows/fusion boundaries; complete draft ID map and canonical frontend. Not exhaustive whole-artifact comparison.",
+      "covered": "FP8 attention/GDN fusion boundaries; first/last NVFP4 MLP, down, full/draft heads; BF16 embedding; FP32 global/input scalars; complete 131072 draft ID map; all six canonical resources."
+    },
+    "tp2_prefix_mtp": "Matched prefill schedules and same-schedule decoded-prefix replay have exact logits, 16/16 token agreement and equal MTP counts, with CUDA Graphs off/on; peer egress agrees over 90 rounds per mode. Different prefill/decode schedules are diagnostic, not an exact-parity contract."
+  },
+  "quality": {
+    "scope": "Fixed18-case greedy screen including text, tools, history, bounded thinking and two images; not a broad accuracy benchmark or NVIDIA reference-engine parity.",
+    "mtp3": {
+      "passed": 15,
+      "total": 18,
+      "failed_cases": [
+        "integer-inventory-arithmetic",
+        "code-repair-as-json",
+        "tool-typed-unicode-arguments"
+      ]
+    },
+    "target_only": {
+      "passed": 15,
+      "total": 18,
+      "failed_cases": [
+        "integer-inventory-arithmetic",
+        "code-repair-as-json",
+        "tool-typed-unicode-arguments"
+      ]
+    },
+    "original_artifact": {
+      "passed": 16,
+      "total": 18,
+      "failed_cases": [
+        "integer-inventory-arithmetic",
+        "code-repair-as-json"
+      ]
+    },
+    "original_saved_observables_equal": true,
+    "new_failure_vs_original": "tool-typed-unicode-arguments: generated a string instead of boolean and garbled the label, with and without MTP.",
+    "mtp_target_non_thinking_observables_equal": true,
+    "thinking": "Both modes pass the final-answer rule; reasoning text differs."
+  },
+  "limits": [
+    "Existing pinned artifact remains the launcher default.",
+    "NVIDIA published benchmark scores and end-to-end numerical identity are not established.",
+    "Linux execution and the full NVIDIA reference engine were not run locally.",
+    "102400-token INT8 is qualified here; larger contexts and BF16 KV for this new profile are not.",
+    "Vision checks used short image prompts, not a full 102K multimodal history."
+  ],
+  "runtime": {
+    "tp": 2,
+    "devices": [
+      0,
+      1
+    ],
+    "max_context": 102400,
+    "kv_capacity": 102400,
+    "kv_cache": "int8-group64",
+    "prefill_chunk": 1024,
+    "cuda_graph": true,
+    "vision": true,
+    "speculative_backend": "mtp",
+    "speculative_draft_window": 3,
+    "proposal_head": "optimized",
+    "image_max_tokens": 2048,
+    "prefix_reuse_during_long_checks": false,
+    "prefix_reuse_during_quality_panel": true
+  },
+  "memory": {
+    "weights_bytes_per_gpu": 12061399040,
+    "workspace_bytes_per_gpu": 138741504,
+    "primary_rank_free_after_startup_bytes": 1523580928,
+    "nvml_mib_per_gpu_during_long_request": [
+      13812,
+      13812
+    ],
+    "nvml_observation_scope": "sampled GPU-wide dedicated memory, MiB; 2s polling, not an instantaneous peak or Windows per-process shared-memory measurement"
+  },
+  "context_qualification": {
+    "summary": {
+      "complete": true,
+      "all_observations_validated": true,
+      "all_tasks_passed": true,
+      "boundary_status": "passed",
+      "qualification_passed": true
+    },
+    "command": "python3.11 tools/bench/qualify_context_windows.py --binary build/windows/apps/ninfer-serve.exe --weights C:/LLM/nvidia/Qwen3.8-27B-NVFP4/qwen3_8_27b_nvfp4_modelopt.ninfer --context 102400 --label nvidia-modelopt-102400",
+    "records": [
+      {
+        "fixture": "retrieve-three",
+        "validated": true,
+        "task_passed": true,
+        "boundary": null,
+        "metrics": {
+          "prompt_tokens": 101868,
+          "completion_tokens": 127,
+          "prefill_seconds": 43.477884599999996,
+          "decode_seconds": 0.7077726999999998,
+          "prefill_tok_s": 2342.984276654527,
+          "decode_tok_s": 178.02325520608528,
+          "speculative_acceptance": 0.9019607843137255,
+          "server_finish_reason": "stop_token"
+        }
+      },
+      {
+        "fixture": "absent-key",
+        "validated": true,
+        "task_passed": true,
+        "boundary": null,
+        "metrics": {
+          "prompt_tokens": 101853,
+          "completion_tokens": 25,
+          "prefill_seconds": 43.513098899999996,
+          "decode_seconds": 0.12464679999999999,
+          "prefill_tok_s": 2340.743421517147,
+          "decode_tok_s": 192.54405247467244,
+          "speculative_acceptance": 1.0,
+          "server_finish_reason": "stop_token"
+        }
+      },
+      {
+        "fixture": "context-boundary",
+        "validated": true,
+        "task_passed": null,
+        "boundary": {
+          "cached_token_frontier": 102400,
+          "prompt_plus_completion": 102401,
+          "expected_cached_frontier": 102400,
+          "contract": "prompt_tokens + completion_tokens -1 == context at context_capacity",
+          "status": "passed"
+        },
+        "metrics": {
+          "prompt_tokens": 100352,
+          "completion_tokens": 2049,
+          "prefill_seconds": 42.62649419999999,
+          "decode_seconds": 13.404254199999995,
+          "prefill_tok_s": 2354.216594241992,
+          "decode_tok_s": 152.7873143438298,
+          "speculative_acceptance": 0.7270844122216468,
+          "server_finish_reason": "context_capacity"
+        }
+      },
+      {
+        "fixture": "post-session-health",
+        "validated": true,
+        "task_passed": true,
+        "boundary": null,
+        "metrics": {
+          "prompt_tokens": 40,
+          "completion_tokens": 10,
+          "prefill_seconds": 0.0964224,
+          "decode_seconds": 0.0554416,
+          "prefill_tok_s": 414.8413646621532,
+          "decode_tok_s": 162.33297740324954,
+          "speculative_acceptance": 1.0,
+          "server_finish_reason": "stop_token"
+        }
+      }
+    ]
+  },
+  "sustained_generation": {
+    "command": "python3.11 tools/bench/context_sweep_windows.py --binary build/windows/apps/ninfer-serve.exe --weights C:/LLM/nvidia/Qwen3.8-27B-NVFP4/qwen3_8_27b_nvfp4_modelopt.ninfer --label nvidia-modelopt-code32k --context 102400 --prompt-tokens 32768 --completion-tokens 4096 --workloads code --repetitions 1",
+    "scope": "One measured cold request after warmup; real repository excerpts, registered nonthinking stochastic defaults, seed 7632647173703958409. Output reached 4096-token cap. No completed code-review task score or peak-throughput claim.",
+    "metrics": {
+      "prompt_tokens": 32768,
+      "completion_tokens": 4096,
+      "prefill_seconds": 11.100097400000001,
+      "decode_seconds": 28.826657800000046,
+      "prefill_tok_s": 2952.0461685318182,
+      "decode_tok_s": 142.05601039188087,
+      "speculative_acceptance": 0.5883412108935404,
+      "server_finish_reason": "output_limit"
+    },
+    "decode_windows": {
+      "scope": "full 1s log intervals after the first decode-positive interval; final partial interval excluded; zero-token stalls included; durations/counter deltas are consecutive steady-clock snapshots, logged wall timestamps are delayed estimates",
+      "available": true,
+      "covered_seconds": 28.2664729,
+      "covered_tokens": 4007,
+      "early": {
+        "intervals": 9,
+        "seconds": 9.092420400000002,
+        "committed_decode_tokens": 1247,
+        "tokens_per_second": 137.1472001008664
+      },
+      "middle": {
+        "intervals": 9,
+        "seconds": 9.0738469,
+        "committed_decode_tokens": 1278,
+        "tokens_per_second": 140.84434243650287
+      },
+      "late": {
+        "intervals": 10,
+        "seconds": 10.100205599999999,
+        "committed_decode_tokens": 1482,
+        "tokens_per_second": 146.7296863739091
+      },
+      "full_intervals": 28
+    },
+    "gpu_memory": {
+      "scope": "sampled GPU-wide dedicated memory, MiB; 2s polling, not an instantaneous peak or Windows per-process shared-memory measurement",
+      "gpus": [
+        {
+          "index": 0,
+          "samples": 31,
+          "max_used_mib": 13812.0,
+          "min_free_mib": 2184.0,
+          "max_utilization_percent": 98.0,
+          "max_power_w": 196.88
+        },
+        {
+          "index": 1,
+          "samples": 31,
+          "max_used_mib": 13812.0,
+          "min_free_mib": 2184.0,
+          "max_utilization_percent": 100.0,
+          "max_power_w": 177.81
+        }
+      ],
+      "errors": 0
+    }
+  }
+}

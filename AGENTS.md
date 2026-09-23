@@ -118,6 +118,14 @@ upstream v3 artifacts are not interchangeable. Large model artifacts live in
 16 GB are not local validation prerequisites: use independent operator oracles,
 saved reference data, and focused TP2 integration tests as appropriate.
 
+The optional NVIDIA Qwen3.8-27B ModelOpt checkpoint has the distinct registered
+`nvfp4-modelopt` identity. It preserves packed text codes, FP32 source multipliers,
+calibrated W4A4/W8A8 activation semantics, and the BF16 embedding. Do not reinterpret
+its multipliers as the original profile's divisors or substitute dynamic activation
+scales. MTP and Vision retain the target's existing encoders for the checkpoint's
+BF16 tensors. Select its artifact and context explicitly; qualification of the
+primary `nvfp4` profile does not establish capacity, speed, or quality for this one.
+
 The user explicitly authorized platform and architecture adaptation. Prioritize
 correctness, useful prompt/prefix processing, and committed-token throughput for
 this hardware. Other inherited model targets remain reference paths rather than

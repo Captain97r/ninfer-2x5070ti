@@ -37,7 +37,7 @@ def response_and_event(spec):
 def record(spec):
     response, event = response_and_event(spec)
     payload = corpus.request_payload(spec.model_id, spec.fixture, spec.seed)
-    return comparison.checked_record(spec, payload, response, event, PRESET)
+    return comparison.checked_record(spec, payload, response, event, PRESET, weights_id="nvfp4")
 
 
 def report():
@@ -53,7 +53,7 @@ class ServingComparisonTests(unittest.TestCase):
         self.payload = corpus.request_payload(self.spec.model_id, self.spec.fixture, self.spec.seed)
 
     def checked(self, response, event):
-        return comparison.checked_record(self.spec, self.payload, response, event, PRESET)
+        return comparison.checked_record(self.spec, self.payload, response, event, PRESET, weights_id="nvfp4")
 
     def test_native_ceiling_is_distinct_from_configured_session_and_kv(self):
         # Relevant fields from the reproduced startup: the native RoPE ceiling
@@ -75,7 +75,20 @@ class ServingComparisonTests(unittest.TestCase):
             "sampling_defaults": {"greedy": False, "non_thinking": PRESET,
                                   "server_overrides": {key: None for key in (*PRESET, "seed")}},
         }
-        self.assertEqual(comparison.validate_start(event), PRESET)
+        for weights_id in ("nvfp4", "nvfp4-modelopt"):
+            event["artifact"]["weights_id"] = weights_id
+            with self.subTest(weights_id=weights_id):
+                self.assertEqual(comparison.validate_start(event), PRESET)
+                response, done = response_and_event(self.spec)
+                result = comparison.checked_record(self.spec, self.payload, response, done, PRESET,
+                                                   weights_id=event["artifact"]["weights_id"])
+                self.assertEqual(result["weights_id"], weights_id)
+        for artifact in ({"target": "qwen3_8_27b", "weights_id": "fp8"},
+                         {"target": "qwen3_6_27b", "weights_id": "nvfp4-modelopt"},
+                         {"target": "qwen3_8_27b"}, {}):
+            invalid = {**event, "artifact": artifact}
+            with self.subTest(artifact=artifact), self.assertRaises(corpus.CampaignError):
+                comparison.validate_start(invalid)
         for field, changed in (("max_context", 262144), ("kv_capacity", 262144),
                                ("effective_max_context", 102400)):
             invalid = copy.deepcopy(event)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import struct
 from typing import Iterable
 
@@ -14,6 +13,10 @@ from tools.convert.qwen3_6.common import recipe as family_recipe
 from tools.convert.qwen3_6_27b import recipe as official_recipe
 
 from . import inventory_nvfp4 as inventory
+from .matrix_recipes import (
+    RowRange, MatrixSource, MatrixPart, Fp8WeightRecipe, Nvfp4WeightRecipe,
+    InputScaleRecipe, build_matrix_recipes, build_direct_recipes, select_rows,
+)
 
 
 BASE_REPOSITORY = "Qwen/Qwen3.8-27B"
@@ -22,317 +25,12 @@ QUANTIZED_REPOSITORY = "unsloth/Qwen3.8-27B-NVFP4"
 QUANTIZED_REVISION = "60e813d4dbbdc5d64cf3f5a8caf2897bedf03679"
 
 
-@dataclass(frozen=True, slots=True)
-class RowRange:
-    begin: int
-    end: int
-
-    @property
-    def rows(self) -> int:
-        return self.end - self.begin
-
-
-@dataclass(frozen=True, slots=True)
-class MatrixSource:
-    name: str
-    shape: tuple[int, int]
-
-    def field(self, suffix: str) -> str:
-        return f"{self.name}.{suffix}"
-
-
-@dataclass(frozen=True, slots=True)
-class MatrixPart:
-    source: MatrixSource
-    rows: tuple[RowRange, ...]
-
-    @property
-    def output_rows(self) -> int:
-        return sum(item.rows for item in self.rows)
-
-
-@dataclass(frozen=True, slots=True)
-class Fp8WeightRecipe:
-    object_name: str
-    shape: tuple[int, int]
-    parts: tuple[MatrixPart, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class Nvfp4WeightRecipe:
-    object_name: str
-    shape: tuple[int, int]
-    parts: tuple[MatrixPart, ...]
-    divisor_sources: tuple[MatrixSource, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class InputDivisorRecipe:
-    object_name: str
-    sources: tuple[MatrixSource, ...]
-    weight_names: tuple[str, ...]
-
-
-def _source(name: str, n: int, k: int) -> MatrixSource:
-    return MatrixSource(name, (n, k))
-
-
-def _all(source: MatrixSource) -> MatrixPart:
-    return MatrixPart(source, (RowRange(0, source.shape[0]),))
-
-
-def _q_part(source: MatrixSource, gate: bool) -> MatrixPart:
-    begin = 256 if gate else 0
-    return MatrixPart(
-        source,
-        tuple(
-            RowRange(head * 512 + begin, head * 512 + begin + 256)
-            for head in range(24)
-        ),
-    )
-
-
-def _build_quantized_matrix_recipes() -> tuple[
-    tuple[Fp8WeightRecipe, ...],
-    tuple[Nvfp4WeightRecipe, ...],
-    tuple[InputDivisorRecipe, ...],
-    tuple[tuple[MatrixSource, ...], ...],
-]:
-    fp8_weights: list[Fp8WeightRecipe] = []
-    nvfp4_weights: list[Nvfp4WeightRecipe] = []
-    input_divisors: list[InputDivisorRecipe] = []
-    divisor_groups: list[tuple[MatrixSource, ...]] = []
-
-    for layer in range(64):
-        source_prefix = f"model.language_model.layers.{layer}."
-        object_prefix = f"text/layers/{layer}/"
-        if layer in inventory.FULL_ATTENTION_LAYERS:
-            query = _source(source_prefix + "self_attn.q_proj", 12288, 5120)
-            key = _source(source_prefix + "self_attn.k_proj", 1024, 5120)
-            value = _source(source_prefix + "self_attn.v_proj", 1024, 5120)
-            output = _source(source_prefix + "self_attn.o_proj", 5120, 6144)
-            fp8_weights.extend(
-                (
-                    Fp8WeightRecipe(
-                        object_prefix + "attention/query_key_gate_value",
-                        (14336, 5120),
-                        (
-                            _q_part(query, False),
-                            _all(key),
-                            _q_part(query, True),
-                            _all(value),
-                        ),
-                    ),
-                    Fp8WeightRecipe(
-                        object_prefix + "attention/output",
-                        output.shape,
-                        (_all(output),),
-                    ),
-                )
-            )
-        else:
-            query_key_value = _source(
-                source_prefix + "linear_attn.in_proj_qkv", 10240, 5120
-            )
-            z = _source(source_prefix + "linear_attn.in_proj_z", 6144, 5120)
-            output = _source(
-                source_prefix + "linear_attn.out_proj", 5120, 6144
-            )
-            fp8_weights.extend(
-                (
-                    Fp8WeightRecipe(
-                        object_prefix + "gdn/query_key_value_z",
-                        (16384, 5120),
-                        (_all(query_key_value), _all(z)),
-                    ),
-                    Fp8WeightRecipe(
-                        object_prefix + "gdn/output",
-                        output.shape,
-                        (_all(output),),
-                    ),
-                )
-            )
-
-        gate = _source(source_prefix + "mlp.gate_proj", 17408, 5120)
-        up = _source(source_prefix + "mlp.up_proj", 17408, 5120)
-        down = _source(source_prefix + "mlp.down_proj", 5120, 17408)
-        if layer in inventory.NVFP4_MLP_LAYERS:
-            gate_up_sources = (gate, up)
-            divisor_groups.append(gate_up_sources)
-            nvfp4_weights.extend(
-                (
-                    Nvfp4WeightRecipe(
-                        object_prefix + "mlp/gate_up",
-                        (34816, 5120),
-                        (_all(gate), _all(up)),
-                        gate_up_sources,
-                    ),
-                    Nvfp4WeightRecipe(
-                        object_prefix + "mlp/down",
-                        down.shape,
-                        (_all(down),),
-                        (down,),
-                    ),
-                )
-            )
-            input_divisors.extend(
-                (
-                    InputDivisorRecipe(
-                        object_prefix
-                        + "mlp/gate_up_projection/input_scale_divisor",
-                        gate_up_sources,
-                        (object_prefix + "mlp/gate_up",),
-                    ),
-                    InputDivisorRecipe(
-                        object_prefix + "mlp/down_projection/input_scale_divisor",
-                        (down,),
-                        (object_prefix + "mlp/down",),
-                    ),
-                )
-            )
-        else:
-            fp8_weights.extend(
-                (
-                    Fp8WeightRecipe(
-                        object_prefix + "mlp/gate_up",
-                        (34816, 5120),
-                        (_all(gate), _all(up)),
-                    ),
-                    Fp8WeightRecipe(
-                        object_prefix + "mlp/down",
-                        down.shape,
-                        (_all(down),),
-                    ),
-                )
-            )
-
-    output_head = _source("lm_head", 248320, 5120)
-    fp8_weights.append(
-        Fp8WeightRecipe(
-            "text/output_head", output_head.shape, (_all(output_head),)
-        )
-    )
-    return (
-        tuple(fp8_weights),
-        tuple(nvfp4_weights),
-        tuple(input_divisors),
-        tuple(divisor_groups),
-    )
-
-
-def _build_quantized_direct_recipes() -> tuple[family_recipe.TensorRecipe, ...]:
-    recipes: list[family_recipe.TensorRecipe] = []
-    for layer in range(64):
-        source_prefix = f"model.language_model.layers.{layer}."
-        object_prefix = f"text/layers/{layer}/"
-        recipes.append(
-            family_recipe.TensorRecipe(
-                object_prefix + "input_norm",
-                family_recipe.source(
-                    source_prefix + "input_layernorm.weight", (5120,)
-                ),
-            )
-        )
-        if layer in inventory.FULL_ATTENTION_LAYERS:
-            recipes.extend(
-                (
-                    family_recipe.TensorRecipe(
-                        object_prefix + "attention/query_norm",
-                        family_recipe.source(
-                            source_prefix + "self_attn.q_norm.weight", (256,)
-                        ),
-                    ),
-                    family_recipe.TensorRecipe(
-                        object_prefix + "attention/key_norm",
-                        family_recipe.source(
-                            source_prefix + "self_attn.k_norm.weight", (256,)
-                        ),
-                    ),
-                )
-            )
-        else:
-            convolution = family_recipe.source(
-                source_prefix + "linear_attn.conv1d.weight", (10240, 1, 4)
-            )
-            recipes.extend(
-                (
-                    family_recipe.TensorRecipe(
-                        object_prefix + "gdn/a_log",
-                        family_recipe.Cast(
-                            family_recipe.source(
-                                source_prefix + "linear_attn.A_log", (48,)
-                            ),
-                            inventory.FP32,
-                        ),
-                    ),
-                    family_recipe.TensorRecipe(
-                        object_prefix + "gdn/dt_bias",
-                        family_recipe.Cast(
-                            family_recipe.source(
-                                source_prefix + "linear_attn.dt_bias", (48,)
-                            ),
-                            inventory.FP32,
-                        ),
-                    ),
-                    family_recipe.TensorRecipe(
-                        object_prefix + "gdn/convolution",
-                        family_recipe.Transpose(
-                            family_recipe.Reshape(
-                                family_recipe.Slice(convolution, 1, 0, 1),
-                                (10240, 4),
-                            ),
-                            (1, 0),
-                        ),
-                    ),
-                    family_recipe.TensorRecipe(
-                        object_prefix + "gdn/a_b_projection",
-                        family_recipe.Concat(
-                            (
-                                family_recipe.source(
-                                    source_prefix
-                                    + "linear_attn.in_proj_a.weight",
-                                    (48, 5120),
-                                ),
-                                family_recipe.source(
-                                    source_prefix
-                                    + "linear_attn.in_proj_b.weight",
-                                    (48, 5120),
-                                ),
-                            ),
-                            0,
-                        ),
-                    ),
-                    family_recipe.TensorRecipe(
-                        object_prefix + "gdn/norm",
-                        family_recipe.source(
-                            source_prefix + "linear_attn.norm.weight", (128,)
-                        ),
-                    ),
-                )
-            )
-        recipes.append(
-            family_recipe.TensorRecipe(
-                object_prefix + "post_attention_norm",
-                family_recipe.source(
-                    source_prefix + "post_attention_layernorm.weight", (5120,)
-                ),
-            )
-        )
-    recipes.append(
-        family_recipe.TensorRecipe(
-            "text/final_norm",
-            family_recipe.source("model.language_model.norm.weight", (5120,)),
-        )
-    )
-    return tuple(recipes)
-
-
 (
     FP8_WEIGHT_RECIPES,
     NVFP4_WEIGHT_RECIPES,
     INPUT_DIVISOR_RECIPES,
     WEIGHT_DIVISOR_GROUPS,
-) = _build_quantized_matrix_recipes()
+) = build_matrix_recipes(inventory.NVFP4_MLP_LAYERS)
 FP8_WEIGHTS_BY_NAME = {item.object_name: item for item in FP8_WEIGHT_RECIPES}
 NVFP4_WEIGHTS_BY_NAME = {
     item.object_name: item for item in NVFP4_WEIGHT_RECIPES
@@ -354,7 +52,7 @@ NVFP4_SOURCES = tuple(
     )
 )
 
-QUANTIZED_DIRECT_RECIPES = _build_quantized_direct_recipes()
+QUANTIZED_DIRECT_RECIPES = build_direct_recipes()
 QUANTIZED_DIRECT_BY_NAME = {
     item.object_name: item for item in QUANTIZED_DIRECT_RECIPES
 }
@@ -605,16 +303,6 @@ def _same_divisor(
     return words[0]
 
 
-def _select_rows(tensor: torch.Tensor, part: MatrixPart) -> torch.Tensor:
-    pieces = [
-        tensor.narrow(0, row_range.begin, row_range.rows)
-        for row_range in part.rows
-    ]
-    if len(pieces) == 1:
-        return pieces[0]
-    return torch.cat(pieces, dim=0)
-
-
 def materialize_fp8_weight(
     recipe: Fp8WeightRecipe,
     reader: ShardReader,
@@ -640,8 +328,8 @@ def materialize_fp8_weight(
                 )
             words = (source_codes.view(torch.uint8), source_scales)
             source_words[part.source] = words
-        code_parts.append(_select_rows(words[0], part))
-        scale_parts.append(_select_rows(words[1], part))
+        code_parts.append(select_rows(words[0], part))
+        scale_parts.append(select_rows(words[1], part))
     codes = (
         code_parts[0].contiguous()
         if len(code_parts) == 1
@@ -683,8 +371,8 @@ def materialize_nvfp4_weight(
                 )
             words = (source_packed, source_scales.view(torch.uint8))
             source_words[part.source] = words
-        packed_parts.append(_select_rows(words[0], part))
-        scale_parts.append(_select_rows(words[1], part))
+        packed_parts.append(select_rows(words[0], part))
+        scale_parts.append(select_rows(words[1], part))
     packed = (
         packed_parts[0].contiguous()
         if len(packed_parts) == 1
@@ -696,7 +384,7 @@ def materialize_nvfp4_weight(
         else torch.cat(scale_parts, dim=0)
     )
     divisor = _same_divisor(
-        reader, recipe.divisor_sources, "weight_global_scale"
+        reader, recipe.scalar_sources, "weight_global_scale"
     )
     if tuple(packed.shape) != (recipe.shape[0], recipe.shape[1] // 2) or tuple(
         scales.shape
@@ -708,7 +396,7 @@ def materialize_nvfp4_weight(
 
 
 def materialize_input_divisor(
-    recipe: InputDivisorRecipe,
+    recipe: InputScaleRecipe,
     reader: ShardReader,
 ) -> torch.Tensor:
     word = _same_divisor(reader, recipe.sources, "input_global_scale")

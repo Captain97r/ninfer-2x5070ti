@@ -60,6 +60,7 @@ pack_nvfp4_e2m1x16(const float2 (&values)[8], std::uint32_t& codes_lo, std::uint
                    "f"(values[6].x), "f"(values[6].y), "f"(values[7].x), "f"(values[7].y));
 }
 
+template <bool ScaleMultiplier = false>
 __device__ __forceinline__ Nvfp4QuantizedK16 quantize_nvfp4_k16(const __nv_bfloat16* source,
                                                                 float input_scale_divisor) {
     const uint4 packed0                = load_vec<uint4>(source);
@@ -78,15 +79,23 @@ __device__ __forceinline__ Nvfp4QuantizedK16 quantize_nvfp4_k16(const __nv_bfloa
     }
 
     Nvfp4QuantizedK16 result{};
-    const float scale_unencoded = __fdiv_rn(input_scale_divisor * max_abs, 6.0F);
+    const float scale_unencoded = ScaleMultiplier
+        ? __fdiv_rn(max_abs, 6.0F * input_scale_divisor)
+        : __fdiv_rn(input_scale_divisor * max_abs, 6.0F);
     result.scale                = __nv_cvt_float_to_fp8(scale_unencoded, __NV_SATFINITE, __NV_E4M3);
     if (result.scale == 0) { return result; }
 
     const float decoded_scale = decode_nvfp4_e4m3(result.scale);
 #pragma unroll
     for (int pair = 0; pair < 8; ++pair) {
-        values[pair].x = __fdiv_rn(values[pair].x * input_scale_divisor, decoded_scale);
-        values[pair].y = __fdiv_rn(values[pair].y * input_scale_divisor, decoded_scale);
+        if constexpr (ScaleMultiplier) {
+            const float multiplier = decoded_scale * input_scale_divisor;
+            values[pair].x = __fdiv_rn(values[pair].x, multiplier);
+            values[pair].y = __fdiv_rn(values[pair].y, multiplier);
+        } else {
+            values[pair].x = __fdiv_rn(values[pair].x * input_scale_divisor, decoded_scale);
+            values[pair].y = __fdiv_rn(values[pair].y * input_scale_divisor, decoded_scale);
+        }
     }
     pack_nvfp4_e2m1x16(values, result.codes_lo, result.codes_hi);
     return result;

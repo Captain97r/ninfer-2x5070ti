@@ -64,6 +64,45 @@ Its MTP weights and tokenizer are embedded. [config/model.json](config/model.jso
 records the exact compatible revision, size and SHA-256. Current upstream **v3**
 artifacts and GGUF files cannot be substituted for this v2 artifact.
 
+## NVIDIA ModelOpt checkpoint
+
+A separate `qwen3.8-27b` / `nvfp4-modelopt` identity imports the
+[NVIDIA checkpoint at the pinned revision](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/tree/482ca0f3832238542f8f5295dde86b5f22711d80).
+It preserves the packed text weight codes, their original FP32 calibration and
+scale values, and the original BF16 embedding. Packed text projections use calibrated
+W4A4 or W8A8 at every token count, including decode. This profile uses the native
+Windows TP2, MTP and vision paths. Independent FP64 operator checks and real TP2
+prefix/CUDA Graph checks pass. The original artifact still matches all 18 saved
+quality responses. The NVIDIA profile scores 15/18 on the small quality screen,
+versus 16/18 for the original: one additional typed Unicode tool-call failure
+occurs both with and without MTP. This screen does not establish broad model quality.
+
+Convert the downloaded source directory on CPU with Python 3.11, PyTorch, NumPy
+and safetensors installed (a CPU PyTorch build is sufficient):
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b.convert_modelopt --model "C:/LLM/nvidia/Qwen3.8-27B-NVFP4" --out "C:/LLM/nvidia/Qwen3.8-27B-NVFP4/qwen3_8_27b_nvfp4_modelopt.ninfer" --device cpu
+```
+
+On Windows, `py -3.11` can replace `python3.11`. Then select the converted artifact
+explicitly, with the tested 102,400-token INT8 context:
+
+```powershell
+.\tools\run_windows.ps1 -Mode Server -Context 102400 -ModelPath 'C:\LLM\nvidia\Qwen3.8-27B-NVFP4\qwen3_8_27b_nvfp4_modelopt.ninfer'
+```
+
+The MTP and vision tensors use the existing registered encoders applied to this
+checkpoint's BF16 tensors. This conversion therefore does not establish numerical
+identity with NVIDIA's complete reference engine or reproduce its benchmark
+results. The existing v2 artifact remains the launcher's default; its measured
+capacity and performance do not transfer to this new profile automatically.
+At 102,400 tokens, both near-limit retrieval tasks, generation to the context
+boundary, and post-session recovery pass. Short image requests also pass at this
+allocation; a full multimodal history has not been qualified. See the
+[local measurements](docs/performance.md#local-nvidia-modelopt-profile) and
+[validation evidence](diagnostics/nvidia-modelopt-validation.json). Refresh OMP
+model discovery after switching, so it reads the new context limit.
+
 ## Image input
 
 Vision is enabled by the Windows launcher in both server and CLI modes. The pinned

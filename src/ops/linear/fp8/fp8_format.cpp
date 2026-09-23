@@ -1,5 +1,6 @@
 #include "ops/linear/fp8/fp8_format.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -39,23 +40,28 @@ Fp8WeightGeometry validate_fp8_weight(const Weight& weight, const char* operatio
         throw std::invalid_argument(std::string(operation) + ": FP8 shape must be positive");
     }
 
+    const bool f32_scales = weight.qtype == QType::FP8_E4M3FN_ROW_F32S;
+    const std::uint64_t scale_bytes = f32_scales ? sizeof(float) : sizeof(std::uint16_t);
     Fp8WeightGeometry geometry{};
     geometry.code_plane_bytes   = checked_mul(static_cast<std::uint64_t>(weight.n),
                                               static_cast<std::uint64_t>(weight.k), operation);
     geometry.scale_plane_offset = align_up(geometry.code_plane_bytes, 256, operation);
-    geometry.scale_plane_bytes  = checked_mul(static_cast<std::uint64_t>(weight.n), 2, operation);
+    geometry.scale_plane_bytes  = checked_mul(static_cast<std::uint64_t>(weight.n), scale_bytes, operation);
     geometry.required_payload_bytes =
         checked_add(geometry.scale_plane_offset, geometry.scale_plane_bytes, operation);
 
-    const std::int64_t scale_stride = static_cast<std::int64_t>(weight.n) * 2;
-    if (weight.qtype != QType::FP8_E4M3FN_ROW_BF16S || weight.layout != QuantLayout::RowScale ||
-        weight.scale_dtype != DType::BF16 ||
+    const std::int64_t scale_stride = static_cast<std::int64_t>(weight.n) * scale_bytes;
+    if ((!f32_scales && weight.qtype != QType::FP8_E4M3FN_ROW_BF16S) ||
+        weight.layout != (f32_scales ? QuantLayout::RowScaleF32 : QuantLayout::RowScale) ||
+        weight.scale_dtype != (f32_scales ? DType::FP32 : DType::BF16) ||
+        (f32_scales && (!std::isfinite(weight.input_scale_multiplier) ||
+                        weight.input_scale_multiplier <= 0.0F)) ||
         weight.group_size != static_cast<std::uint32_t>(weight.k) || weight.group != weight.k ||
         weight.ndim != 2 || weight.shape[0] != weight.n || weight.shape[1] != weight.k ||
         weight.shape[2] != 1 || weight.shape[3] != 1 || weight.padded_shape[0] != weight.n ||
         weight.padded_shape[1] != weight.k || weight.padded_shape[2] != 1 ||
         weight.padded_shape[3] != 1 || weight.scale_ne[0] != weight.n || weight.scale_ne[1] != 1 ||
-        weight.scale_ne[2] != 1 || weight.scale_ne[3] != 1 || weight.scale_nb[0] != 2 ||
+        weight.scale_ne[2] != 1 || weight.scale_ne[3] != 1 || weight.scale_nb[0] != static_cast<std::int64_t>(scale_bytes) ||
         weight.scale_nb[1] != scale_stride || weight.scale_nb[2] != scale_stride ||
         weight.scale_nb[3] != scale_stride || weight.payload == nullptr ||
         weight.qdata == nullptr || weight.scales == nullptr || weight.qhigh != nullptr ||

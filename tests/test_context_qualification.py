@@ -12,6 +12,35 @@ from tools.bench import run_serve_corpus as corpus
 
 
 class ContextQualificationTests(unittest.TestCase):
+    def test_records_preserve_both_admitted_server_profiles(self):
+        preset = {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0,
+                  "presence_penalty": 1.5, "frequency_penalty": 0.0}
+        case = {"name": "post-session-health", "kind": "json", "expected_prompt_tokens": 100,
+                "expected": {"kind": "json", "value": {"status": "ok"}},
+                "payload": qualify.greedy_payload("qwen3.8-27b", "instruction", "question", 128)}
+        response = {"choices": [{"message": {"content": '{"status":"ok"}'}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 5}}
+        event = {"artifact_type": corpus.SERVER_LOG_ARTIFACT_TYPE,
+                 "schema_version": corpus.SERVER_LOG_SCHEMA_VERSION, "event": "request_done",
+                 "request": {"model": "qwen3.8-27b", "requested_output_tokens": 128,
+                             "enable_thinking": False,
+                             "sampling": {**preset, "temperature": 0, "seed": qualify.SEED}},
+                 "result": {"prompt_tokens": 100, "completion_tokens": 5, "computed_prefill_tokens": 100,
+                            "prefix_cache_hit_tokens": 0, "finish_reason": "stop_token", "tool_call_count": 0},
+                 "timings_seconds": {"prepare": 0.1, "vision": 0, "prefill": 2, "decode": 1,
+                                     "total": 3.1, "ttft": 2.2},
+                 "speculative": {"backend": "mtp", "rounds": 2, "drafted_tokens": 6,
+                                 "accepted_tokens": 2, "fallback_steps": 0}}
+        for weights_id in ("nvfp4", "nvfp4-modelopt"):
+            start = {"artifact": {"target": "qwen3_8_27b", "weights_id": weights_id}}
+            qualify.comparison.validate_artifact_identity(start)
+            with self.subTest(weights_id=weights_id):
+                record = qualify.assess(case, response, event, 102400, preset, Path("model.ninfer"),
+                                        weights_id=start["artifact"]["weights_id"])
+                self.assertEqual(record["weights_id"], weights_id)
+                self.assertTrue(record["validated"])
+                self.assertTrue(record["task_passed"])
+
     def test_ledger_oracle_matches_three_distinct_record_depths_and_absent_control(self):
         for name in ("retrieve-three", "absent-key"):
             case = qualify.ledger_case("qwen3.8-27b", name, 401)

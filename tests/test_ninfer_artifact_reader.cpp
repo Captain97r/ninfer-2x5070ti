@@ -173,6 +173,48 @@ void test_normative_fixture() {
     }
 }
 
+void test_multiplier_formats() {
+    const Json directory = {
+        {"identity", {{"model_id", "fixture-model"}, {"weights_id", "multiplier-formats"}}},
+        {"objects", Json::array({
+                        {{"name", "nv4"},
+                         {"kind", "tensor"},
+                         {"shape", {128, 64}},
+                         {"format", "NVFP4_F32M"},
+                         {"layout", "blockscale-k16-m128x4-multiplier-v1"},
+                         {"offset", 0},
+                         {"bytes", 4612}},
+                        {{"name", "fp8"},
+                         {"kind", "tensor"},
+                         {"shape", {3, 9}},
+                         {"format", "FP8_E4M3FN_ROW_F32S"},
+                         {"layout", "row-scale-f32-v1"},
+                         {"offset", 4864},
+                         {"bytes", 268}},
+                    })},
+    };
+    auto fixture = write_fixture(directory, "multiplier_formats");
+    Reader reader(fixture.path);
+    const auto& nv4 = std::get<TensorDescriptor>(*reader.find("nv4"));
+    const auto& fp8 = std::get<TensorDescriptor>(*reader.find("fp8"));
+    if (nv4.format != NumericFormat::NVFP4_F32M ||
+        nv4.layout != StorageLayout::BlockScaleK16M128x4MultiplierV1 ||
+        fp8.format != NumericFormat::FP8_E4M3FN_ROW_F32S ||
+        fp8.layout != StorageLayout::RowScaleF32V1 ||
+        ninfer::artifact::format_name(nv4.format) != "NVFP4_F32M" ||
+        ninfer::artifact::layout_name(fp8.layout) != "row-scale-f32-v1") {
+        throw std::runtime_error("multiplier format descriptor mismatch");
+    }
+    // Identical byte counts must not let multiplier payloads be interpreted as divisors.
+    for (int index : {0, 1}) {
+        auto wrong = directory;
+        wrong["objects"][index]["layout"] =
+            index == 0 ? "blockscale-k16-m128x4-v1" : "row-scale-v1";
+        auto invalid = write_fixture(wrong, "multiplier_layout_mismatch");
+        expect_artifact_error([&] { Reader rejected(invalid.path); }, "multiplier layout mismatch");
+    }
+}
+
 void test_common_validation() {
     {
         auto directory                   = normative_directory();
@@ -211,6 +253,7 @@ int main() {
         test_registered_sizes();
         test_normative_fixture();
         test_common_validation();
+        test_multiplier_formats();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

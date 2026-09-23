@@ -50,15 +50,22 @@ Nvfp4WeightGeometry validate_nvfp4_weight(const Weight& weight, const char* oper
         checked_add(checked_add(geometry.scale_plane_offset, geometry.scale_plane_bytes, operation),
                     sizeof(float), operation);
 
-    if (weight.qtype != QType::NVFP4 || weight.layout != QuantLayout::BlockScaleK16M128x4 ||
+    const bool multiplier_format = weight.qtype == QType::NVFP4_F32M;
+    const bool legacy_format = weight.qtype == QType::NVFP4;
+    const bool layout_matches = multiplier_format
+        ? weight.layout == QuantLayout::BlockScaleK16M128x4Multiplier
+        : weight.layout == QuantLayout::BlockScaleK16M128x4;
+    const float weight_scale = multiplier_format ? weight.weight_scale_multiplier : weight.weight_scale_divisor;
+    const float input_scale = multiplier_format ? weight.input_scale_multiplier : weight.input_scale_divisor;
+    if ((!legacy_format && !multiplier_format) || !layout_matches ||
         weight.scale_dtype != DType::FP8_E4M3FN || weight.group_size != 16 || weight.group != 16 ||
         weight.ndim != 2 || weight.shape[0] != weight.n || weight.shape[1] != weight.k ||
         weight.padded_shape[0] != weight.n || weight.padded_shape[1] != weight.k ||
         weight.payload == nullptr || weight.qdata == nullptr || weight.scales == nullptr ||
         weight.qhigh != nullptr || weight.high_plane_bytes != 0 ||
         weight.payload_bytes < geometry.required_payload_bytes ||
-        !std::isfinite(weight.weight_scale_divisor) || weight.weight_scale_divisor <= 0.0F ||
-        !std::isfinite(weight.input_scale_divisor) || weight.input_scale_divisor <= 0.0F ||
+        !std::isfinite(weight_scale) || weight_scale <= 0.0F ||
+        !std::isfinite(input_scale) || input_scale <= 0.0F ||
         !aligned_to(weight.qdata, 16) || !aligned_to(weight.scales, 16)) {
         throw std::invalid_argument(std::string(operation) + ": invalid NVFP4 weight");
     }

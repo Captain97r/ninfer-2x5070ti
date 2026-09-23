@@ -93,9 +93,7 @@ def validate_start(event, context):
     if any(event.get("server", {}).get(key) != value for key, value in {
             "host": HOST, "port": PORT, "public_model_id": "qwen3.8-27b"}.items()):
         raise corpus.CampaignError("unexpected endpoint/model")
-    if any(event.get("artifact", {}).get(key) != value for key, value in {
-            "target": "qwen3_8_27b", "weights_id": "nvfp4"}.items()):
-        raise corpus.CampaignError("expected the registered Qwen3.8 NVFP4 artifact")
+    comparison.validate_artifact_identity(event)
     defaults = event.get("sampling_defaults", {})
     preset, overrides = defaults.get("non_thinking", {}), defaults.get("server_overrides", {})
     if (defaults.get("greedy") is not False or set(preset) != set(comparison.SAMPLING_FIELDS)
@@ -220,7 +218,7 @@ def calibrate(model, workload, body, manifest, target, cap, counter=count_payloa
             "payload": make_payload(model, workload, body[:low], cap)}
 
 
-def checked_record(case, weights, response, event, preset):
+def checked_record(case, weights, response, event, preset, *, weights_id):
     payload = case["payload"]
     fixture = corpus.Fixture(case["name"], payload["messages"], False,
                              payload["max_completion_tokens"], "context-sweep", case["workload"])
@@ -267,7 +265,7 @@ def checked_record(case, weights, response, event, preset):
             or comparison.nonnegative_int(result.get("tool_call_count"), "tool_call_count") != 0
             or answer["tool_calls"]):
         raise corpus.CampaignError("unexpected or inconsistent finish/tool output")
-    record = corpus.build_result_record(spec, "nvfp4", payload, response, event)
+    record = corpus.build_result_record(spec, weights_id, payload, response, event)
     record["metrics"].update({"computed_prefill_tokens": prompt, "prefix_cache_hit_tokens": 0,
                               "server_ttft_ms": 1000 * timings["ttft"],
                               "server_finish_reason": engine_finish, "finish_reason": wire_finish,
@@ -507,6 +505,7 @@ def execute(args, command, output, sources, report, weights):
                 start = server.wait_until_ready()
                 report["server_start"] = start
                 preset = validate_start(start, args.context)
+                weights_id = start["artifact"]["weights_id"]
                 report["cim"].append(cim_snapshot(server.process.pid, "server-ready"))
                 models = read_json("/v1/models").get("data", [])
                 if len(models) != 1 or models[0].get("id") != "qwen3.8-27b":
@@ -549,7 +548,7 @@ def execute(args, command, output, sources, report, weights):
                             response = read_json("/v1/chat/completions", case["payload"])
                             wall = time.monotonic() - before
                             request_start, done = correlate(server, start["server_instance_id"], index)
-                            record = checked_record(case, weights, response, done, preset)
+                            record = checked_record(case, weights, response, done, preset, weights_id=weights_id)
                             record.update({"phase": case["phase"], "http_wall_seconds": wall,
                                            "target_prompt_tokens": case["target_prompt_tokens"],
                                            "http_start_unix_ms": started_ms})

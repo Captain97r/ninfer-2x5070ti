@@ -22,6 +22,10 @@ Nvfp4LinearRoute resolve_route(std::int32_t output_rows, std::int32_t input_rows
     if (tokens <= 0 || !is_nvfp4_linear_problem(output_rows, input_rows)) {
         throw std::invalid_argument("nvfp4 linear: unsupported shape");
     }
+    if (policy == LinearPolicy::CalibratedA4) { return Nvfp4LinearRoute::W4A4; }
+    if (output_rows == 248320 || output_rows == 124160 || output_rows == 131072 || output_rows == 65536) {
+        throw std::invalid_argument("NVFP4 vocabulary projection requires calibrated A4");
+    }
     if (policy == LinearPolicy::A16Only) { return Nvfp4LinearRoute::A16; }
     if (policy != LinearPolicy::AllowA4) {
         throw std::invalid_argument("nvfp4 linear: unsupported policy");

@@ -172,7 +172,7 @@ def boundary_outcome(prompt, completion, context, engine_finish):
     return result
 
 
-def assess(case, response, event, context, preset, weights):
+def assess(case, response, event, context, preset, weights, *, weights_id):
     payload = case["payload"]
     result, usage = event.get("result", {}), response.get("usage", {})
     for key in ("prompt_tokens", "completion_tokens"):
@@ -195,7 +195,7 @@ def assess(case, response, event, context, preset, weights):
     fixture = corpus.Fixture(case["name"], payload["messages"], False, payload["max_completion_tokens"],
                              "context-qualification", case["kind"])
     spec = corpus.RunSpec("qwen3_8_27b", payload["model"], weights, "mtp3", "mtp", 3, "greedy", fixture, SEED)
-    record = corpus.build_result_record(spec, "nvfp4", payload, response, event)
+    record = corpus.build_result_record(spec, weights_id, payload, response, event)
     record["observable"] = answer
     record["metrics"].update(server_finish_reason=engine_finish, finish_reason=mapped,
                               server_ttft_ms=1000 * event["timings_seconds"]["ttft"])
@@ -263,6 +263,7 @@ def execute(args, binary, weights, output, report):
             server.tail = corpus.ServerLogTail(server.log_path, server.process, 0)
             start = server.wait_until_ready()
             preset = sweep.validate_start(start, args.context)
+            weights_id = start["artifact"]["weights_id"]
             report.update(server_start=start, sampling=preset)
             models = sweep.read_json("/v1/models").get("data", [])
             if len(models) != 1 or models[0].get("id") != "qwen3.8-27b":
@@ -286,7 +287,8 @@ def execute(args, binary, weights, output, report):
                     try:
                         response = sweep.read_json("/v1/chat/completions", case["payload"])
                         _, event = sweep.correlate(server, start["server_instance_id"], index)
-                        record = assess(case, response, event, args.context, preset, weights)
+                        record = assess(case, response, event, args.context, preset, weights,
+                                        weights_id=weights_id)
                     except (Exception, KeyboardInterrupt) as error:
                         record = {"fixture": case["name"], "request": case["payload"], "response": response,
                                   "server_event": event, "validated": False, "error": str(error),

@@ -57,10 +57,19 @@ void gdn_input_proj(const Tensor& x, const Weight& qk_weight, const Weight& valu
  * quantization at every positive T. FP8 admits A16Only and AllowA8 at every positive T; AllowA8
  * selects A16 through T=7 and private activation quantization followed by A8 Tensor Core
  * contraction at every T>=8. Every route writes the two independent final allocations directly.
- * The complete projection is evaluated against the same exact-decode/naive-FP64 oracle;
- * activation quantization and the production reduction profile are private effects covered by the
- * selected criterion. x, both persistent weight planes, qkv, z, and the live workspace must be
+ * The complete projection is evaluated against an exact-decode/naive-FP64 oracle. Activation
+ * quantization is private for legacy policies; CalibratedA8 instead uses Linear's independently
+ * evaluated E4M3 quantize/dequantize result A in each dot. The production reduction profile
+ * remains a private effect covered by the selected criterion. x, both persistent weight planes, qkv, z, and the live workspace must be
  * mutually non-overlapping.
+ *
+ * FP8_E4M3FN_ROW_F32S / RowScaleF32 registers the same parent and TP2 section shapes with
+ * CalibratedA8 only. Linear's specified fixed activation codec and exact FP32 row multipliers
+ * apply at every T, including T=1. Fused Q/K/V/Z weights require a common original input
+ * calibration across their source projections. The oracle evaluates that codec independently
+ * before FP64 projection; row weight multipliers are not combined or rounded to BF16.
+ * The calibrated snapshot/record forms use the same projection followed by the existing
+ * convolution/state contract, with caller-owned projected and quantized-activation workspace.
  *
  * The policy-bearing form uses caller-owned call-scoped transient storage sized by
  * gdn_input_proj_workspace_capacity_bytes(). A16 requires zero bytes. The convenience overload
@@ -147,7 +156,9 @@ void gdn_input_proj_conv_snapshot(const Tensor& x, const Weight& qk_weight,
  * Single-parent form of gdn_input_proj_conv_snapshot. Registered parents are W8G32_F16S RowSplit
  * [12288,2048], NVFP4 BlockScaleK16M128x4 [16384,5120], and FP8_E4M3FN_ROW_BF16S RowScale
  * [16384,5120], all in q/k/value/z row order. W8 admits A16Only, NVFP4 admits A16Only/AllowA4,
- * and FP8 admits A16Only/AllowA8. B=1 accepts every positive W for FP8; the batched domain is
+ * and legacy FP8 admits A16Only/AllowA8. FP8_E4M3FN_ROW_F32S uses CalibratedA8 and the same
+ * shapes/state transitions with its required activation codec. B=1 accepts every positive W
+ * for FP8; the batched domain is
  * B=2..8 and W=1..16. For FP8 B=1, A16 is fused at W=1..3 and W=7..10 and materialized
  * otherwise; AllowA8 uses the same winners through W=9 and A8 from W=10. Batched AllowA8 uses A8
  * when B*W>=9. Tensor operands, the complete FP8 parent, and live workspace must be mutually

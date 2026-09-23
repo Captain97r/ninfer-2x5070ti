@@ -36,7 +36,8 @@ Fp8GdnProjectedWorkspace allocate_projected(Allocator& allocator, std::int32_t c
 }
 
 void require_policy(LinearPolicy policy, const char* operation) {
-    if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+    if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+        policy != LinearPolicy::CalibratedA8) {
         throw std::invalid_argument(std::string(operation) + " admits only A16 or A8");
     }
 }
@@ -84,6 +85,9 @@ Fp8GdnConvPlan fp8_gdn_snapshot_resolve_plan(LinearPolicy policy, std::int32_t w
     if (width <= 0 || batch_size <= 0 || batch_size > 8 || (batch_size > 1 && width > 16)) {
         throw std::invalid_argument("fp8 GDN snapshot: invalid B/W domain");
     }
+    if (policy == LinearPolicy::CalibratedA8) {
+        return {Fp8GdnConvScheduleId::MaterializedA8};
+    }
     if (batch_size == 1) {
         if (policy == LinearPolicy::AllowA8 && width >= 10) {
             return {Fp8GdnConvScheduleId::MaterializedA8};
@@ -101,6 +105,9 @@ Fp8GdnConvPlan fp8_gdn_record_resolve_plan(LinearPolicy policy, std::int32_t wid
     require_policy(policy, "fp8 GDN record");
     if (width < 2 || width > 16 || batch_size <= 0 || batch_size > 8) {
         throw std::invalid_argument("fp8 GDN record: invalid B/W domain");
+    }
+    if (policy == LinearPolicy::CalibratedA8) {
+        return {Fp8GdnConvScheduleId::MaterializedA8};
     }
     if (batch_size == 1) {
         if (policy == LinearPolicy::AllowA8 && width >= 10) {

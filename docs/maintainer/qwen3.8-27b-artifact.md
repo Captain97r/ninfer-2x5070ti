@@ -3,7 +3,7 @@
 This reference defines the `qwen3.8-27b/nvfp4` `.ninfer` storage contract: identity, object
 inventory, shapes, numeric formats, storage layouts, fused row order, aliases, fixed sources, and
 source-to-object transforms. The existing registered `qwen3.8-27b/groupwise-int` contract remains
-defined in Section 13.
+defined in Section 13. The independent NVIDIA ModelOpt profile is defined in Section 14.
 
 The NVFP4 profile is a registered Engine identity implemented by the target converter, exact
 binder, and Qwen3.8 execution leaves. The generic artifact registry resolves its version-2
@@ -751,3 +751,107 @@ python3 -m tools.convert.qwen3_8_27b.convert \
 The converter validates the official checkpoint, frontend resources, complete object plan, and
 numeric recipes before opening the output, then writes the sibling
 `qwen3_8_27b.ninfer.conversion.json` report.
+
+
+## 14. NVIDIA ModelOpt artifact
+
+The separate registered identity imports
+[NVIDIA's Qwen3.8-27B-NVFP4 checkpoint](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/tree/482ca0f3832238542f8f5295dde86b5f22711d80)
+at revision `482ca0f3832238542f8f5295dde86b5f22711d80`:
+
+```text
+filename   = qwen3_8_27b_nvfp4_modelopt.ninfer
+model_id   = qwen3.8-27b
+weights_id = nvfp4-modelopt
+target_key = qwen3_8_27b
+recipe_id  = qwen3_8_27b_nvfp4_modelopt-v1
+```
+
+This is a peer storage contract, not an alias for `nvfp4`. The previous identities and their
+numerical assignments remain unchanged. The new converter uses only the NVIDIA checkpoint;
+it does not require a second BF16 checkpoint.
+
+### 14.1 Source-word preservation and inventory
+
+| Role | Source and persistent representation |
+|---|---|
+| token embedding | preserve original BF16 words in `contiguous-le-v1` |
+| all full-attention/GDN input and output projections | preserve E4M3FN code words and original FP32 weight multiplier as `FP8_E4M3FN_ROW_F32S` |
+| MLP gate/up and down, all 64 layers | preserve packed E2M1 words, E4M3FN block scales and original FP32 global multiplier as `NVFP4_F32M` |
+| full output head | preserve NVIDIA's `[248320,5120]` NVFP4 matrix |
+| draft head | select exact packed rows/scales from that full head in the registered `131072`-ID shortlist order |
+| input calibration | preserve each original scalar FP32 multiplier as a separate role object |
+| direct norms/GDN controls | existing direct transforms: preserve BF16, or exact BF16-to-FP32 expansion where specified |
+| MTP and Vision | existing registered groupwise encoders from NVIDIA's BF16 tensors |
+
+FP8 fusion retains each constituent's own multiplier by repeating its exact FP32 word over its
+output rows. Query/gate deinterleaving, attention `[Q,K,G,V]` order, GDN `[Q,K,V,Z]` order and
+gate/up concatenation follow the row geometry already documented above. No FP8 row scale is
+rounded to BF16. NVFP4 scale swizzling changes byte positions only; global multipliers are never
+inverted or rounded into the older divisor format.
+
+Each fused gate/up matrix requires bit-identical source `weight_scale_2` words and
+`input_scale` words. Fused attention Q/K/V and GDN qkv/z require bit-identical input scale
+words; their weight multipliers may differ. The fixed importer rejects mismatches instead of
+averaging or silently recalibrating. Scalar objects have shape `[]` and these role suffixes:
+
+- `attention/input_projection/input_scale_multiplier` and `attention/output_projection/input_scale_multiplier`;
+- `gdn/input_projection/input_scale_multiplier` and `gdn/output_projection/input_scale_multiplier`;
+- `mlp/gate_up_projection/input_scale_multiplier` and `mlp/down_projection/input_scale_multiplier`;
+- `text/output_head/input_scale_multiplier` and `text/draft_head/input_scale_multiplier`.
+
+Layer-local suffixes follow `text/layers/{l}/`. There are 258 scalar input objects. The complete
+artifact contains 1264 tensors and six resources: 916 Text-core tensors, three draft-head tensors,
+12 MTP tensors and 333 Vision tensors. Its format counts are:
+
+| Format | Tensors |
+|---|---:|
+| `BF16` | 535 |
+| `FP32` | 354 |
+| `I32` | 1 |
+| `NVFP4_F32M` | 130 |
+| `FP8_E4M3FN_ROW_F32S` | 128 |
+| `Q4G64_F16S` | 54 |
+| `Q5G64_F16S` | 54 |
+| `Q6G64_F16S` | 1 |
+| `W8G32_F16S` | 7 |
+
+The ordered inventory is `tools/convert/qwen3_8_27b/inventory_modelopt.py`. The exact weight
+formulas and layouts are defined in Sections 3.5 of [tensor formats](tensor-formats.md) and
+4.1/5.1 of [storage layouts](storage-layouts.md).
+
+### 14.2 Frontend and conversion
+
+NVIDIA's vocabulary, added tokens, chat template and media configurations match the registered
+frontend. Its reduced tokenizer metadata and generation metadata differ. The dedicated adapter
+reconstructs the canonical tokenizer metadata from those identical source tokens/template,
+including `add_bos_token=false`, the registered pad token and the added-token decoder. It removes
+only export-version metadata from generation configuration and preserves generation semantics.
+The final six resource hashes must match the registered Qwen3.8 frontend exactly. Original source
+files remain untouched; the conversion report names the two normalized metadata resources.
+
+The shortlist uses the existing frozen frequency ranking and all 21 canonical special IDs.
+Draft weights retain source NVFP4 rows exactly, including original block/global scales. This
+preserves the draft-to-target row mapping; it does not assert that the approximate MTP proposer
+or private activation arithmetic reproduces the source framework bit for bit.
+
+```bash
+python3 -m tools.convert.qwen3_8_27b.convert_modelopt \
+  --model /path/to/nvidia/Qwen3.8-27B-NVFP4 \
+  --out /path/to/models/qwen3_8_27b_nvfp4_modelopt.ninfer \
+  --device cpu
+```
+
+Before opening the output, the converter validates the fixed configuration, all 2194 source
+tensor signatures (798 BF16, 401 E4M3FN, 193 packed U8, 802 scalar FP32), all calibration words,
+fusion equalities, canonical resources, shortlist and object plan. BF16 embedding output streams
+in bounded chunks; draft selection never materializes a dense FP32 head. The artifact is written
+directly to the selected filename, and the sibling `.conversion.json` is emitted only after the
+complete writer succeeds. An interrupted partial output is not a usable artifact.
+
+CPU qualification covers independent exact physical-plane indexing, finite code/scale admission,
+FP32 word preservation, complete small-matrix decode, fused row order, shortlist selection and
+source rejection. A completed local import also checks representative real attention/GDN/MLP,
+full/draft-head and embedding rows against the source. These checks establish conversion
+fidelity. They do not establish full-framework numerical parity, model quality or throughput;
+those require the corresponding execution-level evidence.

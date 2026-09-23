@@ -15,7 +15,7 @@ constexpr std::uint64_t kKAlignment      = 128;
 constexpr std::uint64_t kNvfp4RowTile      = 128; // rows per scale-plane tile row
 constexpr std::uint64_t kNvfp4TileColumns  = 64;  // logical columns per scale tile (4 groups of 16)
 constexpr std::uint64_t kNvfp4TileBytes    = 512; // 128 rows x 4 lanes of one scale tile
-constexpr std::uint64_t kNvfp4DivisorBytes = 4;
+constexpr std::uint64_t kNvfp4GlobalScaleBytes = 4;
 
 std::uint64_t checked_add(std::uint64_t a, std::uint64_t b, std::string_view label) {
     if (b > std::numeric_limits<std::uint64_t>::max() - a) {
@@ -69,6 +69,16 @@ std::uint64_t direct_word_bytes(NumericFormat format) {
     }
 }
 
+void require_scale_format(StorageLayout layout, NumericFormat format) {
+    const bool mismatch =
+        (layout == StorageLayout::BlockScaleK16M128x4V1 && format != NumericFormat::NVFP4) ||
+        (layout == StorageLayout::BlockScaleK16M128x4MultiplierV1 &&
+         format != NumericFormat::NVFP4_F32M) ||
+        (layout == StorageLayout::RowScaleV1 && format != NumericFormat::FP8_E4M3FN_ROW_BF16S) ||
+        (layout == StorageLayout::RowScaleF32V1 && format != NumericFormat::FP8_E4M3FN_ROW_F32S);
+    if (mismatch) { throw ArtifactError("scaled tensor format does not match its storage layout"); }
+}
+
 } // namespace
 
 std::string_view format_name(NumericFormat format) noexcept {
@@ -91,6 +101,10 @@ std::string_view format_name(NumericFormat format) noexcept {
         return "NVFP4";
     case NumericFormat::FP8_E4M3FN_ROW_BF16S:
         return "FP8_E4M3FN_ROW_BF16S";
+    case NumericFormat::NVFP4_F32M:
+        return "NVFP4_F32M";
+    case NumericFormat::FP8_E4M3FN_ROW_F32S:
+        return "FP8_E4M3FN_ROW_F32S";
     }
     return {};
 }
@@ -105,6 +119,10 @@ std::string_view layout_name(StorageLayout layout) noexcept {
         return "blockscale-k16-m128x4-v1";
     case StorageLayout::RowScaleV1:
         return "row-scale-v1";
+    case StorageLayout::BlockScaleK16M128x4MultiplierV1:
+        return "blockscale-k16-m128x4-multiplier-v1";
+    case StorageLayout::RowScaleF32V1:
+        return "row-scale-f32-v1";
     }
     return {};
 }
@@ -123,6 +141,7 @@ std::uint64_t resource_alignment(ResourceEncoding) noexcept { return 1; }
 
 std::uint64_t tensor_encoded_size(StorageLayout layout, NumericFormat format,
                                   std::span<const std::uint64_t> shape) {
+    require_scale_format(layout, format);
     if (layout == StorageLayout::ContiguousLeV1) {
         if (shape.size() > 16) {
             throw ArtifactError("contiguous-le-v1 supports rank 0 through 16");
@@ -141,10 +160,11 @@ std::uint64_t tensor_encoded_size(StorageLayout layout, NumericFormat format,
         }
         return row_split_geometry(format, shape).encoded_bytes;
     }
-    if (layout == StorageLayout::BlockScaleK16M128x4V1) {
+    if (layout == StorageLayout::BlockScaleK16M128x4V1 ||
+        layout == StorageLayout::BlockScaleK16M128x4MultiplierV1) {
         return block_scale_geometry(format, shape).encoded_bytes;
     }
-    if (layout == StorageLayout::RowScaleV1) {
+    if (layout == StorageLayout::RowScaleV1 || layout == StorageLayout::RowScaleF32V1) {
         return row_scale_geometry(format, shape).encoded_bytes;
     }
     throw ArtifactError("unknown tensor layout");
@@ -178,7 +198,7 @@ RowSplitGeometry row_split_geometry(NumericFormat format, std::span<const std::u
 
 BlockScaleGeometry block_scale_geometry(NumericFormat format,
                                         std::span<const std::uint64_t> shape) {
-    if (format != NumericFormat::NVFP4) {
+    if (format != NumericFormat::NVFP4 && format != NumericFormat::NVFP4_F32M) {
         throw ArtifactError("blockscale-k16-m128x4-v1 requires NVFP4");
     }
     if (shape.size() != 2 || shape[0] == 0 || shape[1] == 0) {
@@ -201,6 +221,7 @@ BlockScaleGeometry block_scale_geometry(NumericFormat format,
     out.scale_plane_bytes = elements / 16;
     out.weight_divisor_offset =
         checked_add(out.scale_plane_offset, out.scale_plane_bytes, "NVFP4 weight divisor offset");
+    out.weight_multiplier_offset = out.weight_divisor_offset;
     out.encoded_bytes = checked_add(out.weight_divisor_offset, 4, "NVFP4 tensor encoded size");
     return out;
 }
@@ -339,6 +360,7 @@ std::uint64_t validate_column_ranges(std::span<const SliceRange> columns,
 TensorSlice tensor_row_slice(StorageLayout layout, NumericFormat format,
                              std::span<const std::uint64_t> shape,
                              std::span<const SliceRange> rows) {
+    require_scale_format(layout, format);
     require_slice(!shape.empty(), "a row slice needs a tensor of rank one or higher");
     TensorSlice out;
 
@@ -373,7 +395,8 @@ TensorSlice tensor_row_slice(StorageLayout layout, NumericFormat format,
         return out;
     }
 
-    if (layout == StorageLayout::BlockScaleK16M128x4V1) {
+    if (layout == StorageLayout::BlockScaleK16M128x4V1 ||
+        layout == StorageLayout::BlockScaleK16M128x4MultiplierV1) {
         // The code plane is row-major [N, K/2]. The swizzled scale plane's outermost axis is the
         // 128-row tile (offset (row_tile * K_tiles + scale_tile) * 512), so a 128-row-aligned row
         // range is one contiguous scale-plane range too. The FP32 weight divisor is matrix-level
@@ -391,11 +414,11 @@ TensorSlice tensor_row_slice(StorageLayout layout, NumericFormat format,
                        checked_mul(parent.k_tiles, kNvfp4TileBytes, "NVFP4 row tile bytes")}};
         append_row_plane_copies(out, scales, rows, kNvfp4RowTile);
         out.copies.push_back(PlaneCopy{parent.weight_divisor_offset, shard.weight_divisor_offset,
-                                       kNvfp4DivisorBytes});
+                                       kNvfp4GlobalScaleBytes});
         return out;
     }
 
-    if (layout == StorageLayout::RowScaleV1) {
+    if (layout == StorageLayout::RowScaleV1 || layout == StorageLayout::RowScaleF32V1) {
         // Row-major code plane plus one BF16 scale word per row; both are row-addressable.
         require_slice(shape.size() == 2, "row-scale-v1 requires a rank-two shape");
         const std::uint64_t total_rows           = validate_row_ranges(rows, shape[0], 1);
@@ -403,9 +426,10 @@ TensorSlice tensor_row_slice(StorageLayout layout, NumericFormat format,
         const std::array<std::uint64_t, 2> shard_shape = {total_rows, shape[1]};
         const RowScaleGeometry shard             = row_scale_geometry(format, shard_shape);
         out.encoded_bytes                        = shard.encoded_bytes;
-        const std::array<SlicePlane, 2> planes   = {
+        const std::array<SlicePlane, 2> planes         = {
             SlicePlane{0, 0, shape[1]},
-            SlicePlane{parent.scale_plane_offset, shard.scale_plane_offset, 2},
+            SlicePlane{parent.scale_plane_offset, shard.scale_plane_offset,
+                       parent.scale_word_bytes},
         };
         append_row_plane_copies(out, planes, rows, 1);
         return out;
@@ -416,6 +440,7 @@ TensorSlice tensor_row_slice(StorageLayout layout, NumericFormat format,
 TensorSlice tensor_column_slice(StorageLayout layout, NumericFormat format,
                                 std::span<const std::uint64_t> shape,
                                 std::span<const SliceRange> column_ranges) {
+    require_scale_format(layout, format);
     require_slice(shape.size() == 2, "a column slice requires a rank-two shape");
     const std::uint64_t rows        = shape[0];
     const std::uint64_t total_count = validate_column_ranges(column_ranges, shape[1]);
@@ -469,7 +494,8 @@ TensorSlice tensor_column_slice(StorageLayout layout, NumericFormat format,
         return out;
     }
 
-    if (layout == StorageLayout::BlockScaleK16M128x4V1) {
+    if (layout == StorageLayout::BlockScaleK16M128x4V1 ||
+        layout == StorageLayout::BlockScaleK16M128x4MultiplierV1) {
         // A column range of whole 64-column scale tiles is contiguous *within* one 128-row tile
         // but strided across row tiles, and the code plane is strided per row. Both are copied as
         // regular strides; the matrix-level divisor is replicated.
@@ -489,11 +515,11 @@ TensorSlice tensor_column_slice(StorageLayout layout, NumericFormat format,
                                    columns.begin / kNvfp4TileColumns, parent.k_tiles,
                                    shard.k_tiles, shard.k_tiles);
         out.copies.push_back(PlaneCopy{parent.weight_divisor_offset, shard.weight_divisor_offset,
-                                       kNvfp4DivisorBytes});
+                                       kNvfp4GlobalScaleBytes});
         return out;
     }
 
-    if (layout == StorageLayout::RowScaleV1) {
+    if (layout == StorageLayout::RowScaleV1 || layout == StorageLayout::RowScaleF32V1) {
         // The BF16 multiplier is per output row, and a column slice keeps every row, so the whole
         // scale plane is replicated: each shard scales its partial product by the same factor,
         // which is exactly what summing the partials across devices requires.
@@ -512,7 +538,8 @@ TensorSlice tensor_column_slice(StorageLayout layout, NumericFormat format,
 }
 
 RowScaleGeometry row_scale_geometry(NumericFormat format, std::span<const std::uint64_t> shape) {
-    if (format != NumericFormat::FP8_E4M3FN_ROW_BF16S) {
+    if (format != NumericFormat::FP8_E4M3FN_ROW_BF16S &&
+        format != NumericFormat::FP8_E4M3FN_ROW_F32S) {
         throw ArtifactError("row-scale-v1 requires FP8_E4M3FN_ROW_BF16S");
     }
     if (shape.size() != 2 || shape[0] == 0 || shape[1] == 0) {
@@ -525,7 +552,8 @@ RowScaleGeometry row_scale_geometry(NumericFormat format, std::span<const std::u
     out.code_plane_bytes = checked_mul(out.rows, out.columns, "FP8 element count");
     out.scale_plane_offset =
         align_up(out.code_plane_bytes, kTensorAlignment, "FP8 scale plane offset");
-    out.scale_plane_bytes = checked_mul(out.rows, 2, "FP8 scale plane bytes");
+    out.scale_word_bytes  = format == NumericFormat::FP8_E4M3FN_ROW_F32S ? 4 : 2;
+    out.scale_plane_bytes = checked_mul(out.rows, out.scale_word_bytes, "FP8 scale plane bytes");
     out.encoded_bytes =
         checked_add(out.scale_plane_offset, out.scale_plane_bytes, "FP8 tensor encoded size");
     return out;

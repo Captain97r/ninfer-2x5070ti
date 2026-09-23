@@ -38,6 +38,45 @@ over the loopback OpenAI-compatible HTTP endpoint. Each reported corpus fixture 
 seeds. Values are arithmetic mean ± sample standard deviation, and server warm-up completes before
 the measured requests. The concurrent campaign has its own sustained-wave method below.
 
+## Local NVIDIA ModelOpt profile
+
+The optional `qwen3.8-27b/nvfp4-modelopt` profile was measured on the two local
+RTX 5070 Ti 16 GB cards on 2026-09-23: native Windows, CUDA 13.3 build / 13.4
+runtime, MSVC 19.44, TP2 through mapped pinned host memory. The source is the
+[pinned NVIDIA checkpoint](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/tree/482ca0f3832238542f8f5295dde86b5f22711d80).
+The launch uses INT8 KV, 102,400-token capacity, prefill chunk 1024, MTP3 with the
+optimized draft head, CUDA Graphs, and vision enabled with a 2,048-token image
+budget. Measured prompts below are text-only and cold (prefix reuse disabled).
+
+| Workload | Prompt tokens | Output tokens | PP, tok/s | Committed TG, tok/s | Draft acceptance |
+|---|---:|---:|---:|---:|---:|
+| Real code excerpts; stochastic review | 32,768 | 4,096 | 2,952.0 | 142.1 | 58.8% |
+| Real documentation; greedy handbook | 100,352 | 2,049 | 2,354.2 | 152.8 | 72.7% |
+
+These are one observation per workload, averaged over each complete prefill or
+decode phase, not peaks or repeated-trial means. TG counts committed tokens after
+the first token, divided by decode time; drafted/rejected tokens are excluded.
+The code request reaches its 4,096-token output cap. The handbook reaches exactly
+102,400 cached positions (`prompt + output - 1`), then a short JSON request passes.
+Neither truncated answer is a scored completed task. These workloads are not
+matched comparisons against the original artifact's historical speed numbers.
+
+Two independently scored near-limit ledger requests also pass: three exact
+records at 5%, 50% and 95% depth in a 101,868-token prompt, and an absent-key query
+in a 101,853-token prompt. Startup CUDA free memory on the primary rank is 1.42 GiB;
+2-second NVML polling during the code run observes at most 13,812 MiB dedicated
+memory on each GPU. Larger contexts, BF16 KV and full-length image histories are
+not qualified for this profile.
+
+Independent FP64 operator checks cover the new calibrated formats and both GPUs;
+matched-schedule TP2 prefix/MTP checks pass with CUDA Graphs off/on. The short
+18-case quality screen scores 15/18 with MTP and 15/18 without it, including both
+image checks. The original artifact scores 16/18 and retains all 18 saved responses
+exactly. The additional failure is typed Unicode tool arguments; the arithmetic
+and code-format failures occur in both profiles. These bounded checks do not
+establish NVIDIA reference-engine parity or its published benchmark scores.
+[Validation and reproduction commands](../diagnostics/nvidia-modelopt-validation.json).
+
 ## Local dual-5070-Ti display move
 
 After moving the monitor to the motherboard and rebooting, both NVIDIA cards report

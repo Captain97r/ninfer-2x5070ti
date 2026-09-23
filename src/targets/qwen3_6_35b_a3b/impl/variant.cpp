@@ -98,6 +98,18 @@ std::size_t gdn_record_workspace_bytes(const Tensor& hidden) {
 
 } // namespace
 
+qwen3_6::HeadProjectionProfile Variant::output_head_profile(WeightsProfile profile) {
+    if (profile != WeightsProfile::GroupwiseInt) {
+        throw std::logic_error("invalid 35B weights profile");
+    }
+    return {QType::Q6G64_F16S, ops::LinearPolicy::A16Only};
+}
+
+qwen3_6::HeadProjectionProfile Variant::proposal_head_profile(WeightsProfile profile) {
+    (void)output_head_profile(profile);
+    return {QType::Q4G64_F16S, ops::LinearPolicy::A16Only};
+}
+
 std::vector<GraphExecutionProfile> Variant::ordinary_graph_profiles(std::uint32_t capacity) {
     return graph_profiles_through(capacity - 1, {127, 511, 2047, 4095, 8197, 16389, 32767});
 }

@@ -15,14 +15,17 @@ namespace ninfer::ops {
 /**
  * @brief Permitted private activation-compute profiles for a linear projection.
  *
- * The policy constrains private route selection; it does not select a kernel or prescribe a
- * particular MMA instruction. The public activation and output tensors remain BF16 for every
- * policy.
+ * A16Only/AllowA8/AllowA4 constrain private route selection. CalibratedA8/CalibratedA4 instead
+ * require the registered checkpoint activation codec at every positive T, including T=1; they
+ * do not admit an A16 fallback. No policy selects a kernel or MMA instruction. Public activation
+ * and output tensors remain BF16.
  */
 enum class LinearPolicy : std::uint8_t {
     A16Only, ///< Admit only A16 compute profiles.
     AllowA8, ///< Admit either A16 or A8 compute profiles.
     AllowA4, ///< Admit either A16 or A4 compute profiles.
+    CalibratedA8, ///< Quantize every input with the stored FP32 E4M3 calibration.
+    CalibratedA4, ///< Quantize every input with its stored FP32 NVFP4 global multiplier.
 };
 
 /**
@@ -44,11 +47,14 @@ enum class LinearPolicy : std::uint8_t {
  * @f[
  *   \mathrm{ideal}_{n,t} =
  *   \sum_{k=0}^{K-1}
- *     \mathrm{FP32Dequant}(w)_{n,k}\,\mathrm{FP32}(x_{k,t}).
+ *     \mathrm{Decode}(w)_{n,k}\,A_{k,t}.
  * @f]
  *
- * `out` stores a BF16 approximation of this ideal result under the named numerical criterion for
- * the selected private activation-compute path.
+ * Decode(w) means the logical value obtained from the exact stored code and scale words.
+ * For A16Only/AllowA8/AllowA4, A is the represented BF16 input promoted without loss. For
+ * CalibratedA8/CalibratedA4, A is the represented result of the explicit activation codec below.
+ * `out` stores a BF16 approximation of this ideal under the named criterion. The oracle evaluates
+ * complete dots in FP64 and does not reproduce a kernel's private reduction/staging profile.
  *
  * @par Logical tensors and layout
  * `x` is contiguous, non-null, 16-byte-aligned BF16 `[K,T]`, `w` has logical shape `[N,K]`, and
@@ -69,14 +75,14 @@ enum class LinearPolicy : std::uint8_t {
  * not inherently represent a text token. FP32_CTRL is unsupported.
  *
  * @par Numerical contract
- * Test fixture code materializes the persistent weight as its logical FP32 dequantized matrix.
- * The one Linear oracle accepts that matrix and the FP32 values represented by the BF16 activation,
- * evaluates every complete dot product with naive FP64 accumulation, and retains the FP64 result.
- * The BF16 output is promoted and compared against that result. Output representation,
- * accumulator precision, activation quantization, staging, reduction order, and kernel schedule
- * are private implementation effects covered by the named tolerance for the selected
- * activation-compute path; none is copied into the oracle. Kernel, schedule, template instance,
- * host launcher, and T region do not create separate criteria inside one path.
+ * The independent oracle decodes persistent weights from their stored words and evaluates the
+ * formula above with naive FP64 accumulation. BF16 output is promoted and compared directly with
+ * that result. Output representation, accumulation, staging, reduction order and kernel schedule
+ * are private implementation effects covered by the selected criterion, never copied into the
+ * oracle. Activation quantization is also private for the legacy A16Only/AllowA8/AllowA4 policies;
+ * for calibrated policies it is the specified semantic boundary below and is evaluated by an
+ * independent codec oracle first. Kernel, schedule, template instance, host launcher and T region
+ * do not create separate criteria inside one path.
  *
  * @par Compute policy
  * `policy` specifies the permitted private activation-compute set. A permission does not require a
@@ -90,6 +96,29 @@ enum class LinearPolicy : std::uint8_t {
  * compute at every positive T. NVFP4 admits A16Only and AllowA4; AllowA4 permits the private
  * resolver to select either a qualified A16 route or activation quantization to NVFP4 at every
  * positive T. The selected route depends only on the registered problem and T.
+ *
+ * @par Calibrated checkpoint formats
+ * FP8_E4M3FN_ROW_F32S / RowScaleF32 stores E4M3 weight codes and one original FP32
+ * dequantization multiplier per row. It admits only CalibratedA8. For each represented BF16
+ * input x, q = RNE_E4M3FN(clamp(FP32(x / input_scale_multiplier), -448, 448)); the represented
+ * activation is decode(q) * input_scale_multiplier. The positive finite input multiplier is
+ * fixed across tokens; no token maximum or BF16 scale rounding is allowed. Weight values are
+ * decode(weight_code[n,k]) * FP32_row_scale[n]. Non-vocabulary registered shapes, including TP2
+ * shards, use this contract. Calibrated FP8 vocabulary projections are not registered.
+ *
+ * NVFP4_F32M / BlockScaleK16M128x4Multiplier admits only CalibratedA4. Let a be its original
+ * positive finite FP32 input_scale_multiplier. For each contiguous 16-value K block of a token,
+ * s = decode(RNE_E4M3FN(clamp(max_i(abs(x_i)) / (6*a), 0, 448))). If s is zero, every represented
+ * activation A_i in that block is zero. Otherwise q_i = RNE_E2M1_SATFINITE(x_i / (s*a)) and
+ * A_i = decode(q_i)*s*a. RNE is nearest-even and the E2M1 finite magnitude limit is 6. This
+ * specified quantization uses the represented BF16 input and FP32 calibration, including zero
+ * blocks and scales that underflow to zero; it is not an error budget for replacing A with x.
+ * Weight values are decode(E2M1_code[n,k])*decode(E4M3_block_scale[n,k/16])*
+ * weight_scale_multiplier. Original global FP32 weight/input multipliers must not be
+ * reconstructed from rounded inverses. This calibrated format is registered for Linear,
+ * LinearAdd and LinearSwiGLU; the attention/GDN NVFP4 forms remain legacy-only.
+ * Both calibrated codecs apply at every positive T, including T=1. Calibrated formats reject
+ * legacy policies, and legacy formats reject calibrated policies.
  *
  * @par Workspace
  * `workspace` is caller-owned call-scoped transient storage sized by
@@ -179,7 +208,7 @@ void linear_column_parallel(const std::array<Tensor, 2>& x, const std::array<Wei
  *
  * @f[
  *   \mathrm{out}_{n,t} = \sum_{r} \sum_{k \in \mathrm{block}(r)}
- *     \mathrm{FP32Dequant}(w)_{n,k}\,\mathrm{FP32}(x_{k,t}).
+ *     \mathrm{Decode}(w)_{n,k}\,A_{k,t}.
  * @f]
  *
  * `w[0].n` must equal `w[1].n` (both ranks produce every output row) and both ranks must agree on

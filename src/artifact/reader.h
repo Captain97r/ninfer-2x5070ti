@@ -28,6 +28,8 @@ enum class NumericFormat {
     W8G32_F16S,
     NVFP4,
     FP8_E4M3FN_ROW_BF16S,
+    NVFP4_F32M,
+    FP8_E4M3FN_ROW_F32S,
 };
 
 enum class StorageLayout {
@@ -35,6 +37,8 @@ enum class StorageLayout {
     RowSplitK128V1,
     BlockScaleK16M128x4V1,
     RowScaleV1,
+    BlockScaleK16M128x4MultiplierV1,
+    RowScaleF32V1,
 };
 
 enum class ResourceEncoding {
@@ -77,12 +81,15 @@ struct BlockScaleGeometry {
     std::uint64_t scale_plane_offset    = 0;
     std::uint64_t scale_plane_bytes     = 0;
     std::uint64_t weight_divisor_offset = 0;
+    // Same physical trailing word, with the semantics selected by NumericFormat.
+    std::uint64_t weight_multiplier_offset = 0;
     std::uint64_t encoded_bytes         = 0;
 };
 
 BlockScaleGeometry block_scale_geometry(NumericFormat format, std::span<const std::uint64_t> shape);
 
 struct RowScaleGeometry {
+    std::uint64_t scale_word_bytes   = 0;
     std::uint64_t rows               = 0;
     std::uint64_t columns            = 0;
     std::uint64_t code_plane_bytes   = 0;

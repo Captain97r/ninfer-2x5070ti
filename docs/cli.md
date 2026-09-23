@@ -30,6 +30,40 @@ template's default. An artifact whose template does not expose effort rejects th
 `--no-thinking` for direct-response prompt rendering; it cannot be combined with
 `--reasoning-effort`. `--greedy` selects exact argmax decoding independently.
 
+## NVIDIA ModelOpt artifact
+
+The `qwen3.8-27b` target also registers the distinct `nvfp4-modelopt` weight identity.
+Its source is [NVIDIA's Qwen3.8-27B-NVFP4 checkpoint](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/tree/482ca0f3832238542f8f5295dde86b5f22711d80)
+at revision `482ca0f3832238542f8f5295dde86b5f22711d80`. Convert that local source
+without loading it on a GPU:
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b.convert_modelopt \
+  --model /path/to/Qwen3.8-27B-NVFP4 \
+  --out /path/to/qwen3_8_27b_nvfp4_modelopt.ninfer --device cpu
+```
+
+The converter preserves the original BF16 embedding and packed text weight codes
+and scale values. Packed text projections require calibrated W4A4/W8A8 for
+all token counts; the CLI does not silently select an A16 decode policy. MTP and
+vision use the existing registered encoders for this checkpoint's BF16 tensors.
+This is a separate numeric profile, not a claim of identical NVIDIA engine outputs
+or benchmark performance. Independent operator checks, real TP2 MTP/prefix checks
+and short image requests pass. The bounded quality screen has a typed Unicode
+tool-call failure absent from the previous artifact; see the [profile results](../README.md#nvidia-modelopt-checkpoint).
+
+For native Windows TP2 with MTP3, select the artifact explicitly:
+
+```powershell
+.\tools\run_windows.ps1 -ModelPath 'C:\LLM\nvidia\Qwen3.8-27B-NVFP4\qwen3_8_27b_nvfp4_modelopt.ninfer' -Context 102400 -Prompt 'Explain tensor parallel inference.'
+```
+
+Use `-Mode Server` for HTTP serving. This 102,400-token INT8 allocation passed
+near-limit retrieval, exact context exhaustion and subsequent-request checks. The
+older artifact's larger context is not qualified for this profile. Omitting
+`-ModelPath` still selects the existing pinned NInfer v2 artifact.
+On Windows, the converter command may use `py -3.11` in place of `python3.11`.
+
 ## Startup memory profile
 
 GPU residency is frozen when the Engine starts:
@@ -207,7 +241,7 @@ device used at the default `--tp 1`; when both are given they must agree on the 
 ```
 
 Tensor-parallel execution is implemented for the 27B execution package (`qwen3.6-27b` and
-`qwen3.8-27b`, either weight profile). `qwen3.6-35b-a3b` has no tensor-parallel path and rejects
+`qwen3.8-27b`, including `nvfp4-modelopt`). `qwen3.6-35b-a3b` has no tensor-parallel path and rejects
 `--tp 2` at startup, as does `--spec dflash`. In the Windows-TP2 fork `--vision` works at `--tp 2`
 (dual-replicated tower, per-rank encode, one media item per request capped at `--image-max-tokens`
 merged vision tokens — default 2048 = 2,097,152 px, at most 16384 = the artifact full 16.7 MP

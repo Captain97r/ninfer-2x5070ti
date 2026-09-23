@@ -345,9 +345,20 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         gdn_stage(layout, first, last, phase, path, batch_size, min_width, max_width);
         post_mixer_stage(layout, first, last, phase);
     };
+    const auto head_scratch = [&](WorkspaceLayoutBuilder& layout, std::int32_t columns,
+                                  bool optimized) {
+        const auto profile = optimized ? Variant::proposal_head_profile(plan.weights_profile)
+                                       : Variant::output_head_profile(plan.weights_profile);
+        const auto rows =
+            (optimized ? Variant::draft_head_rows : TextConfig::output_rows) / plan.tp;
+        scratch(layout,
+                ops::linear_workspace_capacity_bytes(profile.format, rows, TextConfig::hidden,
+                                                     profile.policy, columns, columns));
+    };
     const auto tp_logits = [&](WorkspaceLayoutBuilder& layout, std::int32_t columns) {
         auto head = layout.scope();
         matrix(layout, DType::BF16, TextConfig::output_rows / plan.tp, columns);
+        head_scratch(layout, columns, false);
         // Both captured rank-zero gathering and replicated eager/full-head gathering keep
         // the incoming peer shard live beside the local shard, aligned at this exact cursor.
         scratch(layout, std::max(ops::allgather_columns_workspace_capacity_bytes(
@@ -362,11 +373,15 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
             } else {
                 auto head = layout.scope();
                 matrix(layout, DType::BF16, Variant::draft_head_rows / plan.tp, columns);
+                head_scratch(layout, columns, true);
                 scratch(layout, ops::argmax_row_parallel_workspace_capacity_bytes(
                                     Variant::draft_head_rows / plan.tp, columns));
             }
-        } else if (plan.proposal_head == ProposalHead::Optimized) {
-            matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
+        } else {
+            if (plan.proposal_head == ProposalHead::Optimized) {
+                matrix(layout, DType::BF16, Variant::draft_head_rows, columns);
+            }
+            head_scratch(layout, columns, plan.proposal_head == ProposalHead::Optimized);
         }
     };
     const auto mtp_stem = [&](WorkspaceLayoutBuilder& layout, std::int32_t tokens,
@@ -514,6 +529,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         text_common_root(text_prefill, chunk);
         target_body(text_prefill, 1, chunk, qwen3_6::TextPhase::Prefill, GdnWorkspacePath::Prefill,
                     1, 1, chunk, text_envelope);
+        head_scratch(text_prefill, 1, false);
         scratch(text_prefill,
                 ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, 1, 1));
         out.text_prefill = finish(text_prefill);
@@ -524,6 +540,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
             matrix(ordinary, DType::BF16, TextConfig::hidden, batch);
             target_body(ordinary, batch, batch, qwen3_6::TextPhase::Verify,
                         GdnWorkspacePath::Snapshot, batch, 1, 1, text_envelope);
+            head_scratch(ordinary, batch, false);
             scratch(ordinary,
                     ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, batch, batch));
             out.ordinary_round = std::max(out.ordinary_round, finish(ordinary));
@@ -534,6 +551,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
             text_common_root(mtp_prefill, chunk);
             target_body(mtp_prefill, 1, chunk, qwen3_6::TextPhase::Prefill,
                         GdnWorkspacePath::Prefill, 1, 1, chunk, text_envelope);
+            head_scratch(mtp_prefill, 1, false);
             matrix(mtp_prefill, DType::I32, 1, chunk);
             if (plan.features.vision) {
                 matrix(mtp_prefill, DType::BF16, TextConfig::hidden, chunk);
@@ -568,6 +586,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                 matrix(target, DType::BF16, TextConfig::hidden, aggregate);
                 target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
                             GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
+                head_scratch(target, aggregate, false);
 
                 const auto mtp_decode_core = [&](WorkspaceLayoutBuilder& layout,
                                                  std::int32_t width) {
@@ -651,6 +670,8 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                     } else {
                         matrix(layout, DType::BF16, TextConfig::output_rows, drafts * batch);
                     }
+                    head_scratch(layout, drafts * batch,
+                                 plan.proposal_head == ProposalHead::Optimized);
                     return finish(layout);
                 };
 
@@ -663,6 +684,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                     target_body(target, aggregate, aggregate, qwen3_6::TextPhase::Verify,
                                 GdnWorkspacePath::ReplayRecord, batch, verify, verify,
                                 text_envelope);
+                    head_scratch(target, aggregate, false);
                     const std::size_t accept =
                         ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
                             TextConfig::token_domain, drafts, drafts, batch, batch);

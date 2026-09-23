@@ -557,6 +557,7 @@ private:
     const Tensor* final_norm_                   = nullptr;
     const Weight* lm_head_                      = nullptr;
     const Weight* proposal_head_                = nullptr;
+    ops::LinearPolicy proposal_head_policy_     = ops::LinearPolicy::A16Only;
     const std::int32_t* proposal_head_ids_      = nullptr;
     int proposal_head_n_                        = 0;
     const ops::SamplingConfig* sampling_config_ = nullptr;

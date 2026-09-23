@@ -130,6 +130,13 @@ void launch_nvfp4_w4a4_tma_linear(Nvfp4Problem problem, const std::uint8_t* acti
                                   const std::uint8_t* weight_scales, __nv_bfloat16* output,
                                   std::int32_t tokens, float alpha, cudaStream_t stream) {
     switch (problem) {
+#define NINFER_NVFP4_VOCAB_TMA(name, geometry) \
+    case Nvfp4Problem::name: \
+        launch_linear<geometry>(activation_codes, activation_scales, weight_codes, \
+                                weight_scales, output, tokens, alpha, stream); \
+        return;
+        NINFER_NVFP4_VOCAB_PROBLEMS(NINFER_NVFP4_VOCAB_TMA)
+#undef NINFER_NVFP4_VOCAB_TMA
     case Nvfp4Problem::AttnInput:
         launch_linear<Nvfp4AttnInputGeometry>(activation_codes, activation_scales, weight_codes,
                                               weight_scales, output, tokens, alpha, stream);

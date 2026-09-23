@@ -68,8 +68,22 @@ __global__ __launch_bounds__(Threads,
     if (tid == 0) { scales[token] = scale; }
 }
 
-template <class Geometry, class Schedule, bool FullTokens>
-void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
+// ModelOpt input_scale is a fixed dequantization multiplier. Division is rounded once;
+// no per-token maximum is evaluated, including ordinary single-token decode.
+__global__ void fp8_calibrated_a8_quantize_kernel(
+    const __nv_bfloat16* input, std::uint8_t* codes, float* scales,
+    std::int32_t input_rows, std::int32_t tokens, float input_scale) {
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::int64_t count = static_cast<std::int64_t>(input_rows) * tokens;
+    if (index >= count) { return; }
+    const float normalized = __fdiv_rn(__bfloat162float(input[index]), input_scale);
+    const float clipped = fminf(448.0F, fmaxf(-448.0F, normalized));
+    codes[index] = __nv_cvt_float_to_fp8(clipped, __NV_SATFINITE, __NV_E4M3);
+    if (index % input_rows == 0) { scales[index / input_rows] = input_scale; }
+}
+
+template <class Geometry, class Schedule, bool FullTokens, class WeightScale>
+void launch_mma_typed(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
                 cudaStream_t stream) {
     static_assert((Geometry::kOutputRows % Schedule::kBlockRows) == 0);
     static_assert((Geometry::kInputRows % Schedule::kBlockK) == 0);
@@ -81,15 +95,25 @@ void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std
     if constexpr (Schedule::kSharedBytes > 48 * 1024) {
         ensure_func_attr_per_device(
             fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue,
-                           Fp8ContiguousOutput>,
+                           Fp8ContiguousOutput, Fp8MmaIdentityRows, false, WeightScale>,
             cudaFuncAttributeMaxDynamicSharedMemorySize, Schedule::kSharedBytes);
     }
     fp8_mma_kernel<Geometry, Schedule, FullTokens>
         <<<blocks, Schedule::kThreads, Schedule::kSharedBytes, stream>>>(
             workspace.codes, workspace.scales, static_cast<const std::uint8_t*>(weight.qdata),
-            static_cast<const __nv_bfloat16*>(weight.scales), tokens, Fp8IdentityEpilogue{},
+            static_cast<const WeightScale*>(weight.scales), tokens, Fp8IdentityEpilogue{},
             output);
     CUDA_CHECK(cudaGetLastError());
+}
+
+template <class Geometry, class Schedule, bool FullTokens>
+void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
+                cudaStream_t stream) {
+    if (weight.qtype == QType::FP8_E4M3FN_ROW_F32S) {
+        launch_mma_typed<Geometry, Schedule, FullTokens, float>(weight, out, workspace, tokens, stream);
+    } else {
+        launch_mma_typed<Geometry, Schedule, FullTokens, __nv_bfloat16>(weight, out, workspace, tokens, stream);
+    }
 }
 
 template <class ActivationGeometry>
@@ -117,6 +141,15 @@ void launch_fp8_a8_quantize(const Tensor& x, const Weight& weight, Fp8A8Workspac
                             cudaStream_t stream) {
     if (workspace.codes == nullptr || workspace.scales == nullptr) {
         throw std::invalid_argument("fp8 A8 requires caller workspace");
+    }
+    if (weight.qtype == QType::FP8_E4M3FN_ROW_F32S) {
+        constexpr int threads = 256;
+        const std::int64_t count = static_cast<std::int64_t>(weight.k) * x.ne[1];
+        fp8_calibrated_a8_quantize_kernel<<<(count + threads - 1) / threads, threads, 0, stream>>>(
+            static_cast<const __nv_bfloat16*>(x.data), workspace.codes, workspace.scales,
+            weight.k, x.ne[1], weight.input_scale_multiplier);
+        CUDA_CHECK(cudaGetLastError());
+        return;
     }
     switch (weight.k) {
     case Fp8Activation5120Geometry::kInputRows:
@@ -174,9 +207,13 @@ void launch_fp8_a8(const Tensor& x, const Weight& weight, Tensor& out, Fp8A8Work
     case Fp8Problem::GdnInputTp2Column:
         launch_problem<Fp8GdnInputTp2ColumnGeometry>(weight, out, workspace, tokens, stream);
         return;
-    case Fp8Problem::VocabularyTp2Column:
     case Fp8Problem::MlpGateUpTp2Column:
+        launch_problem<Fp8MlpGateUpTp2ColumnGeometry>(weight, out, workspace, tokens, stream);
+        return;
     case Fp8Problem::AttnInputTp2Column:
+        launch_problem<Fp8AttnInputTp2ColumnGeometry>(weight, out, workspace, tokens, stream);
+        return;
+    case Fp8Problem::VocabularyTp2Column:
         break;
     }
     throw std::logic_error("FP8 vocabulary has no A8 route");

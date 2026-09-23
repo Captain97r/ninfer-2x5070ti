@@ -1,4 +1,5 @@
 #include "ninfer/ops/linear_swiglu.h"
+#include "ops/linear/linear_policy.h"
 
 #include "core/layout.h"
 #include "ninfer/ops/silu_mul.h"
@@ -26,6 +27,8 @@ void validate_policy(LinearPolicy policy) {
     case LinearPolicy::A16Only:
     case LinearPolicy::AllowA8:
     case LinearPolicy::AllowA4:
+    case LinearPolicy::CalibratedA8:
+    case LinearPolicy::CalibratedA4:
         return;
     }
     throw std::invalid_argument("linear_swiglu: invalid compute policy");
@@ -38,6 +41,7 @@ std::size_t linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gat
                                                    std::int32_t min_tokens,
                                                    std::int32_t max_tokens) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(qtype, policy);
     if (min_tokens <= 0 || max_tokens < min_tokens || (gate_up_rows % 2) != 0) {
         throw std::invalid_argument("linear_swiglu workspace: invalid profile or token interval");
     }
@@ -58,10 +62,10 @@ std::size_t linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gat
         return detail::q4_linear_swiglu_capacity_workspace_bytes(
             gate_up_rows, gate_up_rows / 2, input_rows, input_rows, min_tokens, max_tokens);
     }
-    if (qtype == QType::NVFP4 && gate_up_rows == 34816 && input_rows == 5120) {
+    if (detail::is_nvfp4_weight_type(qtype) && gate_up_rows == 34816 && input_rows == 5120) {
         return detail::nvfp4_linear_swiglu_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S && gate_up_rows == 34816 && input_rows == 5120) {
+    if (detail::is_fp8_weight_type(qtype) && gate_up_rows == 34816 && input_rows == 5120) {
         return detail::fp8_linear_swiglu_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
     throw std::invalid_argument("linear_swiglu workspace: unsupported weight format");
@@ -77,6 +81,7 @@ std::size_t linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gat
 void linear_swiglu(const Tensor& x, const Weight& gate_up_weight, Tensor& out, LinearPolicy policy,
                    WorkspaceArena& ws, cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(gate_up_weight.qtype, policy);
     if (x.dtype != DType::BF16 || out.dtype != DType::BF16) {
         throw std::invalid_argument("linear_swiglu: x/out must be BF16");
     }
@@ -111,8 +116,8 @@ void linear_swiglu(const Tensor& x, const Weight& gate_up_weight, Tensor& out, L
                            gate_up_weight.group_size == 32 && gate_up_weight.group == 32 &&
                            gate_up_weight.qhigh == nullptr &&
                            gate_up_weight.high_plane_bytes == 0 && common_row_split;
-    const bool nvfp4_weight = large_shape && gate_up_weight.qtype == QType::NVFP4;
-    const bool fp8_weight   = large_shape && gate_up_weight.qtype == QType::FP8_E4M3FN_ROW_BF16S;
+    const bool nvfp4_weight = large_shape && detail::is_nvfp4_weight_type(gate_up_weight.qtype);
+    const bool fp8_weight   = large_shape && detail::is_fp8_weight_type(gate_up_weight.qtype);
     if (!q4_weight && !w8_weight && !nvfp4_weight && !fp8_weight) {
         throw std::invalid_argument("linear_swiglu: unsupported weight");
     }
@@ -161,6 +166,7 @@ constexpr std::int32_t kShardIntermediate = kShardGateUpRows / 2; // 8704
 void validate_swiglu_column_rank_semantics(const Tensor& x, const Weight& w, const Tensor& out,
                                            LinearPolicy policy) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
     if (x.dtype != DType::BF16 || out.dtype != DType::BF16) {
         throw std::invalid_argument("linear_swiglu column-parallel: x/out must be BF16");
     }
@@ -186,8 +192,8 @@ void validate_swiglu_column_rank_semantics(const Tensor& x, const Weight& w, con
         w.shape[0] == w.n && w.shape[1] == w.k && w.qdata != nullptr && w.scales != nullptr;
     const bool q4_weight =
         w.qtype == QType::Q4G64_F16S && w.group_size == 64 && w.group == 64 && common_row_split;
-    const bool nvfp4_weight = w.qtype == QType::NVFP4;
-    const bool fp8_weight   = w.qtype == QType::FP8_E4M3FN_ROW_BF16S;
+    const bool nvfp4_weight = detail::is_nvfp4_weight_type(w.qtype);
+    const bool fp8_weight   = detail::is_fp8_weight_type(w.qtype);
     if (!q4_weight && !nvfp4_weight && !fp8_weight) {
         throw std::invalid_argument("linear_swiglu column-parallel: unsupported weight format");
     }
@@ -197,7 +203,8 @@ void validate_swiglu_column_rank_semantics(const Tensor& x, const Weight& w, con
         return;
     }
     if (fp8_weight) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("linear_swiglu column-parallel: FP8 admits only A16 or A8");
         }
         (void)detail::validate_fp8_weight(w, "fp8 linear_swiglu column-parallel");
@@ -266,10 +273,10 @@ void issue_swiglu_column_rank(int rank, const std::array<Tensor, 2>& x,
                               LinearPolicy policy, const std::array<WorkspaceArena*, 2>& workspace,
                               const ExecutionContext& ec) {
     const auto slot = static_cast<std::size_t>(rank);
-    if (w[slot].qtype == QType::NVFP4) {
+    if (detail::is_nvfp4_weight_type(w[slot].qtype)) {
         detail::nvfp4_linear_swiglu_dispatch_shard(x[slot], w[slot], out[slot], policy,
                                                    workspace[slot], ec.dev[slot]->stream);
-    } else if (w[slot].qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    } else if (detail::is_fp8_weight_type(w[slot].qtype)) {
         detail::fp8_linear_swiglu_dispatch_shard(x[slot], w[slot], out[slot], policy,
                                                  workspace[slot], ec.dev[slot]->stream);
     } else {
@@ -283,15 +290,16 @@ std::size_t linear_swiglu_column_parallel_workspace_capacity_bytes(QType qtype, 
                                                                     std::int32_t min_tokens,
                                                                     std::int32_t max_tokens) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(qtype, policy);
     if (min_tokens <= 0 || max_tokens < min_tokens) {
         throw std::invalid_argument(
             "linear_swiglu column-parallel workspace: invalid token interval");
     }
-    if (qtype == QType::NVFP4) {
+    if (detail::is_nvfp4_weight_type(qtype)) {
         return detail::nvfp4_linear_swiglu_shard_workspace_capacity_bytes(policy, min_tokens,
                                                                           max_tokens);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(qtype)) {
         // The A8 activation-quantize workspace is a pure function of (tokens, K), and K=5120 is
         // unchanged by the shard (only the output row count N halves) -- the tp1 query is exact
         // here, the same rule attn_input_proj's and gdn_input_proj's column shards follow.

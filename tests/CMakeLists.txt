@@ -432,6 +432,10 @@ ninfer_add_linear_test(ninfer_linear_q6_a16_test ops/linear/test_q6_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_w8_a16_test ops/linear/test_w8_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_nvfp4_a16_test ops/linear/test_nvfp4_a16.cpp)
 ninfer_add_linear_test(ninfer_linear_nvfp4_a4_test ops/linear/test_nvfp4_a4.cpp)
+ninfer_add_op_test(ninfer_modelopt_nvfp4_test
+  SOURCES ops/test_modelopt_nvfp4.cpp
+  LIBRARIES ninfer_ops)
+set_tests_properties(ninfer_modelopt_nvfp4_test PROPERTIES TIMEOUT 600)
 ninfer_add_op_test(ninfer_nvfp4_tma_descriptors_test
   SOURCES ops/test_nvfp4_tma_descriptors.cpp
           ops/linear/linear_test_common.cpp
@@ -515,3 +519,8 @@ foreach(test_target IN LISTS ninfer_qwen3_6_27b_internal_tests)
     ${PROJECT_SOURCE_DIR}/src/targets/qwen3_6_27b/export
     ${PROJECT_SOURCE_DIR}/src/targets/qwen3_6/export)
 endforeach()
+
+ninfer_add_op_test(ninfer_modelopt_fp8_test
+  SOURCES ops/test_modelopt_fp8.cpp
+  LIBRARIES ninfer_ops ninfer_core)
+set_tests_properties(ninfer_modelopt_fp8_test PROPERTIES TIMEOUT 600)

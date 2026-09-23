@@ -133,8 +133,8 @@ inline constexpr std::uint64_t kQuantRowSplitAlignment = 128;
 //   - `gdn_gating` (`gdn/a_projection`, `gdn/b_projection`, `gdn/a_log`, `gdn/dt_bias`,
 //     `gdn/a_b_projection`): always BF16/FP32 `contiguous-le-v1`, row-independent, and split into
 //     24-row halves that are not 128-aligned by construction.
-//   - the vocab row-splits (`output_head`, `draft_head`): always `row-split-k128-v1` or
-//     `row-scale-v1`, both row-independent.
+//   - the vocab row-splits (`output_head`, `draft_head`): their fixed TP2 widths are already
+//     multiples of 128, including the ModelOpt block-scaled multiplier profile.
 // If any of those families ever gains an NVFP4 binding, `tensor_row_slice` rejects a misaligned
 // boundary at bind time with the exact layout reason, so this list being conservative cannot let
 // a wrong copy through.
@@ -176,6 +176,8 @@ struct WeightPlan {
     artifact::NumericFormat format          = artifact::NumericFormat::BF16;
     std::uint32_t weight_scale_divisor_bits = 0;
     std::uint32_t input_scale_divisor_bits  = 0;
+    std::uint32_t weight_scale_multiplier_bits = 0;
+    std::uint32_t input_scale_multiplier_bits  = 0;
     std::vector<Shard> shards; // empty => replicated/full on device 0
 };
 
@@ -262,7 +264,8 @@ struct BindingPlan {
     std::array<TextLayerPlan, kTextLayers> text_layers;
     artifact::ObjectHandle final_norm;
     WeightPlan output_head;
-    artifact::ObjectHandle draft_head;
+    WeightPlan draft_head;
+    ops::LinearPolicy head_policy = ops::LinearPolicy::A16Only;
     artifact::ObjectHandle draft_head_token_ids;
     MtpPlan mtp;
 

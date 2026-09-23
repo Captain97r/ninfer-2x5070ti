@@ -1,4 +1,5 @@
 #include "ninfer/ops/gdn_input_proj.h"
+#include "ops/linear/linear_policy.h"
 
 #include "core/layout.h"
 #include "ops/common/split_launch.h"
@@ -282,6 +283,8 @@ void validate_policy(LinearPolicy policy) {
     case LinearPolicy::A16Only:
     case LinearPolicy::AllowA8:
     case LinearPolicy::AllowA4:
+    case LinearPolicy::CalibratedA8:
+    case LinearPolicy::CalibratedA4:
         return;
     }
     throw std::invalid_argument("gdn_input_proj: invalid compute policy");
@@ -290,15 +293,17 @@ void validate_policy(LinearPolicy policy) {
 void dispatch_single_parent(const Tensor& x, const Weight& weight, Tensor& qkv, Tensor& z,
                             LinearPolicy policy, WorkspaceArena* workspace, cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(weight.qtype, policy);
     const std::int32_t cols = x.ne[1];
     if (cols <= 0) { throw std::invalid_argument("gdn_input_proj: T must be positive"); }
 
-    if (weight.qtype == QType::NVFP4) {
+    if ((weight.qtype == QType::NVFP4)) {
         constexpr std::int32_t kHidden  = 5120;
         constexpr std::int32_t kQkvRows = 10240;
         constexpr std::int32_t kZRows   = 6144;
         constexpr std::int32_t kRows    = kQkvRows + kZRows;
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument("NVFP4 gdn_input_proj admits only A16 or A4");
         }
         require_matrix(x, kHidden, cols, "x");
@@ -313,12 +318,13 @@ void dispatch_single_parent(const Tensor& x, const Weight& weight, Tensor& qkv, 
         return;
     }
 
-    if (weight.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(weight.qtype)) {
         constexpr std::int32_t kHidden  = 5120;
         constexpr std::int32_t kQkvRows = 10240;
         constexpr std::int32_t kZRows   = 6144;
         constexpr std::int32_t kRows    = kQkvRows + kZRows;
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("FP8 gdn_input_proj admits only A16 or A8");
         }
         require_matrix(x, kHidden, cols, "x");
@@ -423,8 +429,9 @@ void dispatch_single_parent_snapshot(const Tensor& x, const Weight& weight,
                                      Tensor& value, Tensor& z, LinearPolicy policy,
                                      WorkspaceArena& workspace, cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(weight.qtype, policy);
 
-    if (weight.qtype == QType::NVFP4) {
+    if ((weight.qtype == QType::NVFP4)) {
         constexpr std::int32_t kHidden     = 5120;
         constexpr std::int32_t kQueryRows  = 2048;
         constexpr std::int32_t kKeyRows    = 2048;
@@ -469,7 +476,7 @@ void dispatch_single_parent_snapshot(const Tensor& x, const Weight& weight,
         return;
     }
 
-    if (weight.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(weight.qtype)) {
         constexpr std::int32_t kHidden     = 5120;
         constexpr std::int32_t kQueryRows  = 2048;
         constexpr std::int32_t kKeyRows    = 2048;
@@ -478,7 +485,8 @@ void dispatch_single_parent_snapshot(const Tensor& x, const Weight& weight,
         constexpr std::int32_t kChannels   = kQueryRows + kKeyRows + kValueRows;
         constexpr std::int32_t kParentRows = kChannels + kZRows;
         const ConvGeometry geometry        = require_snapshot_input(x, kHidden);
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("FP8 gdn_input_proj_conv_snapshot admits only A16 or A8");
         }
         detail::validate_fp8_weight(weight, "fp8 gdn_input_proj_conv_snapshot");
@@ -575,8 +583,9 @@ void dispatch_single_parent_record(const Tensor& x, const Weight& weight, const 
                                    LinearPolicy policy, WorkspaceArena& workspace,
                                    cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(weight.qtype, policy);
 
-    if (weight.qtype == QType::NVFP4) {
+    if ((weight.qtype == QType::NVFP4)) {
         constexpr std::int32_t kHidden     = 5120;
         constexpr std::int32_t kQueryRows  = 2048;
         constexpr std::int32_t kKeyRows    = 2048;
@@ -585,7 +594,8 @@ void dispatch_single_parent_record(const Tensor& x, const Weight& weight, const 
         constexpr std::int32_t kChannels   = kQueryRows + kKeyRows + kValueRows;
         constexpr std::int32_t kParentRows = kChannels + kZRows;
         const ConvGeometry geometry        = require_record_input(x, kHidden);
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument("NVFP4 gdn_input_proj_conv_record admits only A16 or A4");
         }
         detail::validate_nvfp4_weight(weight, "nvfp4 gdn_input_proj_conv_record");
@@ -633,7 +643,7 @@ void dispatch_single_parent_record(const Tensor& x, const Weight& weight, const 
         return;
     }
 
-    if (weight.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(weight.qtype)) {
         constexpr std::int32_t kHidden     = 5120;
         constexpr std::int32_t kQueryRows  = 2048;
         constexpr std::int32_t kKeyRows    = 2048;
@@ -642,7 +652,8 @@ void dispatch_single_parent_record(const Tensor& x, const Weight& weight, const 
         constexpr std::int32_t kChannels   = kQueryRows + kKeyRows + kValueRows;
         constexpr std::int32_t kParentRows = kChannels + kZRows;
         const ConvGeometry geometry        = require_record_input(x, kHidden);
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("FP8 gdn_input_proj_conv_record admits only A16 or A8");
         }
         detail::validate_fp8_weight(weight, "fp8 gdn_input_proj_conv_record");
@@ -742,21 +753,24 @@ std::size_t gdn_input_proj_workspace_capacity_bytes(QType parent_qtype, std::int
                                                     std::int32_t min_tokens,
                                                     std::int32_t max_tokens) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(parent_qtype, policy);
     if (min_tokens <= 0 || max_tokens < min_tokens) {
         throw std::invalid_argument("gdn_input_proj workspace: invalid token interval");
     }
-    if (parent_qtype == QType::NVFP4) {
+    if ((parent_qtype == QType::NVFP4)) {
         if (parent_rows != detail::Nvfp4GdnInputGeometry::kOutputRows ||
             input_rows != detail::Nvfp4GdnInputGeometry::kInputRows ||
-            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4)) {
+            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4)) {
             throw std::invalid_argument("gdn_input_proj workspace: unsupported NVFP4 profile");
         }
         return detail::nvfp4_gdn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
-    if (parent_qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(parent_qtype)) {
         if (parent_rows != detail::Fp8GdnInputGeometry::kOutputRows ||
             input_rows != detail::Fp8GdnInputGeometry::kInputRows ||
-            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8)) {
+            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8)) {
             throw std::invalid_argument("gdn_input_proj workspace: unsupported FP8 profile");
         }
         return detail::fp8_gdn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
@@ -828,15 +842,17 @@ std::size_t gdn_input_proj_conv_snapshot_workspace_capacity_bytes(
     QType parent_qtype, std::int32_t parent_rows, std::int32_t input_rows, LinearPolicy policy,
     std::int32_t batch_size, std::int32_t min_width, std::int32_t max_width) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(parent_qtype, policy);
     require_snapshot_capacity_domain(batch_size, min_width, max_width);
-    if (parent_qtype == QType::FP8_E4M3FN_ROW_BF16S &&
+    if (detail::is_fp8_weight_type(parent_qtype) &&
         parent_rows == detail::Fp8GdnInputGeometry::kOutputRows &&
         input_rows == detail::Fp8GdnInputGeometry::kInputRows &&
-        (policy == LinearPolicy::A16Only || policy == LinearPolicy::AllowA8)) {
+        (policy == LinearPolicy::A16Only || policy == LinearPolicy::AllowA8 ||
+         policy == LinearPolicy::CalibratedA8)) {
         return detail::fp8_gdn_snapshot_workspace_capacity_bytes(policy, batch_size, min_width,
                                                                  max_width);
     }
-    if (parent_qtype != QType::NVFP4 || parent_rows != detail::Nvfp4GdnInputGeometry::kOutputRows ||
+    if (!(parent_qtype == QType::NVFP4) || parent_rows != detail::Nvfp4GdnInputGeometry::kOutputRows ||
         input_rows != detail::Nvfp4GdnInputGeometry::kInputRows) {
         throw std::invalid_argument(
             "gdn_input_proj_conv_snapshot workspace: unsupported single-parent profile");
@@ -878,17 +894,20 @@ std::size_t gdn_input_proj_conv_record_workspace_capacity_bytes(
     QType parent_qtype, std::int32_t parent_rows, std::int32_t input_rows, LinearPolicy policy,
     std::int32_t batch_size, std::int32_t min_width, std::int32_t max_width) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(parent_qtype, policy);
     require_record_capacity_domain(batch_size, min_width, max_width);
-    if (parent_qtype == QType::FP8_E4M3FN_ROW_BF16S &&
+    if (detail::is_fp8_weight_type(parent_qtype) &&
         parent_rows == detail::Fp8GdnInputGeometry::kOutputRows &&
         input_rows == detail::Fp8GdnInputGeometry::kInputRows &&
-        (policy == LinearPolicy::A16Only || policy == LinearPolicy::AllowA8)) {
+        (policy == LinearPolicy::A16Only || policy == LinearPolicy::AllowA8 ||
+         policy == LinearPolicy::CalibratedA8)) {
         return detail::fp8_gdn_record_workspace_capacity_bytes(policy, batch_size, min_width,
                                                                max_width);
     }
-    if (parent_qtype != QType::NVFP4 || parent_rows != detail::Nvfp4GdnInputGeometry::kOutputRows ||
+    if (!(parent_qtype == QType::NVFP4) || parent_rows != detail::Nvfp4GdnInputGeometry::kOutputRows ||
         input_rows != detail::Nvfp4GdnInputGeometry::kInputRows ||
-        (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4)) {
+        (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4)) {
         throw std::invalid_argument(
             "gdn_input_proj_conv_record workspace: unsupported single-parent profile");
     }
@@ -1068,6 +1087,7 @@ constexpr std::int32_t kShardValueZRows   = 6144;  // Q5G64_F16S value_z shard
 void validate_fused_column_rank_semantics(const Tensor& x, const Weight& w, const Tensor& qkv,
                                           const Tensor& z, LinearPolicy policy) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
     const std::int32_t cols = x.ne[1];
     if (cols <= 0) {
         throw std::invalid_argument("gdn_input_proj column-parallel: T must be positive");
@@ -1077,14 +1097,16 @@ void validate_fused_column_rank_semantics(const Tensor& x, const Weight& w, cons
     require_matrix(z, kShardZRows, cols, "z");
     require_single_parent_nonoverlap(x, qkv, z);
 
-    if (w.qtype == QType::NVFP4) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+    if ((w.qtype == QType::NVFP4)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument(
                 "gdn_input_proj column-parallel: NVFP4 admits only A16 or A4");
         }
         detail::validate_nvfp4_weight(w, "nvfp4 gdn_input_proj column-parallel");
-    } else if (w.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+    } else if (detail::is_fp8_weight_type(w.qtype)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument(
                 "gdn_input_proj column-parallel: FP8 admits only A16 or A8");
         }
@@ -1164,13 +1186,14 @@ std::size_t gdn_input_proj_column_parallel_workspace_capacity_bytes(QType qtype,
                                                                      LinearPolicy policy,
                                                                      std::int32_t min_tokens,
                                                                      std::int32_t max_tokens) {
+    detail::validate_calibrated_linear_policy(qtype, policy);
     // The activation-quantize workspace (NVFP4 W4A4 / FP8 A8) is a pure function of (tokens, K),
     // and K=5120 is unchanged by the shard (only the output row count N halves) -- the tp1 query is
     // exact here, the same rule attn_input_proj's own shard follows.
-    if (qtype == QType::NVFP4) {
+    if ((qtype == QType::NVFP4)) {
         return detail::nvfp4_gdn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(qtype)) {
         return detail::fp8_gdn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
     throw std::invalid_argument(
@@ -1201,7 +1224,7 @@ void gdn_input_proj_column_parallel(const std::array<Tensor, 2>& x,
     detail::for_each_rank(ec, [&](int rank) {
         const auto slot = static_cast<std::size_t>(rank);
         const Weight& w = query_key_value_z_weight[slot];
-        if (w.qtype == QType::NVFP4) {
+        if ((w.qtype == QType::NVFP4)) {
             detail::nvfp4_gdn_input_dispatch_shard(x[slot], w, qkv_dst[slot], z_dst[slot], policy,
                                                    workspace[slot], ec.dev[slot]->stream);
         } else {
@@ -1318,13 +1341,16 @@ ConvGeometry validate_record_shard_rank(const Tensor& x, const Tensor& conv_weig
 
 void validate_fused_shard_weight(const Weight& w, LinearPolicy policy, const char* op) {
     validate_policy(policy);
-    if (w.qtype == QType::NVFP4) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
+    if ((w.qtype == QType::NVFP4)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument(std::string(op) + ": NVFP4 admits only A16 or A4");
         }
         detail::validate_nvfp4_weight(w, op);
-    } else if (w.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+    } else if (detail::is_fp8_weight_type(w.qtype)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument(std::string(op) + ": FP8 admits only A16 or A8");
         }
         detail::validate_fp8_weight(w, op);
@@ -1339,13 +1365,14 @@ void validate_fused_shard_weight(const Weight& w, LinearPolicy policy, const cha
 std::size_t shard_projection_workspace_bytes(QType qtype, LinearPolicy policy,
                                              std::int32_t min_columns, std::int32_t max_columns,
                                              const char* op) {
+    detail::validate_calibrated_linear_policy(qtype, policy);
     // K = 5120 is unchanged by the shard (only the output row count halves), so the tp1 activation
     // quantization query is exact -- the same argument
     // gdn_input_proj_column_parallel_workspace_capacity_bytes makes.
-    if (qtype == QType::NVFP4) {
+    if ((qtype == QType::NVFP4)) {
         return detail::nvfp4_gdn_input_workspace_capacity_bytes(policy, min_columns, max_columns);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(qtype)) {
         return detail::fp8_gdn_input_workspace_capacity_bytes(policy, min_columns, max_columns);
     }
     if (qtype == QType::Q4G64_F16S || qtype == QType::Q5G64_F16S) {
@@ -1444,7 +1471,7 @@ void gdn_input_proj_conv_snapshot_column_parallel(
             arena.alloc(DType::BF16, {kShardConvChannels, geometry[slot].aggregate_columns});
         compose_shard_conv(x[slot], projected, z_dst[slot], geometry[slot],
                            [&](const Tensor& x_flat, Tensor& out, Tensor& z_flat) {
-                               if (w.qtype == QType::NVFP4) {
+                               if ((w.qtype == QType::NVFP4)) {
                                    detail::nvfp4_gdn_input_dispatch_shard(x_flat, w, out, z_flat,
                                                                           policy, &arena, stream);
                                } else {
@@ -1564,7 +1591,7 @@ void gdn_input_proj_conv_record_column_parallel(
         Tensor record_flat = flatten_columns(record_dst[slot], kShardConvChannels, geometry[slot]);
         compose_shard_conv(x[slot], record_flat, z_dst[slot], geometry[slot],
                            [&](const Tensor& x_flat, Tensor& out, Tensor& z_flat) {
-                               if (w.qtype == QType::NVFP4) {
+                               if ((w.qtype == QType::NVFP4)) {
                                    detail::nvfp4_gdn_input_dispatch_shard(x_flat, w, out, z_flat,
                                                                           policy, &arena, stream);
                                } else {

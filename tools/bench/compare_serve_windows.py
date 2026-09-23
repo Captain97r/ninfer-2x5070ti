@@ -78,6 +78,13 @@ def specs(weights):
     return result
 
 
+def validate_artifact_identity(event):
+    artifact = event.get("artifact", {})
+    if (artifact.get("target") != "qwen3_8_27b"
+            or artifact.get("weights_id") not in ("nvfp4", "nvfp4-modelopt")):
+        raise corpus.CampaignError("expected registered Qwen3.8 nvfp4 or nvfp4-modelopt weights")
+
+
 def validate_start(event):
     corpus.require_server_log_identity(event, "server_start")
     engine = event.get("engine", {})
@@ -87,9 +94,7 @@ def validate_start(event):
     if (server.get("host"), server.get("port"), server.get("public_model_id")) != (
             HOST, PORT, "qwen3.8-27b"):
         raise corpus.CampaignError("unexpected server endpoint or model")
-    artifact = event.get("artifact", {})
-    if (artifact.get("target"), artifact.get("weights_id")) != ("qwen3_8_27b", "nvfp4"):
-        raise corpus.CampaignError("expected the registered Qwen3.8 NVFP4 artifact")
+    validate_artifact_identity(event)
     defaults = event.get("sampling_defaults", {})
     preset = defaults.get("non_thinking", {})
     overrides = defaults.get("server_overrides", {})
@@ -110,7 +115,7 @@ def nonnegative_int(value, name):
     return value
 
 
-def checked_record(spec, payload, response, event, preset):
+def checked_record(spec, payload, response, event, preset, *, weights_id):
     """Reuse corpus metrics, but account for enabled prefix reuse and reject bad data."""
     result = event.get("result", {})
     usage = response.get("usage", {})
@@ -157,7 +162,7 @@ def checked_record(spec, payload, response, event, preset):
         raise corpus.CampaignError("unexpected Engine finish reason or tool count")
     if answer["finish_reason"] != ("tool_calls" if tool_count else mapped_finish):
         raise corpus.CampaignError("HTTP and server log finish reasons differ")
-    record = corpus.build_result_record(spec, "nvfp4", payload, response, event)
+    record = corpus.build_result_record(spec, weights_id, payload, response, event)
     # The corpus disables prefix reuse; its total-prompt numerator would inflate
     # PP throughput here. A full cache hit has no meaningful PP rate.
     record["metrics"].update({
@@ -248,6 +253,7 @@ def execute(command, output, all_specs, report, baseline):
             server.tail = corpus.ServerLogTail(log_path, server.process, 0)
             start = server.wait_until_ready()
             preset = validate_start(start)
+            weights_id = start["artifact"]["weights_id"]
             report["server_start"] = start
             report["contract"]["resolved_nonthinking_sampling"] = preset
             if baseline and not json_equal(report["contract"], baseline.get("contract")):
@@ -268,7 +274,7 @@ def execute(command, output, all_specs, report, baseline):
                             if last_id is not None and request_id != last_id + 1:
                                 raise corpus.CampaignError("unexpected concurrent or missing serving request")
                             last_id = request_id
-                            record = checked_record(spec, payload, response, event, preset)
+                            record = checked_record(spec, payload, response, event, preset, weights_id=weights_id)
                             record.update({"phase": phase, "http_wall_seconds": wall_seconds})
                             corpus.append_record(records_file, record)
                             report[phase].append(record)

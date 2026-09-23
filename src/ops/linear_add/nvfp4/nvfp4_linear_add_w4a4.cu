@@ -1,3 +1,4 @@
+#include "ops/linear/nvfp4/nvfp4_format.h"
 #include "ops/linear_add/nvfp4/nvfp4_linear_add_plan.h"
 
 #include "core/device.h"
@@ -25,7 +26,7 @@ void launch_gemm(const Weight& weight, Tensor& residual, Nvfp4W4a4Workspace work
                     (tokens + Schedule::kBlockM - 1) / Schedule::kBlockM);
     const Nvfp4W4a4MaterializedActivation activation{workspace.codes, workspace.scales};
     auto* output      = static_cast<__nv_bfloat16*>(residual.data);
-    const float alpha = 1.0F / (weight.input_scale_divisor * weight.weight_scale_divisor);
+    const float alpha = nvfp4_product_multiplier(weight);
     nvfp4_w4a4_mma_kernel<Geometry, Schedule><<<grid, Schedule::kThreads, 0, stream>>>(
         activation, static_cast<const std::uint8_t*>(weight.qdata),
         static_cast<const std::uint8_t*>(weight.scales), tokens, alpha,
@@ -60,7 +61,7 @@ void nvfp4_linear_add_w4a4_launch(const Tensor& x, const Weight& weight, Tensor&
     const std::int32_t tokens  = x.ne[1];
     const Nvfp4Problem problem = resolve_nvfp4_problem(weight.n, weight.k);
     if (tokens >= 1024 && (tokens % kTmaBlockM) == 0) {
-        const float alpha = 1.0F / (weight.input_scale_divisor * weight.weight_scale_divisor);
+        const float alpha = nvfp4_product_multiplier(weight);
         launch_nvfp4_w4a4_tma_linear_add(problem, workspace.codes, workspace.scales,
                                          static_cast<const std::uint8_t*>(weight.qdata),
                                          static_cast<const std::uint8_t*>(weight.scales),

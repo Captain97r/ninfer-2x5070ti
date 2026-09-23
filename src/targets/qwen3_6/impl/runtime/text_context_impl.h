@@ -313,6 +313,7 @@ void TextContext::bind() {
     }
     if (weights_.optimized_proposal) {
         const auto& proposal = *weights_.optimized_proposal;
+        proposal_head_policy_ = proposal.policy;
         set_proposal_head(&proposal.head, static_cast<const std::int32_t*>(proposal.token_ids.data),
                           proposal.head.n);
         if (tp_ != nullptr) {
@@ -644,13 +645,15 @@ void TextContext::proposal_argmax(const Tensor& hidden, Tensor& logits, Tensor& 
     require_tensor_window(logits, DType::BF16, kCfg.vocab, T, "proposal logits");
     if (proposal_head_ != nullptr) {
         Tensor proposal_logits = work_.alloc(DType::BF16, {proposal_head_n_, T});
-        ops::linear(hidden, *proposal_head_, proposal_logits, ctx_.stream);
+        ops::linear(hidden, *proposal_head_, proposal_logits, proposal_head_policy_, work_,
+                    ctx_.stream);
         ops::argmax(proposal_logits, proposal_tokens, proposal_head_n_, ctx_.stream);
         ops::proposal_remap_token_ids(proposal_tokens, proposal_head_ids_, proposal_head_n_,
                                       ctx_.stream);
     } else {
         Tensor output_logits = matrix_window(logits, T);
-        ops::linear(hidden, *lm_head_, output_logits, ctx_.stream);
+        ops::linear(hidden, *lm_head_, output_logits, weights_.output_head_policy, work_,
+                    ctx_.stream);
         ops::argmax(output_logits, proposal_tokens, kCfg.token_domain, ctx_.stream);
     }
 }
@@ -760,7 +763,7 @@ void TextContext::ordinary_decode_batch(const Tensor& ids, const Tensor& cache_p
         NullTap tap;
         run_layers(x, Phase::Verify, tap);
         ops::rmsnorm(x, *final_norm_, kCfg.rms_eps, true, hidden, stream);
-        ops::linear(hidden, *lm_head_, logits, stream);
+        ops::linear(hidden, *lm_head_, logits, weights_.output_head_policy, work_, stream);
     }
     work_.reset();
 }
@@ -821,7 +824,8 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
         Tensor flat_logits = logits.view({kCfg.vocab, columns});
         Tensor flat_tokens = target_tokens.view({columns});
         ops::rmsnorm(x, *final_norm_, kCfg.rms_eps, true, flat_hidden, stream);
-        ops::linear(flat_hidden, *lm_head_, flat_logits, stream);
+        ops::linear(flat_hidden, *lm_head_, flat_logits, weights_.output_head_policy, work_,
+                    stream);
         ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, stream);
     }
     work_.reset();
@@ -1267,7 +1271,7 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             if (is_last) {
                 Tensor last_xf = xf.slice(1, len - 1, 1);
                 Tensor logits  = matrix_window(io_.logits, 1);
-                ops::linear(last_xf, *lm_head_, logits, s);
+                ops::linear(last_xf, *lm_head_, logits, weights_.output_head_policy, work_, s);
                 // Set io_.pos to the bonus token's absolute position (base + T) before picking so
                 // the sampler RNG is keyed by it (prefill purpose keeps it distinct from the first
                 // decode step, which reuses the same io_.pos).
@@ -1933,7 +1937,8 @@ void TextContext::logits_tp2(const std::array<Tensor, 2>& hidden, Tensor& logits
     for (std::size_t r = 0; r < 2; ++r) {
         part[r] = ws[r]->alloc(DType::BF16, {kShardVocab, columns});
     }
-    ops::linear_column_parallel(hidden, {*lm_head_, *lm_head_peer_}, part, execution);
+    ops::linear_column_parallel(hidden, {*lm_head_, *lm_head_peer_}, part,
+                                weights_.output_head_policy, ws, execution);
 
     // Gather the complete rectangular logit view, including padded verification columns.
     // The received shard lives alongside `part` until the destination's local interleave.
@@ -2630,7 +2635,8 @@ void TextContext::proposal_argmax_tp2(const std::array<Tensor, 2>& hidden,
     for (std::size_t r = 0; r < 2; ++r) {
         part[r] = ws[r]->alloc(DType::BF16, {shard_rows, T});
     }
-    ops::linear_column_parallel(hidden, {*proposal_head_, *proposal_head_peer_}, part, execution);
+    ops::linear_column_parallel(hidden, {*proposal_head_, *proposal_head_peer_}, part,
+                                proposal_head_policy_, ws, execution);
     ops::argmax_row_parallel(part, proposal_tokens, total_rows, ws, execution, *tp_->transfer);
     const CurrentDevice restore;
     CUDA_CHECK(cudaSetDevice(ctx_.device));

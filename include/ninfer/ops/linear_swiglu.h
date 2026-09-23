@@ -41,7 +41,9 @@ linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gate_up_rows,
  * Op: linear_swiglu
  *
  * Math / indexing:
- *   gate_up = Linear(x, gate_up_weight); M=gate_up_rows/2;
+ *   gate_up = Decode(gate_up_weight) * A; M=gate_up_rows/2;
+ *   A is represented BF16 x under legacy policies, or Linear's specified calibrated activation
+ *   under CalibratedA8/CalibratedA4. The ideal has no intermediate projection output cast.
  *   ideal[i,t] = SiLU(gate_up[i,t]) * gate_up[M+i,t].
  *
  * Logical shapes / supported domain:
@@ -62,6 +64,15 @@ linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gate_up_rows,
  *   staging, and workspace precision; those private choices are not semantic rounding boundaries.
  *   Under AllowA8, row-scaled FP8 resolves T=1 and every T>=3 to A8 and T=2 to fused A16 SIMT;
  *   A16Only uses fused A16 kernels for every positive T.
+ *
+ * Calibrated formats:
+ *   FP8_E4M3FN_ROW_F32S / RowScaleF32 admits only CalibratedA8 at the same parent and TP2
+ *   shapes. Linear's fixed activation codec applies before both gate/up contractions, at every
+ *   T. The common input calibration must be identical across the fused source projections;
+ *   each gate/up row keeps its original FP32 weight multiplier. NVFP4_F32M admits only
+ *   CalibratedA4 at the registered NVFP4 shapes. The oracle evaluates these explicit codecs
+ *   independently before the complete FP64 gate/up dots and ideal SiLU product. Private
+ *   intermediate BF16 materializations are still evaluated as numerical implementation error.
  *
  * Effects:
  *   Writes the full output; x/weight and output must not alias.

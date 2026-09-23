@@ -14,8 +14,8 @@
 namespace ninfer::ops::detail {
 namespace {
 
-template <class Geometry, class Output, bool FullTokens>
-void launch_mma(const Weight& weight, Tensor& qkv, Tensor& z, Fp8A8Workspace workspace,
+template <class Geometry, class Output, bool FullTokens, class WeightScale>
+void launch_mma_typed(const Weight& weight, Tensor& qkv, Tensor& z, Fp8A8Workspace workspace,
                 std::int32_t tokens, cudaStream_t stream) {
     using Schedule           = typename Fp8LinearA8ProductionSchedule<Geometry>::Type;
     constexpr int kRowTiles  = Geometry::kOutputRows / Schedule::kBlockRows;
@@ -25,15 +25,26 @@ void launch_mma(const Weight& weight, Tensor& qkv, Tensor& z, Fp8A8Workspace wor
 
     if constexpr (Schedule::kSharedBytes > 48 * 1024) {
         ensure_func_attr_per_device(
-            fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue, Output>,
+            fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue, Output,
+                           Fp8MmaIdentityRows, false, WeightScale>,
             cudaFuncAttributeMaxDynamicSharedMemorySize, Schedule::kSharedBytes);
     }
     fp8_mma_kernel<Geometry, Schedule, FullTokens>
         <<<blocks, Schedule::kThreads, Schedule::kSharedBytes, stream>>>(
             workspace.codes, workspace.scales, static_cast<const std::uint8_t*>(weight.qdata),
-            static_cast<const __nv_bfloat16*>(weight.scales), tokens, Fp8IdentityEpilogue{},
+            static_cast<const WeightScale*>(weight.scales), tokens, Fp8IdentityEpilogue{},
             output);
     CUDA_CHECK(cudaGetLastError());
+}
+
+template <class Geometry, class Output, bool FullTokens>
+void launch_mma(const Weight& weight, Tensor& qkv, Tensor& z, Fp8A8Workspace workspace,
+                std::int32_t tokens, cudaStream_t stream) {
+    if (weight.qtype == QType::FP8_E4M3FN_ROW_F32S) {
+        launch_mma_typed<Geometry, Output, FullTokens, float>(weight, qkv, z, workspace, tokens, stream);
+    } else {
+        launch_mma_typed<Geometry, Output, FullTokens, __nv_bfloat16>(weight, qkv, z, workspace, tokens, stream);
+    }
 }
 
 template <class Geometry, class Output>

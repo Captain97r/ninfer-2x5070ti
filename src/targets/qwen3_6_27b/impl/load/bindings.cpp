@@ -33,7 +33,7 @@ bool is_bf16_attention_output(std::size_t layer) { return layer == 3 || layer ==
 
 bool is_bf16_gdn_output(std::size_t layer) { return layer == 4; }
 
-NumericFormat endpoint_format(WeightsProfile weights_profile) {
+NumericFormat embedding_format(WeightsProfile weights_profile) {
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
         return NumericFormat::Q6G64_F16S;
@@ -42,6 +42,8 @@ NumericFormat endpoint_format(WeightsProfile weights_profile) {
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::Qwen38Nvfp4:
         return NumericFormat::FP8_E4M3FN_ROW_BF16S;
+    case WeightsProfile::Qwen38ModelOpt:
+        return NumericFormat::BF16;
     }
     throw std::invalid_argument("qwen3_6_27b: invalid weights profile");
 }
@@ -99,18 +101,46 @@ WeightPlan bind_nvfp4_weight(artifact::Binder& binder, std::string_view name, st
                       .input_scale_divisor_bits  = input_bits};
 }
 
+// ModelOpt scalar words are multipliers, unlike the inherited divisor artifact. Validate them
+// at binding and retain their exact FP32 bits in the immutable per-rank Weight view.
+WeightPlan
+bind_modelopt_weight(artifact::Binder& binder, std::string_view name, NumericFormat format,
+                     std::int32_t rows, std::int32_t columns, std::string_view input_name,
+                     artifact::TensorPlacement placement = artifact::TensorPlacement::Device) {
+    const auto object = artifact::bind_tensor(
+        binder, name, format,
+        {static_cast<std::uint64_t>(rows), static_cast<std::uint64_t>(columns)}, placement);
+    const auto input      = artifact::bind_tensor(binder, input_name, NumericFormat::FP32, {},
+                                                  artifact::TensorPlacement::ValidateOnly);
+    const auto input_bits = read_u32_le(binder.payload(input).data, 0, input_name);
+    require_positive_finite(input_bits, input_name);
+    WeightPlan out{.object = object, .format = format};
+    out.input_scale_multiplier_bits = input_bits;
+    if (format == NumericFormat::NVFP4_F32M) {
+        const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
+                                                    static_cast<std::uint64_t>(columns)};
+        const auto geometry                      = artifact::block_scale_geometry(format, shape);
+        out.weight_scale_multiplier_bits =
+            read_u32_le(binder.payload(object).data, geometry.weight_multiplier_offset, name);
+        require_positive_finite(out.weight_scale_multiplier_bits, name);
+    }
+    return out;
+}
+
 Weight materialized_weight(const artifact::MaterializedArtifact& materialized,
                            const WeightPlan& plan, std::int32_t rows, std::int32_t columns,
                            int device = 0) {
-    if (plan.format != NumericFormat::NVFP4) {
-        return artifact::materialized_weight(materialized, plan.object, plan.format, rows, columns,
-                                             device);
+    if (plan.format != NumericFormat::NVFP4 && plan.format != NumericFormat::NVFP4_F32M) {
+        auto out = artifact::materialized_weight(materialized, plan.object, plan.format, rows,
+                                                 columns, device);
+        out.input_scale_multiplier = std::bit_cast<float>(plan.input_scale_multiplier_bits);
+        return out;
     }
 
     const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
                                                 static_cast<std::uint64_t>(columns)};
     const artifact::BlockScaleGeometry geometry =
-        artifact::block_scale_geometry(NumericFormat::NVFP4, shape);
+        artifact::block_scale_geometry(plan.format, shape);
     artifact::require_placement_bytes(materialized, plan.object, device, geometry.encoded_bytes);
     const auto* bytes =
         static_cast<const std::byte*>(materialized.device_data(plan.object, device));
@@ -118,7 +148,8 @@ Weight materialized_weight(const artifact::MaterializedArtifact& materialized,
     Weight out{};
     out.payload              = bytes;
     out.payload_bytes        = geometry.encoded_bytes;
-    out.qtype                = QType::NVFP4;
+    const bool multiplier    = plan.format == NumericFormat::NVFP4_F32M;
+    out.qtype                = multiplier ? QType::NVFP4_F32M : QType::NVFP4;
     out.group_size           = 16;
     out.ndim                 = 2;
     out.qdata                = bytes;
@@ -126,7 +157,8 @@ Weight materialized_weight(const artifact::MaterializedArtifact& materialized,
     out.n                    = rows;
     out.k                    = columns;
     out.group                = 16;
-    out.layout               = QuantLayout::BlockScaleK16M128x4;
+    out.layout =
+        multiplier ? QuantLayout::BlockScaleK16M128x4Multiplier : QuantLayout::BlockScaleK16M128x4;
     out.scale_dtype          = DType::FP8_E4M3FN;
     out.shape[0]             = rows;
     out.shape[1]             = columns;
@@ -134,6 +166,8 @@ Weight materialized_weight(const artifact::MaterializedArtifact& materialized,
     out.padded_shape[1]      = columns;
     out.weight_scale_divisor = std::bit_cast<float>(plan.weight_scale_divisor_bits);
     out.input_scale_divisor  = std::bit_cast<float>(plan.input_scale_divisor_bits);
+    out.weight_scale_multiplier = std::bit_cast<float>(plan.weight_scale_multiplier_bits);
+    out.input_scale_multiplier  = std::bit_cast<float>(plan.input_scale_multiplier_bits);
     return out;
 }
 
@@ -405,6 +439,60 @@ void bind_qwen38_nvfp4_text_layers(artifact::Binder& binder, BindingPlan& out) {
     }
 }
 
+void bind_qwen38_modelopt_text_layers(artifact::Binder& binder, BindingPlan& out) {
+    constexpr NumericFormat kFp8 = NumericFormat::FP8_E4M3FN_ROW_F32S;
+    for (std::size_t layer = 0; layer < kTextLayers; ++layer) {
+        TextLayerPlan& target    = out.text_layers[layer];
+        const std::string prefix = "text/layers/" + std::to_string(layer) + "/";
+        target.input_norm        = artifact::bind_device_tensor(binder, prefix + "input_norm",
+                                                                NumericFormat::BF16, {5120});
+        target.is_full_attention = is_full_layer(layer);
+        if (target.is_full_attention) {
+            target.attention.projection = FusedAttentionProjectionPlan{
+                .query_key_gate_value = bind_modelopt_weight(
+                    binder, prefix + "attention/query_key_gate_value", kFp8, 14336, 5120,
+                    prefix + "attention/input_projection/input_scale_multiplier"),
+            };
+            target.attention.query_norm = artifact::bind_device_tensor(
+                binder, prefix + "attention/query_norm", NumericFormat::BF16, {256});
+            target.attention.key_norm = artifact::bind_device_tensor(
+                binder, prefix + "attention/key_norm", NumericFormat::BF16, {256});
+            target.attention.output =
+                bind_modelopt_weight(binder, prefix + "attention/output", kFp8, 5120, 6144,
+                                     prefix + "attention/output_projection/input_scale_multiplier");
+        } else {
+            target.gdn.a_log       = artifact::bind_device_tensor(binder, prefix + "gdn/a_log",
+                                                                  NumericFormat::FP32, {48});
+            target.gdn.dt_bias     = artifact::bind_device_tensor(binder, prefix + "gdn/dt_bias",
+                                                                  NumericFormat::FP32, {48});
+            target.gdn.convolution = artifact::bind_device_tensor(
+                binder, prefix + "gdn/convolution", NumericFormat::BF16, {4, 10240});
+            target.gdn.control_projection = FusedGdnControlProjectionPlan{
+                .a_b_projection = bind_weight(binder, prefix + "gdn/a_b_projection",
+                                              NumericFormat::BF16, {96, 5120}),
+            };
+            target.gdn.input_projection = FusedGdnInputProjectionPlan{
+                .query_key_value_z = bind_modelopt_weight(
+                    binder, prefix + "gdn/query_key_value_z", kFp8, 16384, 5120,
+                    prefix + "gdn/input_projection/input_scale_multiplier"),
+            };
+            target.gdn.norm = artifact::bind_device_tensor(binder, prefix + "gdn/norm",
+                                                           NumericFormat::BF16, {128});
+            target.gdn.output =
+                bind_modelopt_weight(binder, prefix + "gdn/output", kFp8, 5120, 6144,
+                                     prefix + "gdn/output_projection/input_scale_multiplier");
+        }
+        target.post_attention_norm = artifact::bind_device_tensor(
+            binder, prefix + "post_attention_norm", NumericFormat::BF16, {5120});
+        target.mlp.gate_up =
+            bind_modelopt_weight(binder, prefix + "mlp/gate_up", NumericFormat::NVFP4_F32M, 34816,
+                                 5120, prefix + "mlp/gate_up_projection/input_scale_multiplier");
+        target.mlp.down =
+            bind_modelopt_weight(binder, prefix + "mlp/down", NumericFormat::NVFP4_F32M, 5120,
+                                 17408, prefix + "mlp/down_projection/input_scale_multiplier");
+    }
+}
+
 void validate_draft_ids(const artifact::Binder& binder, artifact::ObjectHandle handle) {
     constexpr std::size_t kDraftVocab     = 131072;
     constexpr std::size_t kTokenizerVocab = 248077;
@@ -517,8 +605,8 @@ void append_channel_block(ShardPlan& plan, std::uint64_t block_offset, std::uint
 
 // Vocab row-splits (output_head, draft_head): the row dimension IS the vocab, so this is
 // mechanically a column-parallel single-block split, just keyed by row count rather than a head
-// count. Always row-split-k128-v1 or row-scale-v1 in every profile (see endpoint_format / the
-// draft_head Q4G64_F16S binding above) -- never blockscale, so no NVFP4 tile check applies.
+// count. ModelOpt adds block-scaled multiplier heads. Both TP2 row boundaries (124160 and
+// 65536) are 128-row tile aligned; tensor_row_slice validates the actual bound format.
 //
 // `draft_head_token_ids` is deliberately NOT a member of this family: it is an index map consumed
 // after a GLOBAL argmax, so it is replicated. See the replicated block in `shard_mapping` below.
@@ -862,9 +950,9 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.frontend     = qwen3_6::bind_frontend_resources(binder);
     out.features     = features;
 
-    const NumericFormat vocabulary_format = endpoint_format(weights_profile);
+    const NumericFormat embedding_storage = embedding_format(weights_profile);
     out.token_embedding =
-        bind_weight(binder, "text/token_embedding", vocabulary_format, {248320, 5120});
+        bind_weight(binder, "text/token_embedding", embedding_storage, {248320, 5120});
     switch (weights_profile) {
     case WeightsProfile::Qwen36GroupwiseInt:
     case WeightsProfile::Qwen38GroupwiseInt:
@@ -876,17 +964,31 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     case WeightsProfile::Qwen38Nvfp4:
         bind_qwen38_nvfp4_text_layers(binder, out);
         break;
+    case WeightsProfile::Qwen38ModelOpt:
+        bind_qwen38_modelopt_text_layers(binder, out);
+        break;
     default:
         throw std::invalid_argument("qwen3_6_27b: invalid weights profile");
     }
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
-    out.output_head = bind_weight(binder, "text/output_head", vocabulary_format, {248320, 5120});
+    const bool modelopt = weights_profile == WeightsProfile::Qwen38ModelOpt;
+    out.head_policy     = modelopt ? ops::LinearPolicy::CalibratedA4 : ops::LinearPolicy::A16Only;
+    out.output_head =
+        modelopt ? bind_modelopt_weight(binder, "text/output_head", NumericFormat::NVFP4_F32M,
+                                        248320, 5120, "text/output_head/input_scale_multiplier")
+                 : bind_weight(binder, "text/output_head", embedding_storage, {248320, 5120});
     const artifact::TensorPlacement proposal_placement =
         features.optimized_proposal() ? artifact::TensorPlacement::Device
                                       : artifact::TensorPlacement::ValidateOnly;
-    out.draft_head = artifact::bind_tensor(binder, "text/draft_head", NumericFormat::Q4G64_F16S,
-                                           {131072, 5120}, proposal_placement);
+    out.draft_head =
+        modelopt ? bind_modelopt_weight(binder, "text/draft_head", NumericFormat::NVFP4_F32M,
+                                        131072, 5120, "text/draft_head/input_scale_multiplier",
+                                        proposal_placement)
+                 : WeightPlan{.object = artifact::bind_tensor(binder, "text/draft_head",
+                                                              NumericFormat::Q4G64_F16S,
+                                                              {131072, 5120}, proposal_placement),
+                              .format = NumericFormat::Q4G64_F16S};
     out.draft_head_token_ids = artifact::bind_tensor(
         binder, "text/draft_head_token_ids", NumericFormat::I32, {131072}, proposal_placement);
     validate_draft_ids(binder, out.draft_head_token_ids);
@@ -1016,11 +1118,11 @@ void LoadedModelData::build_device_view(const BindingPlan& plan, int device,
     final_norm = artifact::materialized_tensor(backing, plan.final_norm, NumericFormat::BF16,
                                                {5120}, device);
     output_head = materialized_weight(backing, plan.output_head, 248320 / tp, 5120, device);
+    runtime.output_head_policy = plan.head_policy;
     if (plan.features.optimized_proposal()) {
         auto& proposal = runtime.optimized_proposal.emplace();
-        proposal.head =
-            artifact::materialized_weight(backing, plan.draft_head, NumericFormat::Q4G64_F16S,
-                                          131072 / tp, 5120, device);
+        proposal.head   = materialized_weight(backing, plan.draft_head, 131072 / tp, 5120, device);
+        proposal.policy = plan.head_policy;
         // Replicated: the winning index comes from a GLOBAL argmax over the allgathered proposal
         // logits and can name a row in either half.
         proposal.token_ids = artifact::materialized_tensor(backing, plan.draft_head_token_ids,

@@ -29,6 +29,7 @@ Fp8LinearAddRoute resolve_route(std::int32_t output_rows, std::int32_t input_row
          input_rows != Fp8Residual17408Tp2RowGeometry::kInputRows)) {
         throw std::invalid_argument("fp8 linear_add: unsupported shape");
     }
+    if (policy == LinearPolicy::CalibratedA8) { return Fp8LinearAddRoute::A8; }
     if (policy == LinearPolicy::A16Only) { return Fp8LinearAddRoute::A16; }
     if (policy != LinearPolicy::AllowA8) {
         throw std::invalid_argument("fp8 linear_add: unsupported policy");

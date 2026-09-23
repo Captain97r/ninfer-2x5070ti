@@ -70,7 +70,7 @@ class BlockScaleGeometry:
     code_plane_bytes: int
     scale_plane_offset: int
     scale_plane_bytes: int
-    weight_divisor_offset: int
+    global_scale_offset: int
     payload_bytes: int
 
 
@@ -117,6 +117,13 @@ ROW_SCALE_V1 = Layout(
     frozenset(("FP8_E4M3FN_ROW_BF16S",)),
 )
 
+BLOCKSCALE_K16_M128X4_MULTIPLIER_V1 = Layout(
+    "blockscale-k16-m128x4-multiplier-v1", 256, frozenset(("NVFP4_F32M",))
+)
+ROW_SCALE_F32_V1 = Layout(
+    "row-scale-f32-v1", 256, frozenset(("FP8_E4M3FN_ROW_F32S",))
+)
+
 LAYOUTS = MappingProxyType(
     {
         layout.name: layout
@@ -125,6 +132,8 @@ LAYOUTS = MappingProxyType(
             ROW_SPLIT_K128_V1,
             BLOCKSCALE_K16_M128X4_V1,
             ROW_SCALE_V1,
+            BLOCKSCALE_K16_M128X4_MULTIPLIER_V1,
+            ROW_SCALE_F32_V1,
         )
     }
 )
@@ -235,7 +244,7 @@ def block_scale_geometry(
     code_plane_bytes = n * k // 2
     scale_plane_offset = align_up(code_plane_bytes, PLANE_ALIGNMENT)
     scale_plane_bytes = n * k // spec.group_size
-    weight_divisor_offset = scale_plane_offset + scale_plane_bytes
+    global_scale_offset = scale_plane_offset + scale_plane_bytes
     return BlockScaleGeometry(
         n=n,
         k=k,
@@ -244,8 +253,8 @@ def block_scale_geometry(
         code_plane_bytes=code_plane_bytes,
         scale_plane_offset=scale_plane_offset,
         scale_plane_bytes=scale_plane_bytes,
-        weight_divisor_offset=weight_divisor_offset,
-        payload_bytes=weight_divisor_offset + 4,
+        global_scale_offset=global_scale_offset,
+        payload_bytes=global_scale_offset + 4,
     )
 
 
@@ -258,7 +267,7 @@ def row_scale_geometry(
     n, k = _shape(shape, rank=2)
     code_plane_bytes = n * k
     scale_plane_offset = align_up(code_plane_bytes, PLANE_ALIGNMENT)
-    scale_plane_bytes = n * 2
+    scale_plane_bytes = n * spec.scale_bytes
     return RowScaleGeometry(
         n=n,
         k=k,
@@ -291,11 +300,11 @@ def encoded_size(
         if not isinstance(numeric_spec, QuantFormat):
             raise ValueError("row-split-k128-v1 requires a grouped quantized format")
         return row_split_geometry(numeric_spec, shape).payload_bytes
-    if layout_spec is BLOCKSCALE_K16_M128X4_V1:
+    if layout_spec in (BLOCKSCALE_K16_M128X4_V1, BLOCKSCALE_K16_M128X4_MULTIPLIER_V1):
         if not isinstance(numeric_spec, Nvfp4Format):
             raise ValueError("blockscale-k16-m128x4-v1 requires NVFP4")
         return block_scale_geometry(numeric_spec, shape).payload_bytes
-    if layout_spec is ROW_SCALE_V1:
+    if layout_spec in (ROW_SCALE_V1, ROW_SCALE_F32_V1):
         if not isinstance(numeric_spec, Fp8RowFormat):
             raise ValueError("row-scale-v1 requires a row-scaled FP8 format")
         return row_scale_geometry(numeric_spec, shape).payload_bytes
@@ -380,22 +389,20 @@ def _exact_uint8_matrix(
     return tensor.detach().contiguous().cpu()
 
 
-def _exact_bf16_vector(tensor: torch.Tensor, length: int, label: str) -> torch.Tensor:
-    if tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != (length,):
-        raise TypeError(f"{label} must be BF16 with shape ({length},)")
+def _exact_scale_vector(tensor: torch.Tensor, length: int, spec: Fp8RowFormat) -> torch.Tensor:
+    expected = _DIRECT_DTYPES[spec.scale_format]
+    if tensor.dtype != expected or tuple(tensor.shape) != (length,):
+        raise TypeError(f"row scales must be {spec.scale_format} with shape ({length},)")
     return tensor.detach().contiguous().cpu()
 
 
 def _validate_fp8_row_words(codes: torch.Tensor, scales: torch.Tensor) -> None:
     if bool(((codes & 0x7F) == 0x7F).any()):
         raise ValueError("row-scaled FP8 codes must be finite E4M3FN words")
-    scale_words = scales.view(torch.int16).to(torch.int32) & 0xFFFF
-    invalid_scales = ((scale_words & 0x8000) != 0) | (
-        (scale_words & 0x7F80) == 0x7F80
-    )
-    if bool(invalid_scales.any()):
-        raise ValueError("row-scaled FP8 scales must be nonnegative finite BF16 words")
-    zero_scale = scale_words == 0
+    if bool((torch.signbit(scales) | ~torch.isfinite(scales)).any()):
+        label = "BF16" if scales.dtype == torch.bfloat16 else "FP32"
+        raise ValueError(f"row-scaled FP8 scales must be nonnegative finite {label} words")
+    zero_scale = scales == 0
     nonzero_code = (codes & 0x7F) != 0
     if bool((zero_scale.unsqueeze(1) & nonzero_code).any()):
         raise ValueError("a zero row scale requires only signed-zero FP8 codes")
@@ -405,26 +412,26 @@ def encode_fp8_row_scaled(
     code_words: torch.Tensor,
     row_scales: torch.Tensor,
     shape: Sequence[int],
+    *,
+    format: str | Fp8RowFormat = "FP8_E4M3FN_ROW_BF16S",
 ) -> bytes:
-    """Encode exact E4M3FN code words and BF16 row multipliers."""
-
-    geometry = row_scale_geometry("FP8_E4M3FN_ROW_BF16S", shape)
+    """Encode exact E4M3FN words and explicitly typed row multipliers."""
+    spec = _format(format)
+    if not isinstance(spec, Fp8RowFormat):
+        raise ValueError("FP8 row encoding requires a row-scaled format")
+    geometry = row_scale_geometry(spec, shape)
     codes = _exact_uint8_matrix(
         code_words,
         (geometry.n, geometry.k),
         "row-scaled FP8 codes",
     )
-    scales = _exact_bf16_vector(
-        row_scales,
-        geometry.n,
-        "row-scaled FP8 scales",
-    )
+    scales = _exact_scale_vector(row_scales, geometry.n, spec)
     _validate_fp8_row_words(codes, scales)
     payload = bytearray(geometry.payload_bytes)
     payload[: geometry.code_plane_bytes] = codes.numpy().tobytes()
     scale_begin = geometry.scale_plane_offset
     payload[scale_begin : scale_begin + geometry.scale_plane_bytes] = encode_direct(
-        scales, "BF16"
+        scales, spec.scale_format
     )
     return bytes(payload)
 
@@ -432,10 +439,14 @@ def encode_fp8_row_scaled(
 def decode_fp8_row_scaled_words(
     payload: Payload,
     shape: Sequence[int],
+    *,
+    format: str | Fp8RowFormat = "FP8_E4M3FN_ROW_BF16S",
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Decode exact E4M3FN code words and BF16 row multipliers."""
-
-    geometry = row_scale_geometry("FP8_E4M3FN_ROW_BF16S", shape)
+    """Decode exact E4M3FN words and explicitly typed row multipliers."""
+    spec = _format(format)
+    if not isinstance(spec, Fp8RowFormat):
+        raise ValueError("FP8 row decoding requires a row-scaled format")
+    geometry = row_scale_geometry(spec, shape)
     if _payload_length(payload) != geometry.payload_bytes:
         raise ValueError(
             f"row-scaled FP8 payload has {_payload_length(payload)} bytes, "
@@ -445,7 +456,7 @@ def decode_fp8_row_scaled_words(
     codes = raw[: geometry.code_plane_bytes].clone().reshape(geometry.n, geometry.k)
     scale_begin = geometry.scale_plane_offset
     scale_bytes = raw[scale_begin : scale_begin + geometry.scale_plane_bytes]
-    scales = decode_direct(scale_bytes, "BF16", (geometry.n,))
+    scales = decode_direct(scale_bytes, spec.scale_format, (geometry.n,))
     _validate_fp8_row_words(codes, scales)
     return codes, scales
 
@@ -454,13 +465,18 @@ def dequantize_fp8_row_scaled(
     payload: Payload,
     shape: Sequence[int],
     dtype: torch.dtype = torch.float32,
+    *,
+    format: str | Fp8RowFormat = "FP8_E4M3FN_ROW_BF16S",
 ) -> torch.Tensor:
-    """Reconstruct a row-scaled FP8 matrix from its exact stored words."""
-
-    codes, scales = decode_fp8_row_scaled_words(payload, shape)
-    return (codes.view(torch.float8_e4m3fn).float() * scales.float().unsqueeze(1)).to(
-        dtype
-    )
+    """Reconstruct represented weights; float64 retains the exact FP32 scale product."""
+    codes, scales = decode_fp8_row_scaled_words(payload, shape, format=format)
+    spec = _format(format)
+    # The inherited BF16-scale format defines a binary32 reconstruction boundary.
+    # FP32 multipliers retain their exact product in an explicitly requested FP64 oracle.
+    compute = (torch.float64 if dtype == torch.float64 and spec.scale_format == "FP32"
+               else torch.float32)
+    return (codes.view(torch.float8_e4m3fn).to(compute) *
+            scales.to(compute).unsqueeze(1)).to(dtype)
 
 
 def swizzle_nvfp4_scales(
@@ -509,27 +525,29 @@ def unswizzle_nvfp4_scales(
 def _positive_fp32_word(value: torch.Tensor | bytes | bytearray | memoryview) -> bytes:
     if isinstance(value, torch.Tensor):
         if value.dtype != torch.float32 or value.numel() != 1:
-            raise TypeError("NVFP4 weight divisor must be one FP32 word")
+            raise TypeError("NVFP4 global scale must be one FP32 word")
         raw = encode_direct(value.reshape(()), "FP32")
     else:
         raw = bytes(value)
         if len(raw) != 4:
-            raise TypeError("NVFP4 weight divisor must contain exactly four bytes")
+            raise TypeError("NVFP4 global scale must contain exactly four bytes")
     word = struct.unpack("<I", raw)[0]
     if not valid_positive_fp32_word(word):
-        raise ValueError("NVFP4 weight divisor must be finite and positive")
+        raise ValueError("NVFP4 global scale must be finite and positive")
     return raw
 
 
 def encode_nvfp4(
     packed_codes: torch.Tensor,
     natural_scales: torch.Tensor,
-    weight_divisor: torch.Tensor | bytes | bytearray | memoryview,
+    global_scale: torch.Tensor | bytes | bytearray | memoryview,
     shape: Sequence[int],
+    *,
+    format: str | Nvfp4Format = "NVFP4",
 ) -> bytes:
     """Encode exact source NVFP4 words without numerical conversion."""
 
-    geometry = block_scale_geometry("NVFP4", shape)
+    geometry = block_scale_geometry(format, shape)
     codes = _exact_uint8_matrix(
         packed_codes,
         (geometry.n, geometry.k // 2),
@@ -543,7 +561,7 @@ def encode_nvfp4(
     invalid = ((scales & 0x80) != 0) | (scales == 0x7F)
     if bool(invalid.any()):
         raise ValueError("NVFP4 scales must be nonnegative finite E4M3FN words")
-    divisor = _positive_fp32_word(weight_divisor)
+    scale_word = _positive_fp32_word(global_scale)
     swizzled = swizzle_nvfp4_scales(scales, shape)
     payload = bytearray(geometry.payload_bytes)
     payload[: geometry.code_plane_bytes] = codes.numpy().tobytes()
@@ -551,17 +569,19 @@ def encode_nvfp4(
         geometry.scale_plane_offset :
         geometry.scale_plane_offset + geometry.scale_plane_bytes
     ] = swizzled.numpy().tobytes()
-    payload[geometry.weight_divisor_offset :] = divisor
+    payload[geometry.global_scale_offset :] = scale_word
     return bytes(payload)
 
 
 def decode_nvfp4_words(
     payload: Payload,
     shape: Sequence[int],
+    *,
+    format: str | Nvfp4Format = "NVFP4",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Decode exact packed code, natural scale, and divisor words."""
+    """Decode packed codes, natural block scales and the registered global-scale word."""
 
-    geometry = block_scale_geometry("NVFP4", shape)
+    geometry = block_scale_geometry(format, shape)
     if _payload_length(payload) != geometry.payload_bytes:
         raise ValueError(
             f"NVFP4 payload has {_payload_length(payload)} bytes, "
@@ -579,12 +599,12 @@ def decode_nvfp4_words(
     invalid = ((scales & 0x80) != 0) | (scales == 0x7F)
     if bool(invalid.any()):
         raise ValueError("NVFP4 scales must be nonnegative finite E4M3FN words")
-    divisor_bytes = bytes(raw[geometry.weight_divisor_offset :].numpy())
-    divisor_word = struct.unpack("<I", divisor_bytes)[0]
-    if not valid_positive_fp32_word(divisor_word):
-        raise ValueError("NVFP4 weight divisor must be finite and positive")
-    divisor = torch.frombuffer(bytearray(divisor_bytes), dtype=torch.float32).reshape(())
-    return codes, scales, divisor
+    global_bytes = bytes(raw[geometry.global_scale_offset :].numpy())
+    global_word = struct.unpack("<I", global_bytes)[0]
+    if not valid_positive_fp32_word(global_word):
+        raise ValueError("NVFP4 global scale must be finite and positive")
+    global_scale = torch.frombuffer(bytearray(global_bytes), dtype=torch.float32).reshape(())
+    return codes, scales, global_scale
 
 
 def _pack_low_nibbles(codes: torch.Tensor) -> torch.Tensor:
@@ -1071,6 +1091,7 @@ def dequantize_row_split(
 
 __all__ = [
     "BLOCKSCALE_K16_M128X4_V1",
+    "BLOCKSCALE_K16_M128X4_MULTIPLIER_V1",
     "BlockScaleGeometry",
     "CONTIGUOUS_LE_V1",
     "K_ALIGNMENT",
@@ -1079,6 +1100,7 @@ __all__ = [
     "PLANE_ALIGNMENT",
     "ROW_SPLIT_K128_V1",
     "ROW_SCALE_V1",
+    "ROW_SCALE_F32_V1",
     "RowPlanes",
     "RowScaleGeometry",
     "RowSplitGeometry",

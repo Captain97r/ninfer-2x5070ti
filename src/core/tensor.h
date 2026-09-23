@@ -37,13 +37,17 @@ enum class QType : std::uint16_t {
     I32_CTRL             = 6,
     NVFP4                = 7,
     FP8_E4M3FN_ROW_BF16S = 8,
+    NVFP4_F32M           = 9,
+    FP8_E4M3FN_ROW_F32S  = 10,
 };
 
 enum class QuantLayout : std::uint16_t {
-    RowSplit            = 0,
-    Contiguous          = 1,
-    BlockScaleK16M128x4 = 2,
-    RowScale            = 3,
+    RowSplit                      = 0,
+    Contiguous                    = 1,
+    BlockScaleK16M128x4           = 2,
+    RowScale                      = 3,
+    BlockScaleK16M128x4Multiplier = 4,
+    RowScaleF32                   = 5,
 };
 
 struct Weight {
@@ -68,6 +72,9 @@ struct Weight {
     std::int64_t scale_nb[4]   = {0, 0, 0, 0};
     float weight_scale_divisor = 0.0F;
     float input_scale_divisor  = 0.0F;
+    // Original calibrated FP32 multipliers, never reconstructed from rounded reciprocals.
+    float weight_scale_multiplier = 0.0F;
+    float input_scale_multiplier  = 0.0F;
 };
 
 } // namespace ninfer

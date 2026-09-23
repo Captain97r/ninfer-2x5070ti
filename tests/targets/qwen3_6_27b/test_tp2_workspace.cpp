@@ -30,9 +30,6 @@ using Profile    = Variant::WeightsProfile;
 namespace family = targets::qwen3_6::detail::qwen3_6_27b_runtime;
 
 namespace {
-constexpr auto fp8 = QType::FP8_E4M3FN_ROW_BF16S;
-constexpr auto a8  = ops::LinearPolicy::AllowA8;
-
 void require(bool value, const char* what) {
     if (!value) throw std::runtime_error(what);
 }
@@ -52,9 +49,13 @@ std::size_t output_scratch(QType format, ops::LinearPolicy policy, int k, int t)
                     ops::linear_workspace_capacity_bytes(format, 5120, k, policy, t, t));
 }
 
-void logits(WorkspaceArena& a, int t, bool optimized) {
+void logits(WorkspaceArena& a, int t, bool optimized, bool modelopt) {
     auto scope = a.scope();
     bf(a, optimized ? 65536 : 124160, t);
+    if (modelopt)
+        scratch(a,
+                ops::linear_workspace_capacity_bytes(QType::NVFP4_F32M, optimized ? 65536 : 124160,
+                                                     5120, ops::LinearPolicy::CalibratedA4, t, t));
     scratch(a, optimized
                    ? ops::argmax_row_parallel_workspace_capacity_bytes(65536, t)
                    : std::max(ops::allgather_columns_workspace_capacity_bytes(124160, t),
@@ -62,7 +63,9 @@ void logits(WorkspaceArena& a, int t, bool optimized) {
 }
 
 void target(WorkspaceArena& a, int t, int batch, int width, bool prefill, bool record,
-            ops::GqaExecutionEnvelope envelope) {
+            ops::GqaExecutionEnvelope envelope, bool modelopt) {
+    const auto fp8 = modelopt ? QType::FP8_E4M3FN_ROW_F32S : QType::FP8_E4M3FN_ROW_BF16S;
+    const auto a8  = modelopt ? ops::LinearPolicy::CalibratedA8 : ops::LinearPolicy::AllowA8;
     {
         auto layer = a.scope();
         bf(a, 5120, t);
@@ -106,9 +109,13 @@ void target(WorkspaceArena& a, int t, int batch, int width, bool prefill, bool r
         if (prefill) scratch(a, ops::gated_delta_net_workspace_capacity_bytes(8, 24, true, t, t));
         scratch(a, output_scratch(fp8, a8, 3072, t));
     }
-    for (const auto format : {QType::NVFP4, fp8}) {
+    const std::vector<QType> mlp_formats =
+        modelopt ? std::vector{QType::NVFP4_F32M} : std::vector{QType::NVFP4, fp8};
+    for (const auto format : mlp_formats) {
         auto layer        = a.scope();
-        const auto policy = format == QType::NVFP4 ? ops::LinearPolicy::AllowA4 : a8;
+        const auto policy = modelopt                 ? ops::LinearPolicy::CalibratedA4
+                            : format == QType::NVFP4 ? ops::LinearPolicy::AllowA4
+                                                     : a8;
         bf(a, 5120, t);
         bf(a, 8704, t);
         scratch(a,
@@ -152,7 +159,7 @@ void mtp_core(WorkspaceArena& a, int t, int batch, int width, ops::GqaExecutionE
 }
 
 void mtp_prefill(WorkspaceArena& a, int t, bool vision, bool optimized,
-                 ops::GqaExecutionEnvelope envelope) {
+                 ops::GqaExecutionEnvelope envelope, bool modelopt) {
     auto call = a.scope();
     bf(a, 5120, t);
     bf(a, 5120, 1);
@@ -174,7 +181,7 @@ void mtp_prefill(WorkspaceArena& a, int t, bool vision, bool optimized,
     if (vision) i32(a, 3);
     scratch(a, ops::gqa_attention_workspace_capacity_bytes(12, DType::I8, envelope, 1, 1, 1));
     mtp_post(a, 1);
-    logits(a, 1, optimized);
+    logits(a, 1, optimized, modelopt);
 }
 
 // Non-owning DeviceArena can account for a host-backed region: these tests enqueue no kernels
@@ -204,7 +211,8 @@ private:
 };
 
 void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vision, bool optimized,
-         std::uint32_t context) {
+         std::uint32_t context, Profile profile = Profile::Qwen38Nvfp4) {
+    const bool modelopt = profile == Profile::Qwen38ModelOpt;
     EngineOptions options;
     options.tp              = 2;
     options.devices         = {0, 1};
@@ -217,8 +225,7 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
     if (drafts)
         options.speculative = {SpeculativeBackend::Mtp, static_cast<std::uint32_t>(drafts),
                                optimized ? ProposalHead::Optimized : ProposalHead::Full};
-    auto planner =
-        targets::qwen3_6::make_sequence_planner<Variant>(device, options, Profile::Qwen38Nvfp4);
+    auto planner       = targets::qwen3_6::make_sequence_planner<Variant>(device, options, profile);
     const auto pages   = planner.capacity_curve().minimum_main_page_groups;
     auto plan          = std::move(planner).finalize(pages);
     const auto& bounds = plan.impl_->workspace;
@@ -237,8 +244,8 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
             bf(a, 5120, t);
             if (vision) i32(a, t);
             bf(a, 5120, t);
-            target(a, t, 1, t, true, false, envelope);
-            logits(a, 1, false);
+            target(a, t, 1, t, true, false, envelope, modelopt);
+            logits(a, 1, false, modelopt);
             scratch(
                 a, ops::sampling_workspace_capacity_bytes(Variant::TextConfig::token_domain, 1, 1));
         }
@@ -251,8 +258,8 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
             bf(a, 5120, t);
             if (vision) i32(a, t);
             bf(a, 5120, t);
-            target(a, t, 1, t, true, false, envelope);
-            logits(a, 1, false);
+            target(a, t, 1, t, true, false, envelope, modelopt);
+            logits(a, 1, false, modelopt);
             scratch(
                 a, ops::sampling_workspace_capacity_bytes(Variant::TextConfig::token_domain, 1, 1));
             i32(a, t);
@@ -260,13 +267,13 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
                 bf(a, 5120, t);
                 i32(a, t);
             }
-            mtp_prefill(a, t, vision, optimized, envelope);
+            mtp_prefill(a, t, vision, optimized, envelope, modelopt);
             if (drafts > 1) {
                 auto iteration = a.scope();
                 bf(a, 5120, 1);
                 i32(a, 1);
                 mtp_core(a, 1, 1, 1, envelope);
-                logits(a, 1, optimized);
+                logits(a, 1, optimized, modelopt);
             }
         }
         if (drafts) owner.finish(bounds.mtp_prefill, "MTP prefill");
@@ -276,8 +283,8 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
             auto root = a.scope();
             bf(a, 5120, b);
             bf(a, 5120, b);
-            target(a, b, b, 1, false, false, envelope);
-            logits(a, b, false);
+            target(a, b, b, 1, false, false, envelope, modelopt);
+            logits(a, b, false, modelopt);
         }
         scratch(a, ops::sampling_workspace_capacity_bytes(Variant::TextConfig::token_domain, b, b));
         owner.finish(bounds.ordinary_round, "ordinary");
@@ -287,23 +294,23 @@ void run(DeviceContext& device, int chunk, int batch_limit, int drafts, bool vis
             auto root = a.scope();
             bf(a, 5120, t);
             bf(a, 5120, t);
-            target(a, t, b, width, false, true, envelope);
-            logits(a, t, false);
+            target(a, t, b, width, false, true, envelope, modelopt);
+            logits(a, t, false, modelopt);
         }
         mtp_core(a, t, b, width, envelope);
         mtp_core(a, b, b, 1, envelope);
-        logits(a, b, optimized);
+        logits(a, b, optimized, modelopt);
         scratch(a, ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
                        Variant::TextConfig::token_domain, drafts, drafts, b, b));
         scratch(a, ops::speculative_replicate_decision_workspace_capacity_bytes(drafts, b));
         owner.finish(bounds.mtp_round, "target verification / MTP / acceptance");
     }
-    std::cout << "chunk=" << chunk << " B=" << batch_limit << " K=" << drafts
-              << " vision=" << vision << " optimized=" << optimized << " context=" << context
-              << " text=" << bounds.text_prefill << " MTPprefill=" << bounds.mtp_prefill
-              << " ordinary=" << bounds.ordinary_round << " MTPround=" << bounds.mtp_round
-              << " vision_workspace=" << bounds.vision_encode << " capacity=" << bounds.capacity
-              << '\n';
+    std::cout << "modelopt=" << modelopt << " chunk=" << chunk << " B=" << batch_limit
+              << " K=" << drafts << " vision=" << vision << " optimized=" << optimized
+              << " context=" << context << " text=" << bounds.text_prefill
+              << " MTPprefill=" << bounds.mtp_prefill << " ordinary=" << bounds.ordinary_round
+              << " MTPround=" << bounds.mtp_round << " vision_workspace=" << bounds.vision_encode
+              << " capacity=" << bounds.capacity << '\n';
 }
 } // namespace
 
@@ -322,6 +329,11 @@ int main() {
         run(device, 128, 8, 5, false, false, 262144);
         run(device, 128, 8, 1, true, true, 131072);
         run(device, 1024, 1, 0, true, false, 196608);
+        run(device, 1024, 1, 3, false, true, 196608, Profile::Qwen38ModelOpt);
+        run(device, 1024, 1, 3, true, true, 196608, Profile::Qwen38ModelOpt);
+        run(device, 128, 8, 5, false, false, 262144, Profile::Qwen38ModelOpt);
+        run(device, 128, 8, 1, true, true, 131072, Profile::Qwen38ModelOpt);
+        run(device, 1024, 1, 0, true, false, 196608, Profile::Qwen38ModelOpt);
         std::cout << "OK TP2 workspace composition\n";
         return 0;
     } catch (const std::exception& e) {

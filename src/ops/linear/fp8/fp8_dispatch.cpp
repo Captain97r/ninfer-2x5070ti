@@ -23,6 +23,12 @@ Fp8LinearRoute resolve_route(std::int32_t output_rows, std::int32_t input_rows, 
         throw std::invalid_argument("fp8 linear: unsupported shape");
     }
     const Fp8Problem problem = resolve_fp8_problem(output_rows, input_rows);
+    if (policy == LinearPolicy::CalibratedA8) {
+        if (is_fp8_vocabulary_problem(problem)) {
+            throw std::invalid_argument("fp8 linear: calibrated vocabulary profile is not registered");
+        }
+        return Fp8LinearRoute::A8;
+    }
     if (policy == LinearPolicy::A16Only) { return Fp8LinearRoute::A16; }
     // A permissive policy does not require a lower-precision route. Vocabulary logits retain
     // BF16 activation compute for every policy, matching the existing Q6/W8 output heads.
@@ -92,6 +98,7 @@ void launch_a16(const Tensor& x, const Weight& weight, Tensor& out, cudaStream_t
 
 bool interval_uses_a8(Fp8Problem problem, LinearPolicy policy, std::int32_t min_tokens,
                       std::int32_t max_tokens) {
+    if (policy == LinearPolicy::CalibratedA8) { return true; }
     if (policy == LinearPolicy::A16Only) { return false; }
     switch (problem) {
     case Fp8Problem::AttnInput:

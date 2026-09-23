@@ -1,3 +1,4 @@
+#include "ops/linear/nvfp4/nvfp4_format.h"
 #include "ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_plan.h"
 
 #include "core/device.h"
@@ -73,7 +74,7 @@ void launch_gemm(const Weight& weight, Tensor& out, Nvfp4W4a4Workspace workspace
     const Nvfp4W4a4MaterializedActivation activation{workspace.codes, workspace.scales};
     const Nvfp4SwiGluRows<Geometry> row_policy{};
     const Nvfp4SwiGluOutput<Geometry> output{static_cast<__nv_bfloat16*>(out.data)};
-    const float alpha = 1.0F / (weight.input_scale_divisor * weight.weight_scale_divisor);
+    const float alpha = nvfp4_product_multiplier(weight);
     nvfp4_w4a4_mma_kernel<Geometry, Schedule, Nvfp4IdentityEpilogue, Nvfp4SwiGluOutput<Geometry>,
                           Nvfp4SwiGluRows<Geometry>, true><<<grid, Schedule::kThreads, 0, stream>>>(
         activation, static_cast<const std::uint8_t*>(weight.qdata),

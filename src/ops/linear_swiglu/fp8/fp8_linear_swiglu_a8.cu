@@ -16,8 +16,8 @@
 namespace ninfer::ops::detail {
 namespace {
 
-template <class Geometry, bool FullTokens>
-void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
+template <class Geometry, bool FullTokens, class WeightScale>
+void launch_mma_typed(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
                 cudaStream_t stream) {
     using Schedule               = typename Fp8LinearA8ProductionSchedule<Geometry>::Type;
     constexpr int kIntermediate = Geometry::kOutputRows / 2;
@@ -33,15 +33,25 @@ void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std
     if constexpr (Schedule::kSharedBytes > 48 * 1024) {
         ensure_func_attr_per_device(
             fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue, Fp8SwiGluOutput,
-                           Rows, true>,
+                           Rows, true, WeightScale>,
             cudaFuncAttributeMaxDynamicSharedMemorySize, Schedule::kSharedBytes);
     }
-    fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue, Fp8SwiGluOutput, Rows, true>
+    fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8IdentityEpilogue, Fp8SwiGluOutput, Rows, true, WeightScale>
         <<<blocks, Schedule::kThreads, Schedule::kSharedBytes, stream>>>(
             workspace.codes, workspace.scales, static_cast<const std::uint8_t*>(weight.qdata),
-            static_cast<const __nv_bfloat16*>(weight.scales), tokens, Fp8IdentityEpilogue{}, output,
+            static_cast<const WeightScale*>(weight.scales), tokens, Fp8IdentityEpilogue{}, output,
             rows);
     CUDA_CHECK(cudaGetLastError());
+}
+
+template <class Geometry, bool FullTokens>
+void launch_mma(const Weight& weight, Tensor& out, Fp8A8Workspace workspace, std::int32_t tokens,
+                cudaStream_t stream) {
+    if (weight.qtype == QType::FP8_E4M3FN_ROW_F32S) {
+        launch_mma_typed<Geometry, FullTokens, float>(weight, out, workspace, tokens, stream);
+    } else {
+        launch_mma_typed<Geometry, FullTokens, __nv_bfloat16>(weight, out, workspace, tokens, stream);
+    }
 }
 
 template <class Geometry>

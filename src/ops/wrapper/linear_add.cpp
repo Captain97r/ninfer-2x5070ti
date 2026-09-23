@@ -1,4 +1,5 @@
 #include "ninfer/ops/linear_add.h"
+#include "ops/linear/linear_policy.h"
 
 #include "ninfer/ops/residual_add.h"
 #include "ops/common/split_launch.h"
@@ -68,6 +69,8 @@ void validate_policy(LinearPolicy policy) {
     case LinearPolicy::A16Only:
     case LinearPolicy::AllowA8:
     case LinearPolicy::AllowA4:
+    case LinearPolicy::CalibratedA8:
+    case LinearPolicy::CalibratedA4:
         return;
     }
     throw std::invalid_argument("linear_add: invalid compute policy");
@@ -81,6 +84,7 @@ void validate_policy(LinearPolicy policy) {
 // every other branch never reads it.
 void dispatch_linear_add(const Tensor& x, const Weight& w, Tensor& residual_out,
                          LinearPolicy policy, WorkspaceArena* ws, cudaStream_t stream) {
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
     const std::int32_t t = x.ne[1];
     if (t <= 0) { throw std::invalid_argument("linear_add: T must be positive"); }
     require_tensor(x, DType::BF16, w.k, t, "x");
@@ -142,8 +146,9 @@ void dispatch_linear_add(const Tensor& x, const Weight& w, Tensor& residual_out,
         return;
     }
 
-    if (w.qtype == QType::NVFP4) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+    if (detail::is_nvfp4_weight_type(w.qtype)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument("NVFP4 linear_add admits only A16 or A4");
         }
         detail::validate_nvfp4_weight(w, "nvfp4 linear_add");
@@ -172,8 +177,9 @@ void dispatch_linear_add(const Tensor& x, const Weight& w, Tensor& residual_out,
         return;
     }
 
-    if (w.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+    if (detail::is_fp8_weight_type(w.qtype)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("FP8 linear_add admits only A16 or A8");
         }
         (void)detail::validate_fp8_weight(w, "fp8 linear_add");
@@ -216,6 +222,7 @@ std::size_t linear_add_workspace_capacity_bytes(QType qtype, std::int32_t output
                                                 std::int32_t input_rows, LinearPolicy policy,
                                                 std::int32_t min_tokens, std::int32_t max_tokens) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(qtype, policy);
     if (min_tokens <= 0 || max_tokens < min_tokens) {
         throw std::invalid_argument("linear_add workspace: invalid token interval");
     }
@@ -242,7 +249,7 @@ std::size_t linear_add_workspace_capacity_bytes(QType qtype, std::int32_t output
         return detail::q5_linear_add_capacity_workspace_bytes(output_rows, input_rows, input_rows,
                                                               min_tokens, max_tokens);
     }
-    if (qtype == QType::NVFP4) {
+    if (detail::is_nvfp4_weight_type(qtype)) {
         // TP2: also admit the row-parallel halves of the two residual geometries (o_proj /
         // gdn/output 6144 -> 3072, mlp/down 17408 -> 8704). Same shape rule as every other split
         // family -- a shard is a standalone tensor of the registered geometry with K halved, so
@@ -257,13 +264,14 @@ std::size_t linear_add_workspace_capacity_bytes(QType qtype, std::int32_t output
              input_rows == detail::Nvfp4Residual6144Tp2RowGeometry::kInputRows) ||
             (output_rows == detail::Nvfp4Residual17408Tp2RowGeometry::kOutputRows &&
              input_rows == detail::Nvfp4Residual17408Tp2RowGeometry::kInputRows);
-        if (!supported || (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4)) {
+        if (!supported || (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4)) {
             throw std::invalid_argument("linear_add workspace: unsupported NVFP4 profile");
         }
         return detail::nvfp4_linear_add_workspace_capacity_bytes(output_rows, input_rows, policy,
                                                                  min_tokens, max_tokens);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(qtype)) {
         // TP2: also admit the row-parallel halves of the two residual geometries (o_proj /
         // gdn/output 6144 -> 3072, mlp/down 17408 -> 8704); see the NVFP4 branch above for the
         // shape-gate rationale.
@@ -276,7 +284,8 @@ std::size_t linear_add_workspace_capacity_bytes(QType qtype, std::int32_t output
              input_rows == detail::Fp8Residual6144Tp2RowGeometry::kInputRows) ||
             (output_rows == detail::Fp8Residual17408Tp2RowGeometry::kOutputRows &&
              input_rows == detail::Fp8Residual17408Tp2RowGeometry::kInputRows);
-        if (!supported || (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8)) {
+        if (!supported || (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8)) {
             throw std::invalid_argument("linear_add workspace: unsupported FP8 profile");
         }
         return detail::fp8_linear_add_workspace_capacity_bytes(output_rows, input_rows, policy,
@@ -293,6 +302,7 @@ void linear_add(const Tensor& x, const Weight& w, Tensor& residual_out, Workspac
 void linear_add(const Tensor& x, const Weight& w, Tensor& residual_out, LinearPolicy policy,
                 WorkspaceArena& ws, cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
     dispatch_linear_add(x, w, residual_out, policy, &ws, stream);
 }
 
@@ -351,8 +361,8 @@ void issue_fused_rank(const Tensor& x, const Weight& w, Tensor& residual, Tensor
         residual_add(scratch, residual, stream);
         return;
     }
-    if (w.qtype == QType::NVFP4 || w.qtype == QType::Q5G64_F16S ||
-        w.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_nvfp4_weight_type(w.qtype) || w.qtype == QType::Q5G64_F16S ||
+        detail::is_fp8_weight_type(w.qtype)) {
         // FP8 reaches here through the same "shape alone selects the route" widening as NVFP4/Q5:
         // dispatch_linear_add's FP8 branch (above) already admits the tp2 row-shard extents, and
         // its own fp8_linear_add_dispatch resolves the halved-K geometry via resolve_fp8_problem.
@@ -382,6 +392,9 @@ void linear_add_row_parallel(const std::array<Tensor, 2>& x, const std::array<We
                              const std::array<WorkspaceArena*, 2>& workspace,
                              const ExecutionContext& ec, const PeerTransfer& transfer) {
     validate_policy(policy);
+    for (const Weight& weight : w) {
+        detail::validate_calibrated_linear_policy(weight.qtype, policy);
+    }
     validate_add_split_pair(x, w, ec);
     validate_add_split_residency(x, w, residual, ec);
 

@@ -138,6 +138,11 @@ using Nvfp4Activation5120Geometry  = Nvfp4ActivationGeometry<5120>;
 using Nvfp4Activation6144Geometry  = Nvfp4ActivationGeometry<6144>;
 using Nvfp4Activation17408Geometry = Nvfp4ActivationGeometry<17408>;
 // Row-parallel activation halves: a rank quantizes only its own K block.
+using Nvfp4OutputHeadGeometry = Nvfp4GemvGeometry<248320, 5120>;
+using Nvfp4OutputHeadTp2ColumnGeometry = Nvfp4GemvGeometry<124160, 5120>;
+using Nvfp4DraftHeadGeometry = Nvfp4GemvGeometry<131072, 5120>;
+using Nvfp4DraftHeadTp2ColumnGeometry = Nvfp4GemvGeometry<65536, 5120>;
+
 using Nvfp4Activation3072Geometry = Nvfp4ActivationGeometry<3072>;
 using Nvfp4Activation8704Geometry = Nvfp4ActivationGeometry<8704>;
 
@@ -157,6 +162,10 @@ enum class Nvfp4Problem : std::uint8_t {
     MlpGateUpTp2Column,
     Residual6144Tp2Row,
     Residual17408Tp2Row,
+    OutputHead,
+    OutputHeadTp2Column,
+    DraftHead,
+    DraftHeadTp2Column,
 };
 
 // The parent geometry a shard problem was split from, and the axis it was split on. Route
@@ -165,6 +174,13 @@ enum class Nvfp4Problem : std::uint8_t {
 // pure function of the family it belongs to, and any re-tuning is a separate, measurable change.
 inline constexpr Nvfp4Problem nvfp4_parent_problem(Nvfp4Problem problem) {
     switch (problem) {
+    case Nvfp4Problem::OutputHeadTp2Column:
+        return Nvfp4Problem::OutputHead;
+    case Nvfp4Problem::DraftHeadTp2Column:
+        return Nvfp4Problem::DraftHead;
+    case Nvfp4Problem::OutputHead:
+    case Nvfp4Problem::DraftHead:
+        return problem;
     case Nvfp4Problem::AttnInputTp2Column:
         return Nvfp4Problem::AttnInput;
     case Nvfp4Problem::GdnInputTp2Column:
@@ -230,12 +246,21 @@ using Nvfp4ParentGeometryType = typename Nvfp4ParentGeometry<Geometry>::Type;
     X(Residual6144Tp2Row, Nvfp4Residual6144Tp2RowGeometry)                                         \
     X(Residual17408Tp2Row, Nvfp4Residual17408Tp2RowGeometry)
 
+// Vocabulary projections use calibrated A4 exclusively; do not instantiate unused
+// A16 schedules for their much larger row domains.
+#define NINFER_NVFP4_VOCAB_PROBLEMS(X) \
+    X(OutputHead, Nvfp4OutputHeadGeometry) \
+    X(OutputHeadTp2Column, Nvfp4OutputHeadTp2ColumnGeometry) \
+    X(DraftHead, Nvfp4DraftHeadGeometry) \
+    X(DraftHeadTp2Column, Nvfp4DraftHeadTp2ColumnGeometry)
+
 inline constexpr bool is_nvfp4_linear_problem(std::int32_t output_rows, std::int32_t input_rows) {
 #define NINFER_NVFP4_MATCH(name, geometry)                                                         \
     if (output_rows == geometry::kOutputRows && input_rows == geometry::kInputRows) {              \
         return true;                                                                               \
     }
     NINFER_NVFP4_LINEAR_PROBLEMS(NINFER_NVFP4_MATCH)
+    NINFER_NVFP4_VOCAB_PROBLEMS(NINFER_NVFP4_MATCH)
 #undef NINFER_NVFP4_MATCH
     return false;
 }
@@ -246,6 +271,7 @@ inline Nvfp4Problem resolve_nvfp4_problem(std::int32_t output_rows, std::int32_t
         return Nvfp4Problem::name;                                                                 \
     }
     NINFER_NVFP4_LINEAR_PROBLEMS(NINFER_NVFP4_RESOLVE)
+    NINFER_NVFP4_VOCAB_PROBLEMS(NINFER_NVFP4_RESOLVE)
 #undef NINFER_NVFP4_RESOLVE
     throw std::invalid_argument("unsupported NVFP4 problem");
 }

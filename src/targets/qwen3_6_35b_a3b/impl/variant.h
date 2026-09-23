@@ -42,6 +42,9 @@ struct Variant {
     static constexpr bool supports_dflash                      = DFlashConfig::supported;
     static constexpr std::int32_t draft_head_rows              = 131072;
 
+    [[nodiscard]] static qwen3_6::HeadProjectionProfile output_head_profile(WeightsProfile);
+    [[nodiscard]] static qwen3_6::HeadProjectionProfile proposal_head_profile(WeightsProfile);
+
     // --- tp == 2 split leaves ------------------------------------------------------------------
     //
     // 35B-A3B has no tensor-parallel path: its MoE post-mixer, its 32-value-head GDN geometry and

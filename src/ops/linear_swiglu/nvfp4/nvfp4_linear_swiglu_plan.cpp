@@ -1,3 +1,4 @@
+#include "ops/linear/nvfp4/nvfp4_format.h"
 #include "ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_plan.h"
 
 #include "core/layout.h"
@@ -29,7 +30,8 @@ constexpr std::int32_t kPrimaryT = 1024;
 // every split family here follows: tuning is inherited from the tp1 parent, never re-measured.
 Nvfp4LinearSwiGluRoute resolve_route(LinearPolicy policy, std::int32_t tokens) {
     if (tokens <= 0) { throw std::invalid_argument("nvfp4 linear_swiglu: T must be positive"); }
-    if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+    if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+        policy != LinearPolicy::CalibratedA4) {
         throw std::invalid_argument("nvfp4 linear_swiglu admits only A16 or A4");
     }
     if (policy == LinearPolicy::A16Only) {
@@ -37,6 +39,7 @@ Nvfp4LinearSwiGluRoute resolve_route(LinearPolicy policy, std::int32_t tokens) {
         if (tokens <= 16) { return Nvfp4LinearSwiGluRoute::SmallTFusedA16; }
         throw std::invalid_argument("nvfp4 linear_swiglu A16 is registered only through T=16");
     }
+    if (policy == LinearPolicy::CalibratedA4 && tokens <= 48) { return Nvfp4LinearSwiGluRoute::FusedW4A4; }
     if (tokens == 1) { return Nvfp4LinearSwiGluRoute::DecodeFusedA16; }
     if (tokens <= 4) { return Nvfp4LinearSwiGluRoute::SmallTFusedA16; }
     if (tokens <= 48) { return Nvfp4LinearSwiGluRoute::FusedW4A4; }
@@ -87,10 +90,10 @@ std::size_t capacity_bytes_impl(LinearPolicy policy, std::int32_t min_tokens,
     }
     (void)resolve_route(policy, min_tokens);
     (void)resolve_route(policy, max_tokens);
-    if (policy == LinearPolicy::A16Only || max_tokens <= 4) { return 0; }
+    if (policy == LinearPolicy::A16Only || (policy != LinearPolicy::CalibratedA4 && max_tokens <= 4)) { return 0; }
 
     std::size_t maximum = 0;
-    if (min_tokens <= 48 && max_tokens >= 5) {
+    if (min_tokens <= 48 && (max_tokens >= 5 || policy == LinearPolicy::CalibratedA4)) {
         maximum = fused_workspace_bytes<Geometry>(std::min(max_tokens, 48));
     }
     if (min_tokens <= kPrimaryT && max_tokens >= kPrimaryT) {
@@ -177,7 +180,7 @@ void dispatch_impl(const Tensor& x, const Weight& weight, Tensor& out, LinearPol
         auto scope                       = workspace->scope();
         const Nvfp4W4a4Workspace scratch = allocate_fused_workspace<Geometry>(*workspace, x.ne[1]);
         launch_nvfp4_w4a4_quantize(x, weight, scratch, stream);
-        const float alpha = 1.0F / (weight.input_scale_divisor * weight.weight_scale_divisor);
+        const float alpha = nvfp4_product_multiplier(weight);
         launch_tma<Geometry>(scratch.codes, scratch.scales,
                              static_cast<const std::uint8_t*>(weight.qdata),
                              static_cast<const std::uint8_t*>(weight.scales),
@@ -195,7 +198,7 @@ void dispatch_impl(const Tensor& x, const Weight& weight, Tensor& out, LinearPol
     auto scope                         = workspace->scope();
     Nvfp4LinearSwiGluWorkspace scratch = allocate_baseline_workspace<Geometry>(*workspace, x.ne[1]);
     WorkspaceArena linear_workspace(scratch.linear);
-    linear(x, weight, scratch.projected, LinearPolicy::AllowA4, linear_workspace, stream);
+    linear(x, weight, scratch.projected, policy, linear_workspace, stream);
     constexpr std::int32_t kIntermediate = Geometry::kOutputRows / 2;
     silu_mul(scratch.projected.slice(0, 0, kIntermediate),
              scratch.projected.slice(0, kIntermediate, kIntermediate), out, stream);

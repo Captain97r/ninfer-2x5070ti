@@ -51,7 +51,7 @@ def interval(end, decode, *, seconds=1, prefill=0, running=1):
 class ContextSweepTests(unittest.TestCase):
     def test_cold_pp_authoritative_ttft_and_early_eos_are_preserved(self):
         case, response, event = case_and_result()
-        result = sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET)
+        result = sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET, weights_id="nvfp4")
         self.assertEqual(result["metrics"]["prefill_tok_s"], 4090)
         self.assertEqual(result["metrics"]["decode_tok_s"], 100)
         self.assertEqual(result["metrics"]["server_ttft_ms"], 2400)  # Not the 2100ms phase sum.
@@ -61,7 +61,7 @@ class ContextSweepTests(unittest.TestCase):
         response["usage"]["completion_tokens"] = event["result"]["completion_tokens"] = 4096
         response["choices"][0]["finish_reason"] = "length"
         event["result"]["finish_reason"] = "output_limit"
-        capped = sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET)
+        capped = sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET, weights_id="nvfp4")
         self.assertTrue(capped["metrics"]["reached_cap"])
         self.assertFalse(capped["metrics"]["early_stop"])
 
@@ -80,7 +80,7 @@ class ContextSweepTests(unittest.TestCase):
             case, response, event = case_and_result()
             mutate(case, response, event)
             with self.subTest(mutation=mutate), self.assertRaises(corpus.CampaignError):
-                sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET)
+                sweep.checked_record(case, Path("model.ninfer"), response, event, PRESET, weights_id="nvfp4")
 
     def test_decode_windows_exclude_mixed_prefill_and_partial_intervals_not_stalls(self):
         events = [interval(1000, 0, prefill=100), interval(2000, 70, prefill=80),
@@ -221,7 +221,20 @@ class ContextSweepTests(unittest.TestCase):
                  "artifact": {"target": "qwen3_8_27b", "weights_id": "nvfp4"},
                  "sampling_defaults": {"greedy": False, "non_thinking": PRESET,
                                        "server_overrides": {key: None for key in (*PRESET, "seed")}}}
-        self.assertEqual(sweep.validate_start(event, 196608), PRESET)
+        for weights_id in ("nvfp4", "nvfp4-modelopt"):
+            event["artifact"]["weights_id"] = weights_id
+            with self.subTest(weights_id=weights_id):
+                self.assertEqual(sweep.validate_start(event, 196608), PRESET)
+                case, response, done = case_and_result()
+                record = sweep.checked_record(case, Path("model.ninfer"), response, done, PRESET,
+                                              weights_id=event["artifact"]["weights_id"])
+                self.assertEqual(record["weights_id"], weights_id)
+        for artifact in ({"target": "qwen3_8_27b", "weights_id": "fp8"},
+                         {"target": "qwen3_6_27b", "weights_id": "nvfp4-modelopt"},
+                         {"target": "qwen3_8_27b"}, {}):
+            changed = {**event, "artifact": artifact}
+            with self.subTest(artifact=artifact), self.assertRaises(corpus.CampaignError):
+                sweep.validate_start(changed, 196608)
         for field, value in (("kv_capacity", 102400), ("max_context", 262144),
                              ("effective_max_context", 196608), ("prefix_reuse", True),
                              ("log_stats_interval_ms", 0)):

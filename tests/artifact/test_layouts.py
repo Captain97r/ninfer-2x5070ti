@@ -223,7 +223,7 @@ def test_nvfp4_known_vector_geometry_swizzle_tail_and_round_trip():
         geometry.code_plane_bytes,
         geometry.scale_plane_offset,
         geometry.scale_plane_bytes,
-        geometry.weight_divisor_offset,
+        geometry.global_scale_offset,
         geometry.payload_bytes,
     ) == (4096, 4096, 512, 4608, 4612)
 
@@ -253,7 +253,7 @@ def test_nvfp4_known_vector_geometry_swizzle_tail_and_round_trip():
             + lane
         )
         assert payload[offset] == int(scales[row, lane])
-    assert payload[geometry.weight_divisor_offset :] == divisor
+    assert payload[geometry.global_scale_offset :] == divisor
 
     decoded_packed, decoded_scales, decoded_divisor = decode_nvfp4_words(
         payload, shape

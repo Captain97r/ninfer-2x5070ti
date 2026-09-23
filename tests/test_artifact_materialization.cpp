@@ -202,6 +202,43 @@ int main() {
                     fp8_weight.payload_bytes == kFp8TensorBytes,
                 "materialized FP8 Weight metadata is incomplete");
 
+        {
+            using Json       = ninfer::test::artifact_fixture::Json;
+            auto f32_fixture = ninfer::test::artifact_fixture::write_fixture(
+                {{"identity", {{"model_id", "fixture-model"}, {"weights_id", "f32-scales"}}},
+                 {"objects", Json::array({{{"name", "fp8"},
+                                           {"kind", "tensor"},
+                                           {"shape", {3, 9}},
+                                           {"format", "FP8_E4M3FN_ROW_F32S"},
+                                           {"layout", "row-scale-f32-v1"},
+                                           {"offset", 0},
+                                           {"bytes", 268}}})}},
+                "fp8_f32");
+            ninfer::artifact::Reader f32_reader(f32_fixture.path);
+            ninfer::artifact::Binder f32_binder(f32_reader);
+            const auto handle = ninfer::artifact::bind_device_tensor(
+                f32_binder, "fp8", ninfer::artifact::NumericFormat::FP8_E4M3FN_ROW_F32S, {3, 9});
+            auto f32_materialized =
+                ninfer::artifact::materialize(f32_reader, f32_binder.finish(), device);
+            const auto weight = ninfer::artifact::materialized_weight(
+                f32_materialized, handle, ninfer::artifact::NumericFormat::FP8_E4M3FN_ROW_F32S, 3,
+                9);
+            require(weight.qtype == ninfer::QType::FP8_E4M3FN_ROW_F32S &&
+                        weight.layout == ninfer::QuantLayout::RowScaleF32 &&
+                        weight.scale_dtype == ninfer::DType::FP32 && weight.scale_nb[0] == 4 &&
+                        weight.scale_nb[1] == 12 && weight.scale_nb[2] == 12 &&
+                        weight.scale_nb[3] == 12 && weight.payload_bytes == 268 &&
+                        weight.scale_ne[0] == 3 &&
+                        weight.scales == static_cast<const std::byte*>(weight.payload) + 256,
+                    "materialized FP8 FP32 scale metadata is incorrect");
+            std::array<std::byte, 268> bytes{};
+            CUDA_CHECK(
+                cudaMemcpy(bytes.data(), weight.payload, bytes.size(), cudaMemcpyDeviceToHost));
+            require(
+                std::all_of(bytes.begin(), bytes.end(), [](auto b) { return b == std::byte{1}; }),
+                "materialized FP8 FP32 scalar bits changed");
+        }
+
         const auto retained = materialized.resource_bytes(resource);
         require(std::equal(retained.begin(), retained.end(), kResource.begin(), kResource.end()),
                 "retained resource payload differs from the artifact");

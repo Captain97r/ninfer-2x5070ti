@@ -61,9 +61,17 @@ void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
  * qualified A16 CUDA-core route and every T>=11 to private activation quantization followed by the
  * A8 Tensor Core route. A16Only uses the A16 route for every positive T.
  *
- * The oracle evaluates every projection independently with naive FP64 accumulation from the
- * logical values represented by the persistent weight and BF16 activation. The final four BF16
- * stores belong to the Op's criterion for the selected activation-compute path.
+ * The oracle evaluates every projection independently with naive FP64 accumulation from exact
+ * stored weight values and activation A. A is the represented BF16 input for legacy policies;
+ * CalibratedA8 uses Linear's explicit E4M3 quantize/dequantize activation boundary. The final
+ * four BF16 stores belong to the criterion, not an oracle staging cast.
+ *
+ * FP8_E4M3FN_ROW_F32S / RowScaleF32 registers the same parent and TP2 section shapes with
+ * CalibratedA8 only. Its exact FP32 row multipliers and fixed activation multiplier follow
+ * Linear's calibrated checkpoint contract at every T, including T=1. A fused parent therefore
+ * requires one common input calibration across its Q/K/gate/V source projections; differing
+ * row weight multipliers remain independent. The numerical oracle evaluates the specified
+ * activation codec before its independent FP64 projections. Legacy policies remain unchanged.
  *
  * `workspace` is caller-owned call-scoped transient storage sized by
  * attn_input_proj_workspace_capacity_bytes(). It must not overlap the input, parent weight, or any

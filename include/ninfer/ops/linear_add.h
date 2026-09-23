@@ -15,6 +15,12 @@
 
 namespace ninfer::ops {
 
+// Calibrated formats obey Linear's explicit activation codec before projection and then the
+// same residual-add contract below. FP8_E4M3FN_ROW_F32S / RowScaleF32 admits CalibratedA8 only;
+// NVFP4_F32M / BlockScaleK16M128x4Multiplier admits CalibratedA4 only. Both retain original
+// FP32 multipliers and require quantization at every T, including single-token row-parallel
+// shards. Neither profile silently falls back to legacy A16 or rounds row scales to BF16.
+
 /**
  * Returns the A16-only transient capacity required by LinearAdd for every T in the inclusive
  * [min_tokens,max_tokens] interval. The QType and dimensions are the fixed implementation profile.
@@ -35,7 +41,9 @@ namespace ninfer::ops {
  * Op: linear_add
  *
  * Math / indexing:
- *   ideal[:,t] = residual[:,t] + Linear(x,w)[:,t].
+ *   ideal[:,t] = residual[:,t] + sum_k Decode(w)[:,k] * A[k,t].
+ *   A is represented BF16 x for legacy policies, or Linear's explicitly calibrated activation
+ *   for CalibratedA8/CalibratedA4. No projection output cast is inserted into this ideal.
  *
  * Logical shapes:
  *   Contiguous BF16 x [K,T] and residual [N,T]. Registered weights are Q5G64_F16S RowSplit
@@ -50,8 +58,9 @@ namespace ninfer::ops {
  *   residual is promoted and compared directly with that result; output storage rounding belongs
  *   to LinearAdd's selected A16, A8, or A4 criterion, not the oracle. Production routes may fuse
  *   or materialize the projection and may choose their natural accumulator, activation
- *   quantization, staging, and workspace precision; those private choices are not semantic
- *   rounding boundaries.
+ *   staging, and workspace precision; those private choices are not semantic rounding
+ *   boundaries. Activation quantization is private for legacy policies; calibrated policies
+ *   require the independently evaluated codec boundary defined by Linear before the FP64 dot.
  *
  * Compute policy:
  *   Q5, W8, and BF16_CTRL admit only A16Only. NVFP4 admits A16Only and AllowA4. Row-scaled FP8

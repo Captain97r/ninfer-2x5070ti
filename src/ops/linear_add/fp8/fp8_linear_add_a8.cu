@@ -17,8 +17,8 @@
 namespace ninfer::ops::detail {
 namespace {
 
-template <class Geometry, bool FullTokens>
-void launch_mma(const Weight& weight, Tensor& residual, Fp8A8Workspace workspace,
+template <class Geometry, bool FullTokens, class WeightScale>
+void launch_mma_typed(const Weight& weight, Tensor& residual, Fp8A8Workspace workspace,
                 std::int32_t tokens, cudaStream_t stream) {
     using Schedule          = typename Fp8LinearA8ProductionSchedule<Geometry>::Type;
     constexpr int kRowTiles = Geometry::kOutputRows / Schedule::kBlockRows;
@@ -31,14 +31,24 @@ void launch_mma(const Weight& weight, Tensor& residual, Fp8A8Workspace workspace
     if constexpr (Schedule::kSharedBytes > 48 * 1024) {
         ensure_func_attr_per_device(
             fp8_mma_kernel<Geometry, Schedule, FullTokens, Fp8AddResidualEpilogue,
-                           Fp8ContiguousOutput>,
+                           Fp8ContiguousOutput, Fp8MmaIdentityRows, false, WeightScale>,
             cudaFuncAttributeMaxDynamicSharedMemorySize, Schedule::kSharedBytes);
     }
     fp8_mma_kernel<Geometry, Schedule, FullTokens>
         <<<blocks, Schedule::kThreads, Schedule::kSharedBytes, stream>>>(
             workspace.codes, workspace.scales, static_cast<const std::uint8_t*>(weight.qdata),
-            static_cast<const __nv_bfloat16*>(weight.scales), tokens, epilogue, destination);
+            static_cast<const WeightScale*>(weight.scales), tokens, epilogue, destination);
     CUDA_CHECK(cudaGetLastError());
+}
+
+template <class Geometry, bool FullTokens>
+void launch_mma(const Weight& weight, Tensor& residual, Fp8A8Workspace workspace,
+                std::int32_t tokens, cudaStream_t stream) {
+    if (weight.qtype == QType::FP8_E4M3FN_ROW_F32S) {
+        launch_mma_typed<Geometry, FullTokens, float>(weight, residual, workspace, tokens, stream);
+    } else {
+        launch_mma_typed<Geometry, FullTokens, __nv_bfloat16>(weight, residual, workspace, tokens, stream);
+    }
 }
 
 template <class Geometry>

@@ -1,4 +1,5 @@
 #include "ninfer/ops/attn_input_proj.h"
+#include "ops/linear/linear_policy.h"
 
 #include "ops/attn_input_proj/bf16/bf16_attn_input_plan.h"
 #include "ops/attn_input_proj/fp8/fp8_attn_input_plan.h"
@@ -78,6 +79,8 @@ void validate_policy(LinearPolicy policy) {
     case LinearPolicy::A16Only:
     case LinearPolicy::AllowA8:
     case LinearPolicy::AllowA4:
+    case LinearPolicy::CalibratedA8:
+    case LinearPolicy::CalibratedA4:
         return;
     }
     throw std::invalid_argument("attn_input_proj: invalid compute policy");
@@ -87,6 +90,7 @@ void dispatch_single_parent(const Tensor& x, const Weight& weight, Tensor& q, Te
                             Tensor& k, Tensor& v, LinearPolicy policy, WorkspaceArena* workspace,
                             cudaStream_t stream) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(weight.qtype, policy);
     if (weight.qtype == QType::BF16_CTRL) {
         constexpr std::int32_t kHidden = 5120;
         constexpr std::int32_t kQRows  = 6144;
@@ -107,14 +111,15 @@ void dispatch_single_parent(const Tensor& x, const Weight& weight, Tensor& q, Te
         return;
     }
 
-    if (weight.qtype == QType::NVFP4) {
+    if ((weight.qtype == QType::NVFP4)) {
         constexpr std::int32_t kHidden = 5120;
         constexpr std::int32_t kQRows  = 6144;
         constexpr std::int32_t kKvRows = 1024;
         constexpr std::int32_t kRows   = 14336;
         const std::int32_t cols        = x.ne[1];
         if (cols <= 0) { throw std::invalid_argument("attn_input_proj: T must be positive"); }
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument("NVFP4 attn_input_proj admits only A16 or A4");
         }
         require_matrix(x, kHidden, cols, "x");
@@ -130,14 +135,15 @@ void dispatch_single_parent(const Tensor& x, const Weight& weight, Tensor& q, Te
         return;
     }
 
-    if (weight.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(weight.qtype)) {
         constexpr std::int32_t kHidden = 5120;
         constexpr std::int32_t kQRows  = 6144;
         constexpr std::int32_t kKvRows = 1024;
         constexpr std::int32_t kRows   = 14336;
         const std::int32_t cols        = x.ne[1];
         if (cols <= 0) { throw std::invalid_argument("attn_input_proj: T must be positive"); }
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument("FP8 attn_input_proj admits only A16 or A8");
         }
         require_matrix(x, kHidden, cols, "x");
@@ -178,6 +184,7 @@ std::size_t attn_input_proj_workspace_capacity_bytes(QType parent_qtype, std::in
                                                      std::int32_t min_tokens,
                                                      std::int32_t max_tokens) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(parent_qtype, policy);
     if (min_tokens <= 0 || max_tokens < min_tokens) {
         throw std::invalid_argument("attn_input_proj workspace: invalid token interval");
     }
@@ -191,11 +198,13 @@ std::size_t attn_input_proj_workspace_capacity_bytes(QType parent_qtype, std::in
     case QType::NVFP4:
         if (parent_rows != detail::Nvfp4AttnInputGeometry::kOutputRows ||
             input_rows != detail::Nvfp4AttnInputGeometry::kInputRows ||
-            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4)) {
+            (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4)) {
             throw std::invalid_argument("attn_input_proj workspace: unsupported NVFP4 profile");
         }
         return detail::nvfp4_attn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     case QType::FP8_E4M3FN_ROW_BF16S:
+    case QType::FP8_E4M3FN_ROW_F32S:
         if (parent_rows != detail::Fp8AttnInputGeometry::kOutputRows ||
             input_rows != detail::Fp8AttnInputGeometry::kInputRows) {
             throw std::invalid_argument("attn_input_proj workspace: unsupported FP8 profile");
@@ -284,6 +293,7 @@ void validate_fused_column_rank_semantics(const Tensor& x, const Weight& w, cons
                                           const Tensor& gate, const Tensor& k, const Tensor& v,
                                           LinearPolicy policy) {
     validate_policy(policy);
+    detail::validate_calibrated_linear_policy(w.qtype, policy);
     const std::int32_t cols = x.ne[1];
     if (cols <= 0) { throw std::invalid_argument("attn_input_proj column-parallel: T must be positive"); }
     require_matrix(x, kShardHidden, cols, "x");
@@ -292,14 +302,16 @@ void validate_fused_column_rank_semantics(const Tensor& x, const Weight& w, cons
     require_matrix(k, kShardKeyRows, cols, "k");
     require_matrix(v, kShardKeyRows, cols, "v");
 
-    if (w.qtype == QType::NVFP4) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4) {
+    if ((w.qtype == QType::NVFP4)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA4 &&
+            policy != LinearPolicy::CalibratedA4) {
             throw std::invalid_argument(
                 "attn_input_proj column-parallel: NVFP4 admits only A16 or A4");
         }
         detail::validate_nvfp4_weight(w, "nvfp4 attn_input_proj column-parallel");
-    } else if (w.qtype == QType::FP8_E4M3FN_ROW_BF16S) {
-        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8) {
+    } else if (detail::is_fp8_weight_type(w.qtype)) {
+        if (policy != LinearPolicy::A16Only && policy != LinearPolicy::AllowA8 &&
+            policy != LinearPolicy::CalibratedA8) {
             throw std::invalid_argument(
                 "attn_input_proj column-parallel: FP8 admits only A16 or A8");
         }
@@ -385,12 +397,13 @@ void validate_split_storage_split_pair(const std::array<Tensor, 2>& x,
 std::size_t attn_input_proj_column_parallel_workspace_capacity_bytes(QType qtype, LinearPolicy policy,
                                                                       std::int32_t min_tokens,
                                                                       std::int32_t max_tokens) {
+    detail::validate_calibrated_linear_policy(qtype, policy);
     // The W4A4/A8 activation-quantize workspace is a pure function of (tokens, K), and K=5120 is
     // unchanged by the shard (only the output row count N halves) -- the tp1 query is exact here.
-    if (qtype == QType::NVFP4) {
+    if ((qtype == QType::NVFP4)) {
         return detail::nvfp4_attn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
-    if (qtype == QType::FP8_E4M3FN_ROW_BF16S) {
+    if (detail::is_fp8_weight_type(qtype)) {
         return detail::fp8_attn_input_workspace_capacity_bytes(policy, min_tokens, max_tokens);
     }
     if (qtype == QType::BF16_CTRL) {
@@ -427,7 +440,7 @@ void attn_input_proj_column_parallel(const std::array<Tensor, 2>& x,
     detail::for_each_rank(ec, [&](int rank) {
         const auto slot = static_cast<std::size_t>(rank);
         const Weight& w  = query_key_gate_value_weight[slot];
-        if (w.qtype == QType::NVFP4) {
+        if ((w.qtype == QType::NVFP4)) {
             detail::nvfp4_attn_input_dispatch_shard(x[slot], w, q_dst[slot], gate_dst[slot],
                                                     k_dst[slot], v_dst[slot], policy,
                                                     workspace[slot], ec.dev[slot]->stream);

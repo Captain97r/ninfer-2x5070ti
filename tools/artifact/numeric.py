@@ -34,13 +34,16 @@ class Nvfp4Format:
 
     name: str
     group_size: int
+    global_scale_operation: str
 
 
 @dataclass(frozen=True, slots=True)
 class Fp8RowFormat:
-    """E4M3FN weights with one BF16 multiplier per logical row."""
+    """E4M3FN weights with one explicitly typed multiplier per logical row."""
 
     name: str
+    scale_format: str
+    scale_bytes: int
 
 
 NumericFormat: TypeAlias = DirectFormat | QuantFormat | Nvfp4Format | Fp8RowFormat
@@ -54,8 +57,10 @@ Q4G64_F16S = QuantFormat("Q4G64_F16S", 4, 64, -8, 7)
 Q5G64_F16S = QuantFormat("Q5G64_F16S", 5, 64, -16, 15)
 Q6G64_F16S = QuantFormat("Q6G64_F16S", 6, 64, -32, 31)
 W8G32_F16S = QuantFormat("W8G32_F16S", 8, 32, -127, 127)
-NVFP4 = Nvfp4Format("NVFP4", 16)
-FP8_E4M3FN_ROW_BF16S = Fp8RowFormat("FP8_E4M3FN_ROW_BF16S")
+NVFP4 = Nvfp4Format("NVFP4", 16, "divide")
+NVFP4_F32M = Nvfp4Format("NVFP4_F32M", 16, "multiply")
+FP8_E4M3FN_ROW_BF16S = Fp8RowFormat("FP8_E4M3FN_ROW_BF16S", "BF16", 2)
+FP8_E4M3FN_ROW_F32S = Fp8RowFormat("FP8_E4M3FN_ROW_F32S", "FP32", 4)
 
 
 DIRECT_FORMATS = MappingProxyType(
@@ -67,9 +72,9 @@ QUANT_FORMATS = MappingProxyType(
         for item in (Q4G64_F16S, Q5G64_F16S, Q6G64_F16S, W8G32_F16S)
     }
 )
-NVFP4_FORMATS = MappingProxyType({NVFP4.name: NVFP4})
+NVFP4_FORMATS = MappingProxyType({x.name: x for x in (NVFP4, NVFP4_F32M)})
 FP8_ROW_FORMATS = MappingProxyType(
-    {FP8_E4M3FN_ROW_BF16S.name: FP8_E4M3FN_ROW_BF16S}
+    {x.name: x for x in (FP8_E4M3FN_ROW_BF16S, FP8_E4M3FN_ROW_F32S)}
 )
 NUMERIC_FORMATS = MappingProxyType(
     {**DIRECT_FORMATS, **QUANT_FORMATS, **NVFP4_FORMATS, **FP8_ROW_FORMATS}
@@ -154,12 +159,14 @@ __all__ = [
     "DIRECT_FORMATS",
     "DirectFormat",
     "FP8_E4M3FN_ROW_BF16S",
+    "FP8_E4M3FN_ROW_F32S",
     "FP8_ROW_FORMATS",
     "FP32",
     "Fp8RowFormat",
     "I32",
     "NUMERIC_FORMATS",
     "NVFP4",
+    "NVFP4_F32M",
     "NVFP4_FORMATS",
     "Nvfp4Format",
     "NumericFormat",

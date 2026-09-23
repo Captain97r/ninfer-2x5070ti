@@ -4,6 +4,7 @@
 #include <ninfer/targets/qwen3_6/vision.h>
 
 #include "core/tensor.h"
+#include "ninfer/ops/linear.h"
 
 #include <array>
 #include <cstddef>
@@ -52,9 +53,16 @@ struct MtpWeights {
     Tensor final_norm;
 };
 
+// Passive target-owned storage/compute facts used by both workspace planning and execution.
+struct HeadProjectionProfile {
+    QType format;
+    ops::LinearPolicy policy;
+};
+
 struct OptimizedProposalWeights {
     Weight head;
     Tensor token_ids;
+    ops::LinearPolicy policy = ops::LinearPolicy::A16Only;
 };
 
 struct DFlashLayerWeights {
@@ -93,6 +101,7 @@ struct ModelView {
     std::array<GdnLayer, GdnLayers> gdn_layers;
     Tensor final_norm;
     Weight output_head;
+    ops::LinearPolicy output_head_policy = ops::LinearPolicy::A16Only;
     StartupFeatures features;
     std::optional<OptimizedProposalWeights> optimized_proposal;
     std::optional<MtpLayer> mtp;
